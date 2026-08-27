@@ -1,0 +1,82 @@
+# AI-Native Project Scaffold
+
+Portable project-development scaffold for AI-collaborative work. Import it into an existing project so a new Agent can **understand, develop, test, submit, and hand off** without depending on chat history.
+
+This is **not** a game-test framework. Game projects are the primary research subject. The top-level architecture MUST NOT bind to a game engine, SCM, IDE, Agent client, or model vendor.
+
+## Status
+
+**P0 — Constitution / Top-Level Architecture** (documents ready for human review; P0 is not closed).
+
+There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product.
+
+## Authority
+
+Read in this order:
+
+1. This README (entry only)
+2. [docs/contracts/CONSTITUTION.md](docs/contracts/CONSTITUTION.md) — highest in-repo rules
+3. [docs/architecture/V2_ARCHITECTURE.md](docs/architecture/V2_ARCHITECTURE.md) — structure, layers, and data flow
+4. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
+
+If these documents conflict, **Constitution wins**. Field-level schemas, APIs, and runtime behavior are out of scope for P0.
+
+## Historical v1
+
+`ai-native-game-scaffold` **v1.0.1** is **FROZEN, READ-ONLY REFERENCE**.
+
+- v1 is a Game Legibility / Test Runtime historical baseline.
+- v2 does **not** continue that repository.
+- Do **not** copy the v1 tree into v2.
+- Later phases MAY selectively reuse qualified v1 capabilities after inspect → qualify → map → migrate → revalidate. See Architecture.
+
+## Allowed at P0
+
+- Read the four P0 documents.
+- Human review of P0.
+- After explicit human approval of P0: start **P1** (Adoption / Bootstrap Contract).
+
+## Forbidden at P0
+
+- Implement Skills, runtime, CLI, Python packages, or contract schemas.
+- Create `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `.scaffold/`, `examples/`, `tests/`, or `tools/`.
+- Copy or vendor the v1 source tree.
+- Modify `ai-native-game-scaffold`.
+- Invent a fifth top-level Skill.
+- Treat Test PASS as permission to commit or push.
+- Auto-commit or auto-push.
+
+## Four Skills (names only)
+
+| Skill | Question it answers |
+| --- | --- |
+| **Understand** | What is this project, and how should a new Agent maintain it? |
+| **Develop** | How should the current task be completed under project rules? |
+| **Test** | What was actually verified for the given scope, and with what result? |
+| **Submit** | Does the **real** working tree meet submission conditions? |
+
+Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Structural Review are **not** top-level Skills. Their homes are defined in the Constitution.
+
+## Phase map
+
+| Phase | Focus |
+| --- | --- |
+| **P0** | Constitution — product, four Skills, principles, boundaries |
+| P1 | Adoption / Bootstrap Contract |
+| P2 | Project Contract |
+| P3 | Records Contract |
+| P4 | Skill Contract & Versioning |
+| P5 | Understand Skill |
+| P6 | Test Skill |
+| P7 | Develop Skill |
+| P8 | Submit Skill |
+| P9 | Repair Migration (into Develop Repair Mode) |
+| P10 | Incremental Understanding / Multi-Agent |
+| P11 | Cross-Project E2E |
+| P12 | Independent Audit / v2.0 Release |
+
+## Next
+
+**P1 — Adoption / Bootstrap Contract:** how an ordinary, possibly dirty, existing project attaches to the scaffold for the first time.
+
+P1 MUST NOT start until a human closes P0.
