@@ -8,7 +8,9 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **P0 — CLOSED / BASELINED** at `6ea16e343fdd4324983786186b17b2d59b059fb7`.
 
-**P1 — Adoption / Bootstrap Contract** (current design phase; not closed).
+**P1 — CLOSED / BASELINED** at `3944e932c9a1d40a78402fc1d244c6a3d99e09f9`.
+
+**P2 — Project Contract** (current design phase; not closed).
 
 There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product.
 
@@ -21,9 +23,11 @@ Read in this order:
 3. [docs/architecture/V2_ARCHITECTURE.md](docs/architecture/V2_ARCHITECTURE.md) — v2 structure and data flow
 4. [docs/contracts/ADOPTION_CONTRACT.md](docs/contracts/ADOPTION_CONTRACT.md) — first-attach contract (P1)
 5. [docs/architecture/ADOPTION_FLOW.md](docs/architecture/ADOPTION_FLOW.md) — first-attach flow (P1)
-6. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
+6. [docs/contracts/PROJECT_CONTRACT.md](docs/contracts/PROJECT_CONTRACT.md) — active host structure (P2)
+7. [docs/architecture/PROJECT_LAYOUT.md](docs/architecture/PROJECT_LAYOUT.md) — active host layout (P2)
+8. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
 
-If these documents conflict, **Constitution wins**. Field-level schemas, APIs, and runtime behavior are out of scope for P1.
+If these documents conflict, **Constitution wins**. Field-level schemas, APIs, and runtime behavior are out of scope for P2.
 
 ## Historical v1
 
@@ -34,16 +38,17 @@ If these documents conflict, **Constitution wins**. Field-level schemas, APIs, a
 - Do **not** copy the v1 tree into v2.
 - Later phases MAY selectively reuse qualified v1 capabilities after inspect → qualify → map → migrate → revalidate. See Architecture.
 
-## Allowed at P1
+## Allowed at P2
 
-- Read P0 baseline documents plus the two P1 adoption documents.
-- Human review of P1.
-- After explicit human approval of P1: start **P2** (Project Contract).
+- Read P0/P1 baselines plus the two P2 project-contract documents.
+- Human review of P2.
+- After P2 human review passes, an approved P2 baseline commit exists, and the working tree is clean: start **P3** (Records Contract).
 
-## Forbidden at P1
+## Forbidden at P2
 
-- Implement Skills, runtime, CLI, Python packages, or contract schemas.
-- Create `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `.scaffold/`, `examples/`, `tests/`, or `tools/`.
+- Implement Skills, runtime, CLI, Python packages, or schema validators.
+- Create live host `AGENTS.md`, `docs/project/`, or `.scaffold/` **in this distribution repository**.
+- Create `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `examples/`, `tests/`, or `tools/`.
 - Copy or vendor the v1 source tree.
 - Modify `ai-native-game-scaffold`.
 - Invent a fifth top-level Skill.
@@ -67,8 +72,8 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 | Phase | Focus |
 | --- | --- |
 | **P0** | Constitution — CLOSED / BASELINED |
-| **P1** | Adoption / Bootstrap Contract — current |
-| P2 | Project Contract |
+| **P1** | Adoption / Bootstrap Contract — CLOSED / BASELINED |
+| **P2** | Project Contract — current |
 | P3 | Records Contract |
 | P4 | Skill Contract & Versioning |
 | P5 | Understand Skill |
@@ -82,6 +87,6 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-**P2 — Project Contract:** host-side `AGENTS.md` / `docs/project/` / `.scaffold/` structure, ownership representation, and shared vs local persistence.
+**P3 — Records Contract:** Task Book, Develop Session, and Change Record schemas and lifecycles.
 
-P2 MUST NOT start until a human closes P1.
+P3 MUST NOT start until P2 human review has passed **and** an approved P2 baseline commit exists with a clean working tree.
