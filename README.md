@@ -12,7 +12,9 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **P2 — CLOSED / BASELINED** at `59d0765de9552569d6aa92e58517b32143c27289`.
 
-**P3 — Records Contract** (current design phase; not closed).
+**P3 — CLOSED / BASELINED** at `6a0091de9c4575e607bd8687744ee154cea7226c`.
+
+**P4 — Skill Contract & Versioning** (current design phase; not closed).
 
 There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product.
 
@@ -29,9 +31,11 @@ Read in this order:
 7. [docs/architecture/PROJECT_LAYOUT.md](docs/architecture/PROJECT_LAYOUT.md) — active host layout (P2)
 8. [docs/contracts/RECORDS_CONTRACT.md](docs/contracts/RECORDS_CONTRACT.md) — development records (P3)
 9. [docs/architecture/RECORD_LIFECYCLES.md](docs/architecture/RECORD_LIFECYCLES.md) — record lifecycles (P3)
-10. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
+10. [docs/contracts/SKILL_CONTRACT.md](docs/contracts/SKILL_CONTRACT.md) — Skill packages, lock, compatibility (P4)
+11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
+12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
 
-If these documents conflict, **Constitution wins**. Runtime, CLI, validators, and live host `.scaffold/` records are out of scope for P3.
+If these documents conflict, **Constitution wins**. Runtime, live `skills/` packages, and host `.scaffold/skills.lock` are out of scope for P4.
 
 ## Historical v1
 
@@ -42,23 +46,24 @@ If these documents conflict, **Constitution wins**. Runtime, CLI, validators, an
 - Do **not** copy the v1 tree into v2.
 - Later phases MAY selectively reuse qualified v1 capabilities after inspect → qualify → map → migrate → revalidate. See Architecture.
 
-## Allowed at P3
+## Allowed at P4
 
-- Read P0/P1/P2 baselines plus the two P3 records documents.
-- Human review of P3.
-- After P3 human review passes, an approved P3 baseline commit exists, and the working tree is clean: start **P4** (Skill Contract & Versioning).
+- Read P0–P3 baselines plus the two P4 Skill-contract documents.
+- Human review of P4.
+- After P4 human review passes, an approved P4 baseline commit exists, and the working tree is clean: start **P5** (Understand Skill).
 
-## Forbidden at P3
+## Forbidden at P4
 
-- Implement Skills, runtime, CLI, Python packages, JSON Schema, or validators.
-- Create live host `AGENTS.md`, `docs/project/`, or `.scaffold/` **in this distribution repository** (including `tasks/`, `changes/`, `runtime/`).
+- Implement Skills, runtime, CLI, resolver, compatibility engine, or validators.
+- Create live `skills/` packages or host `.scaffold/skills.lock` **in this distribution repository**.
 - Create `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `examples/`, `tests/`, or `tools/`.
+- Create Claude / Cursor / Codex client configs.
 - Copy or vendor the v1 source tree.
 - Modify `ai-native-game-scaffold`.
-- Invent a fifth top-level Skill or a fourth canonical development record.
+- Invent a fifth top-level Skill.
 - Treat Test PASS as permission to commit or push.
 - Auto-commit or auto-push.
-- Start P4 before P3 is baselined.
+- Start P5 before P4 is baselined.
 
 ## Four Skills (names only)
 
@@ -78,8 +83,8 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 | **P0** | Constitution — CLOSED / BASELINED |
 | **P1** | Adoption / Bootstrap Contract — CLOSED / BASELINED |
 | **P2** | Project Contract — CLOSED / BASELINED |
-| **P3** | Records Contract — current |
-| P4 | Skill Contract & Versioning |
+| **P3** | Records Contract — CLOSED / BASELINED |
+| **P4** | Skill Contract & Versioning — current |
 | P5 | Understand Skill |
 | P6 | Test Skill |
 | P7 | Develop Skill |
@@ -91,6 +96,6 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-**P4 — Skill Contract & Versioning.**
+**P5 — Understand Skill.**
 
-P4 MUST NOT start until P3 human review has passed **and** an approved P3 baseline commit exists with a clean working tree.
+P5 MUST NOT start until P4 human review has passed **and** an approved P4 baseline commit exists with a clean working tree.
