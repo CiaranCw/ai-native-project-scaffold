@@ -818,7 +818,7 @@ It supports exactly two **resolution contexts**, not two Skills, workflows, comp
 | Context | Authority anchor | Applies when |
 | --- | --- | --- |
 | **Pre-Adoption Bootstrap Preflight** | Explicitly Selected Distribution Release | Legitimate first attachment before host Scaffold identity and lock authority exist |
-| **Host Compatibility Preflight** | Host `project.yaml` + `skills.lock` expectations, resolved against actual local Distribution packages | Host Scaffold metadata/lock exists or prior Scaffold identity/state means normal host/recovery reasoning applies |
+| **Host Compatibility Preflight** | Complete authoritative host `skills.lock` expectations with `project.yaml`, or the bounded Plan-derived recovery anchor in §27.5.1, resolved against actual local Distribution packages | Host Scaffold metadata/lock exists or prior Scaffold identity/state means normal host/recovery reasoning applies |
 
 Context selection MUST use read-only evidence and P1/P2 lifecycle semantics. It MUST NOT mutate the project or pre-create host metadata merely to make preflight succeed.
 
@@ -911,15 +911,22 @@ If, before Apply, the Selected Distribution Release identity, its release-pinned
 ### 27.4 Authority handoff
 
 ```text
-before approved initial host lock exists
+legitimate first attachment before host identity/recovery evidence
   → bootstrap resolution authority = Selected Distribution Release
 
-approved Adoption creates project.yaml + initial skills.lock
+host identity/recovery evidence exists before complete initial lock
+  → Host Compatibility / recovery path
+  → same applicable approved Plan's Selected Distribution Release
+     MAY serve only as the bounded §27.5.1 recovery anchor
+
+approved Adoption completely and coherently establishes initial skills.lock
   → normal resolution authority = durable host metadata/lock
   → actual local Distribution packages are evaluated against that lock
 ```
 
-After creation, `skills.lock` is the durable expected-version source of truth. The bootstrap-selected release MUST NOT remain a second durable host version authority. If its identity is retained as source/provenance inside the lock or historical Adoption evidence, it MUST NOT compete with the lock’s exact expected Skill entries.
+The authority handoff occurs only when the complete coherent initial `skills.lock` has been durably established according to the approved Adoption. No lock, two-of-four entries, malformed/incomplete initial lock, or interrupted publication is normal expected-version authority.
+
+After that complete establishment, `skills.lock` is the durable expected-version source of truth. The bootstrap-selected release and any Plan-bound recovery use MUST expire as resolution authority and MUST NOT remain a second durable host version authority. If release identity is retained as source/provenance inside the lock or historical Adoption evidence, it MUST NOT compete with the lock’s exact expected Skill entries.
 
 A later Agent with no chat history reads the durable host lock and runs Host Compatibility Preflight. It does not require the adopting Agent’s memory to determine expected versions.
 
@@ -943,6 +950,37 @@ When compatibility **work** itself is required: route to Understand `compatibili
 
 If even that cannot be established: **BLOCK** and require a compatible Distribution / explicit migration path.
 
+#### 27.5.1 Interrupted initial-Adoption recovery before complete lock
+
+An interrupted first Adoption in which host identity or other prior Scaffold state already exists belongs to the **Host Compatibility Preflight / recovery path**, under P2 `ADOPTING` / `RECOVERY_REQUIRED` semantics as the evidence requires. It is not legitimate fresh attachment and MUST NOT reuse Pre-Adoption Bootstrap Preflight. This is a narrow resolution rule inside the existing Host context, not a third Preflight context, lifecycle state, compatibility result, record, or approval type.
+
+Before a complete authoritative initial `skills.lock` exists, the same revalidated approved Adoption Plan’s Selected Distribution Release MAY temporarily anchor package resolution solely to continue that same initial Adoption. This bounded anchor MAY be used only when P1/P2/P3 facts and actual host observation establish all of the following:
+
+- the host is in the current initial Adoption execution/recovery path, not a completed `ACTIVE` host
+- a recoverable current Adoption Session exists and identifies the applicable Adoption Plan
+- the Plan identity/content is recoverable
+- P1 revalidation establishes that the Plan had valid Human Plan Approval and that approval remains applicable; a persisted observed-approval field alone is not permission
+- the Plan still binds the exact Selected Distribution Release, exact release-pinned Understand, coherent exact four-Skill core set, exact intended initial `skills.lock`, target contract intent as applicable, and approved mutation envelope
+- observed durable host state is a provable expected prefix/checkpoint of that envelope, or another state P1 recovery can safely reason about without changing approved intent
+- the exact Selected Distribution Release and pinned package identities remain resolvable
+- the actual Understand needed for recovery satisfies the R4 exact identity relation: release-pinned Understand = actual resolved recovery Understand, including applicable package/release identity and integrity
+
+If any required fact cannot be established: MUST NOT guess. BLOCK or return to P1 recovery/re-planning and human re-approval as applicable. There is no pre-lock `COMPATIBLE` substitution, latest-installed fallback, or same-version-string shortcut.
+
+When valid, this package-resolution authority is **Plan-bound, execution-bound, recovery-only, and non-reusable outside that Adoption**. It is not durable host expected-version authority, human permission, or a compatibility-result value. Preflight revalidation and package resolution remain read-only: they do not publish the lock, replay an action, or mutate the host. P4 authorizes only bounded package resolution; P1/P5 remain responsible for whether and how approved remaining work may resume. P4 does not decide replay, idempotence, rollback, retry, checkpoint storage, or concrete resume behavior. P3 remains authority for Adoption Session representation and retention.
+
+An absent, partial, malformed, incomplete, or not-yet-authoritatively-published initial lock is recovery evidence, not normal Host Compatibility expected-version authority. MUST NOT perform ordinary lock-based compatibility against it. The intended complete lock comes from the applicable approved Plan; it MUST NOT be inferred or regenerated from whatever packages are installed. Completing the Plan’s already-approved outstanding initial-lock action is not regeneration from installed packages, and the package environment MUST NOT redefine the intended lock.
+
+Expected approved progress alone does not invalidate Plan Approval applicability. Material unexpected divergence, a changed Plan/envelope/identity binding, or work outside the approved envelope requires re-discovery/re-evaluation as needed, an updated/regenerated Plan, and P1 human re-approval. No new permission is created.
+
+The bounded recovery anchor MUST cease when the complete coherent initial lock becomes authoritative, Adoption is abandoned/aborted under P1, the Plan is replaced, approval is no longer applicable, observed state materially diverges, exact release/package resolution fails, or recovery requires a revised Plan and approval.
+
+A historical Adoption Plan MUST NOT be revived as a magic lock for an `ACTIVE` host that later loses or corrupts its previously authoritative lock. That remains established-host consistency/recovery behavior. The bounded rule applies only to the same interrupted initial Adoption whose complete initial lock was never successfully established and whose current Session/Plan/recovery binding proves that fact.
+
+The rule MUST work without host SCM. Recovery authority derives from durable Scaffold state, the Adoption Plan/Session binding, actual host observation, and Distribution-owned release identity—not Git history, tags, SHAs, or remote branches.
+
+A later Agent with no chat history can recover the expected release, exact U/D/T/S set, recovery Understand, and intended complete lock only from those revalidated durable/session/Plan facts. If that Agent cannot recover the binding or resolve the exact release-pinned package, it MUST BLOCK rather than substitute its own local package set.
+
 Compatibility Preflight MUST NOT perform project development in either context.
 
 ---
@@ -965,6 +1003,8 @@ MUST NOT silently regenerate the lock from whatever is installed and continue as
 Route to Understand Compatibility / recovery planning **where safely possible** (P5 owns operational repair). Otherwise BLOCK.
 
 This established-host rule MUST NOT be applied to legitimate first attachment merely because no initial host lock exists. Conversely, missing lock alone MUST NOT select bootstrap; §27 context classification governs.
+
+For the same currently interrupted initial Adoption, §27.5.1 MAY provide bounded Plan-derived package resolution when all recovery conditions hold. The missing/incomplete lock itself supplies no expected-version authority. If those conditions do not hold—including when a previously `ACTIVE` host later loses its lock—BLOCK or use P1/established-host recovery; MUST NOT reconstruct authority from installed packages or a historical Adoption Plan.
 
 ---
 
@@ -1338,6 +1378,15 @@ Contract-level behavior. No fixtures.
 | **AZ** Approved Plan bound release/U1; actual package changes to U2 before Apply | Prior Plan Approval MUST NOT silently carry over. Re-resolve/re-evaluate, update or regenerate the Plan, and obtain human re-approval under P1. |
 | **BA** Package claims the same `understand` id/version but released identity/integrity cannot be established | Strings alone are insufficient. BLOCK / resolve; MUST NOT treat the package as the exact release-pinned member. |
 | **BB** After Adoption, host lock expects U1 and explicit host evaluation finds local U1.1 compatible | Normal Host Compatibility Preflight MAY return `COMPATIBLE`; the pre-adoption exact-binding rule does not remove established-host compatible substitution. |
+| **BC** Initial Adoption completes with coherent U1/D1/T1/S1 lock | Complete lock becomes durable expected-version authority; temporary bootstrap/Plan resolution authority expires. |
+| **BD** Current approved initial Adoption is interrupted after `project.yaml` but before lock | Host Compatibility/recovery revalidates current Session, Plan, approval applicability, expected host prefix, exact release R, and exact U1. If all hold, Plan-bound R may temporarily resolve U1 for P1/P5 recovery. |
+| **BE** Current interrupted initial Adoption has only two lock entries | Partial lock is not authority and MUST NOT enter ordinary lock comparison. Use the bounded Plan recovery anchor only if every condition holds. |
+| **BF** Host identity exists but recoverable Session/Plan binding is absent | MUST NOT fresh-bootstrap, infer a release/lock, or guess. BLOCK / P1 recovery. |
+| **BG** Applicable Plan binds R/U1 but recovering Agent has only U2 | No pre-lock `COMPATIBLE` substitution. BLOCK pending exact R/U1 resolution. |
+| **BH** Interruption follows a provable approved `project.yaml` creation step | Expected approved progress alone does not invalidate Plan Approval applicability. |
+| **BI** Durable Scaffold mutation outside the approved envelope appears | Prior approval MUST NOT silently carry over. Re-discover/re-evaluate, update/regenerate Plan, and obtain P1 human re-approval. |
+| **BJ** Previously completed `ACTIVE` host later loses its lock | Historical Adoption Plan MUST NOT become expected-version authority. Use established-host consistency/recovery behavior. |
+| **BK** Recovery completes coherent four-Skill initial lock | Lock becomes durable expected-version authority; bounded recovery anchor ceases; later entry uses normal Host Compatibility Preflight. |
 
 ---
 
@@ -1386,3 +1435,6 @@ Contract-level behavior. No fixtures.
 | AM | Initial lock becomes the durable expected-version SSOT; bootstrap source does not remain a competing authority |
 | AN | Pre-adoption actual Understand exactly matches the Selected Distribution Release’s pinned Understand package identity before bootstrap executes |
 | AO | Initial lock Understand equals release-pinned and actual bootstrap Understand; all four entries derive from one coherent release set |
+| AP | Interrupted initial Adoption uses only a current applicable Plan/Session-bound recovery anchor inside Host Compatibility Preflight |
+| AQ | Partial initial lock is recovery evidence, not normal host authority; complete coherent publication triggers handoff |
+| AR | Plan-bound recovery authority expires and cannot be revived from historical Adoption for a later damaged ACTIVE host |

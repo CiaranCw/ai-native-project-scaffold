@@ -29,19 +29,23 @@ This distribution repository does **not** contain Skill packages or a host lock.
         │       ├─ exact + safe → Understand / bootstrap
         │       └─ mismatch → BLOCK / explicit coherent release selection
         │
-        ├─ established host identity/metadata/lock
+        ├─ established/prior host identity/metadata
         │       │
         │       ▼
         │     AGENTS.md
         │       │
         │       ▼
-        │  HOST COMPATIBILITY PREFLIGHT
-        │  project.yaml + skills.lock + actual packages
+        │  HOST COMPATIBILITY PREFLIGHT / RECOVERY
         │       │
-        │       ├─ EXACT / COMPATIBLE → requested Skill may start
-        │       ├─ MIGRATION_REQUIRED → Compatibility / migration path
-        │       ├─ INCOMPATIBLE       → BLOCK
-        │       └─ UNKNOWN            → BLOCK (do not guess)
+        │       ├─ complete authoritative skills.lock
+        │       │    → project.yaml + lock + actual packages
+        │       │    → normal five-result evaluation
+        │       │
+        │       ├─ current interrupted initial Adoption
+        │       │  before complete lock
+        │       │    → bounded approved Plan/Session recovery rule
+        │       │
+        │       └─ no safe authority → BLOCK / P1 recovery
         │
         └─ partial/conflicting/uncertain Scaffold footprint
                 → ADOPTING / RECOVERY_REQUIRED / UNKNOWN /
@@ -383,16 +387,33 @@ Installing a local package ≠ migrating the host.
         ├─ established/prior Scaffold host
         │       │
         │       ▼
-        │  HOST COMPATIBILITY PREFLIGHT
-        │       authority: project.yaml + skills.lock
-        │                  + actual local Distribution packages
-        │       package/input INVALID → validity blocker
-        │       VALID package → EXACT | COMPATIBLE |
-        │                       MIGRATION_REQUIRED |
-        │                       INCOMPATIBLE | UNKNOWN
-        │       missing/incomplete established-host lock
-        │         → consistency/recovery blocker
-        │         × do not regenerate from installed packages
+        │  HOST COMPATIBILITY PREFLIGHT / RECOVERY
+        │       │
+        │       ├─ complete authoritative host lock
+        │       │     authority: project.yaml + skills.lock
+        │       │                + actual local packages
+        │       │     VALID package → EXACT | COMPATIBLE |
+        │       │                     MIGRATION_REQUIRED |
+        │       │                     INCOMPATIBLE | UNKNOWN
+        │       │
+        │       ├─ current interrupted initial Adoption
+        │       │  before complete authoritative lock
+        │       │     require:
+        │       │       recoverable Session → applicable approved Plan
+        │       │       observed expected approved host prefix/checkpoint
+        │       │       exact Selected Release still resolvable
+        │       │       release-pinned U = actual recovery U
+        │       │     temporary authority:
+        │       │       same Plan's Selected Release/package facts
+        │       │     × partial lock is not authority
+        │       │     × no installed-package inference/substitution
+        │       │     → P1/P5 decides safe remaining recovery work
+        │       │
+        │       └─ missing/incomplete lock without valid current
+        │          initial-Adoption Plan/Session binding
+        │             → consistency/recovery blocker
+        │             × do not regenerate from installed packages
+        │             × historical Plan is not a magic lock
         │
         └─ partial/prior/conflicting footprint or cannot tell
                 × MUST NOT fall back to bootstrap
@@ -412,7 +433,8 @@ Selected Distribution Release R
       = intended initial lock Understand U
       + develop/test/submit from the same coherent release set
   → P1 human approval
-  → approved Apply creates project.yaml + skills.lock
+  → approved Apply creates project.yaml and ultimately establishes
+    complete coherent skills.lock
   → skills.lock becomes durable expected-version authority
   → later Agent reads lock and uses Host Compatibility Preflight
 
@@ -423,6 +445,28 @@ actual bootstrap Understand ≠ release-pinned Understand
 
 × no chat-memory dependency
 × R does not remain a competing durable host version authority
+```
+
+```text
+interrupted initial Adoption after host identity, before complete lock
+  → Host Compatibility / recovery path (NOT a third context)
+  → current Adoption Session identifies same approved Plan
+  → revalidate Plan identity + approval applicability + observed host
+  → expected approved prefix/checkpoint
+      + exact Selected Release R still resolvable
+      + release-pinned Understand U = actual recovery Understand U
+        → bounded Plan-derived package resolution
+        → P1/P5 may decide whether approved remaining work resumes
+  → partial/malformed/incomplete lock is recovery evidence, NOT authority
+  → complete coherent four-Skill lock established
+        → lock authority begins; temporary recovery anchor expires
+
+missing binding / unexpected divergence / exact R or U unavailable
+  → BLOCK / P1 recovery, re-plan, and re-approval as applicable
+
+previously ACTIVE host later loses lock
+  → established-host consistency/recovery
+  × MUST NOT revive historical Adoption Plan as expected-version authority
 ```
 
 ---
