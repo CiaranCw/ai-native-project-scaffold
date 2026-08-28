@@ -16,11 +16,11 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **P4 — CLOSED / BASELINED** at `56c7bdb3fa1e193b6fc54693ca635fa3c86e5f77`.
 
-**FA-1 — ACTIVE / REMEDIATION.**
+**FA-1 — PASS / CLOSED** at `2bf5a9a96acca45ccc919dd542bc914420674316`. Independent re-audit of the current P0–P4 Foundation passed. All blocking findings are closed.
 
-**P5 — BLOCKED BY FA-1.**
+**P5 — UNBLOCKED / NOT STARTED.**
 
-There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product.
+There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product. First remote Push is still pending.
 
 ## Authority
 
@@ -39,7 +39,7 @@ Read in this order:
 11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
 12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
 
-If these documents conflict, **Constitution wins**. Runtime, live `skills/` packages, and host `.scaffold/skills.lock` remain absent during FA-1 remediation.
+If these documents conflict, **Constitution wins**. Runtime, live `skills/` packages, and host `.scaffold/skills.lock` remain absent. P5 has not started.
 
 ## Historical v1
 
@@ -50,25 +50,18 @@ If these documents conflict, **Constitution wins**. Runtime, live `skills/` pack
 - Do **not** copy the v1 tree into v2.
 - Later phases MAY selectively reuse qualified v1 capabilities after inspect → qualify → map → migrate → revalidate. See Architecture.
 
-## Allowed during FA-1 remediation
+## Current
 
-- Inspect the P0–P4 foundation authorities.
-- Apply only human-triaged foundation corrections.
-- Perform ordinary static consistency validation.
+P0–P4 Foundation is independently audited and closed. P5 is unblocked and has **not started**.
 
-## Forbidden during FA-1 remediation
+Until P5 starts, this repository remains foundation documents only:
 
-- Implement Skills, runtime, CLI, resolver, compatibility engine, or validators.
-- Create live `skills/` packages or host `.scaffold/skills.lock` **in this distribution repository**.
-- Create `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `examples/`, `tests/`, or `tools/`.
-- Create Claude / Cursor / Codex client configs.
-- Copy or vendor the v1 source tree.
-- Modify `ai-native-game-scaffold`.
-- Invent a fifth top-level Skill.
-- Treat Test PASS as permission to commit or push.
-- Auto-commit or auto-push.
-- Claim `FA1_PASS`.
-- Start P5 before FA-1 passes.
+- no Skill runtime, CLI, resolver, or validators
+- no live `skills/` packages or host `.scaffold/skills.lock` **in this distribution repository**
+- no `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `examples/`, `tests/`, or `tools/`
+- no Claude / Cursor / Codex client configs
+- no v1 source tree and no fifth top-level Skill
+- no auto-commit or auto-push
 
 ## Four Skills (names only)
 
@@ -90,8 +83,8 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 | **P2** | Project Contract — CLOSED / BASELINED |
 | **P3** | Records Contract — CLOSED / BASELINED |
 | **P4** | Skill Contract & Versioning — CLOSED / BASELINED |
-| **FA-1** | Foundation Architecture Audit — ACTIVE / REMEDIATION |
-| P5 | Understand Skill — BLOCKED BY FA-1 |
+| **FA-1** | Foundation Architecture Audit — PASS / CLOSED |
+| **P5** | Understand Skill — UNBLOCKED / NOT STARTED |
 | P6 | Test Skill |
 | P7 | Develop Skill |
 | P8 | Submit Skill |
@@ -102,6 +95,6 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-**FA-1 — Foundation Architecture Audit remediation.**
+**P5 — Understand Skill. Unblocked. Not started.**
 
-P5 MUST NOT start until FA-1 passes. The repository MUST NOT claim `FA1_PASS` during remediation.
+This repository does **not** claim v2.0 release. P6–P12 remain future work.
