@@ -342,7 +342,7 @@ Normal top-level ownership:
 | **Understand** | Bootstrap / Adoption, Full, Refresh, Compatibility |
 | **Develop** | Task implementation, stage implementation, Repair. MAY invoke Test for required validation. |
 | **Test** | Verification execution and evidence/result reporting |
-| **Submit** | Independent final review, real Diff intake, Structural Review, Knowledge Consistency, Test Completeness, human authorization gate, Change Record finalization, Commit / optional Push |
+| **Submit** | Independent final review, real Diff intake, Structural Review, Knowledge Consistency, Test Completeness, human authorization gate, Change Record finalization, SCM Commit or no-SCM durable finalization, optional Push |
 
 Test MUST NOT silently enter Develop. Test MUST NOT authorize submission.
 
@@ -424,7 +424,7 @@ A child Skill invocation MUST NOT gain permissions merely because the caller has
 | Invocation | MUST NOT imply |
 | --- | --- |
 | Develop → Test | Test may modify source |
-| Submit → Test | Test may Commit |
+| Submit → Test | Test may perform S10 durable finalization / Commit |
 | Submit → Understand Refresh | Understand has generic Commit permission |
 
 Human submission authorization remains owned by Submit / P8 and is **candidate-bound**. Skill routing MUST NOT escalate permission.
@@ -722,7 +722,7 @@ Actual host mutation requires **explicit human approval of the migration plan** 
 
 Exact storage/schema is **not** P4.
 
-If **before** migration Apply any of the following materially change:
+If **before the first migration mutation** any of the following materially change:
 
 - the migration plan
 - host persistent Scaffold state
@@ -743,9 +743,39 @@ re-evaluate compatibility
 
 Pure observational information that does **not** alter plan applicability or the mutation envelope MUST NOT automatically require re-approval.
 
-Migration Plan Approval is **not** P8 Submit Authorization. Persistent migration changes still require normal Submit before Commit.
+Migration Plan Approval is **not** P8 `SUBMIT_AUTHORIZED`. Persistent migration changes still require normal Submit and candidate-bound S10 authorization before durable submission finalization.
 
-### 25.2 Records
+### 25.2 Migration execution and interruption
+
+P5 MUST execute an approved migration through this minimal lifecycle:
+
+```text
+PREPARED → APPLYING → VALIDATING → COMPLETED
+PREPARED → ABORTED
+APPLYING / VALIDATING → RECOVERY_REQUIRED
+RECOVERY_REQUIRED → deterministic resume or proven-safe ABORTED
+```
+
+This lifecycle is not a fifth Skill and does not create a fourth canonical development record. P3 defines minimum representation obligations for a bounded operational Migration Execution artifact/session; P5 owns its concrete schema, persistence, checkpoints, and runtime.
+
+| State | Meaning |
+| --- | --- |
+| **PREPARED** | Execution context is bound to plan identity/content, source host state/fingerprint, source `skills.lock`, relevant record/metadata generation, target intent, and approved mutation envelope. PREPARED is not persisted human permission. Before first mutation, P5 MUST revalidate those bindings and establish valid current Migration Plan Approval. |
+| **APPLYING** | Persistent mutation has begun. Execution state records which approved actions/checkpoints completed, which remain, expected observed state for recovery, and rollback/recovery information where defined. Universal rollback is **not** required. |
+| **VALIDATING** | Approved mutation actions ran, but required post-apply validation has not yet established a coherent successfully migrated host. Normal operation MUST NOT treat migration as complete. |
+| **COMPLETED** | Migration actions and required validation succeeded. P5 may then update or clear applicable P2 `NEEDS_MIGRATION` / `RECOVERY_REQUIRED` state and clean temporary execution state according to its lifecycle. |
+| **RECOVERY_REQUIRED** | Persistent mutation may be partial/uncertain, actual host state diverged unexpectedly, validation cannot establish coherence, or restart cannot safely determine how to resume. A host in this condition MUST NOT return to normal ACTIVE use blindly. |
+| **ABORTED** | Valid only if no persistent migration mutation occurred, or all applied mutations were proven safely reverted/neutralized and the host is coherent. Unknown partial mutation is RECOVERY_REQUIRED, never ABORTED. |
+
+Recovery MUST observe the actual host, read execution checkpoints, and compare both against the approved mutation envelope.
+
+- If observed state is a provable expected prefix/checkpoint of the approved plan, P5 MAY deterministically resume under the approved recovery protocol.
+- Approved Apply actions moving the host through expected checkpoints inside the mutation envelope do **not** by themselves invalidate approval applicability.
+- If material unexpected divergence exists, or remaining mutations/assumptions would leave the approved envelope, the prior approval is no longer applicable. Re-evaluate compatibility, update/regenerate the plan, and obtain human re-approval before further mutation.
+
+Interruption after persistent mutation begins MUST enter RECOVERY_REQUIRED unless deterministic safe completion or a coherent safely reverted state can be proven. Execution/checkpoint state MUST NOT be cleaned while needed to reason about uncertain partial mutation.
+
+### 25.3 Records
 
 If a new Skill generation cannot safely interpret old Task / Change / Session schema: it MUST NOT silently rewrite those records.
 
@@ -898,6 +928,8 @@ At least these three:
 | **THIN BRIDGE** | Client-specific project/config file points at AGENTS + the canonical Skill resolver/authority. Aligns with P1 `THIN_BRIDGE` strategy. |
 | **GENERATED DERIVED COPY** | Only when a client **technically requires** local copied instructions. |
 
+Authority and ownership remain independent (P2). A durable Scaffold-created thin bridge, generated derived copy, or Scaffold-managed region in an existing client file MUST be covered by the P2 ownership registry even though it remains non-authoritative. Whole generated copies use **GENERATED**; Scaffold-controlled regions use **MANAGED**; preserved files with no Scaffold-controlled mutation remain **HUMAN_OWNED**. No fourth mode is introduced.
+
 ### 31.1 Generated derived copy
 
 The copy MUST be: derived one-way, non-authoritative, regenerable, source-identifiable. MUST NOT be hand-maintained as an independent Skill.
@@ -934,7 +966,7 @@ Skill resolution and version compatibility MUST NOT require Git / Perforce.
 
 `skills.lock` remains usable on no-SCM hosts. It is still a **persistent host artifact** even without SCM.
 
-A lock update is still a project mutation. P8 owns submission / finalization behavior. SCM-dependent history / Commit capabilities exist **only when SCM exists**. P4 MUST NOT invent no-SCM Commit semantics.
+A lock update is still a project mutation. P8 owns the concrete submission/finalization mechanism. SCM-dependent history / Commit capabilities exist **only when SCM exists**. On a no-SCM host, Submit-S10 instead uses P8’s atomic or conflict-detectable durable finalization/publication operation; P4 freezes only that success is recoverably distinguishable after restart, failure/interruption creates no false submitted history, no Git/SCM Commit is pretended, and Submit-S11 Push is N/A.
 
 MUST NOT invent Git tags as mandatory Skill identities.
 
@@ -1014,7 +1046,7 @@ P4 defines the requirements. Implementation/testing is later.
 | **P5** | Understand workflows: Bootstrap, Full, Refresh, Compatibility **execution**, migration **application**, knowledge updates |
 | **P6** | Test Skill workflow, execution, Evidence, native tests, Game Legibility runtime |
 | **P7** | Develop Skill, Task execution, Develop Sessions, Repair |
-| **P8** | Submit Skill, Observed-S2, reviews, Test Completeness, human authorization, Change Record, Commit / Push |
+| **P8** | Submit Skill, Observed-S2, reviews, Test Completeness, candidate-bound human authorization, Change Record, SCM Commit or no-SCM durable finalization, optional Push |
 
 P4 MUST NOT implement those workflows.
 
@@ -1134,7 +1166,7 @@ Contract-level behavior. No fixtures.
 | **A** All four locked versions exactly available | Each package VALID; Preflight → EXACT for each. Normal Skill start. Lock unchanged. |
 | **B** One PATCH differs, declared compatible | COMPATIBLE. MAY execute. Difference surfaced. Not reported EXACT. Lock unchanged. |
 | **C** One MINOR differs, capability checks pass | COMPATIBLE *if* evaluation agrees; else not guessed. Surfaced. Lock unchanged. |
-| **D** MAJOR differs, migration required | Package VALID → MIGRATION_REQUIRED. ACTIVE host: NEEDS_MIGRATION semantically applies (P5 persists). Plan + host-state-bound approval before apply. Material pre-apply change invalidates approval. |
+| **D** MAJOR differs, migration required | Package VALID → MIGRATION_REQUIRED. ACTIVE host: NEEDS_MIGRATION semantically applies (P5 persists). Plan + host-state-bound approval before apply. Material pre-apply change invalidates approval. Expected approved Apply checkpoints do not. Interrupted partial Apply uses Migration Execution recovery semantics. |
 | **E** Version differs, known incompatible | INCOMPATIBLE. Block normal execution. No silent substitute Skill. |
 | **F** Compatibility cannot be determined | UNKNOWN. Block unsafe execution. Do not guess. |
 | **G** Expected Skill package missing | Blocker. MUST NOT use generic chat or another Skill as equivalent. |
@@ -1146,7 +1178,7 @@ Contract-level behavior. No fixtures.
 | **M** Compatible local version executes | COMPATIBLE path. Lock **not** rewritten. Result reports actual version. |
 | **N** User explicitly chooses to update the lock | Lock update workflow. Visible old/new/result/migration-needed. Later Submit reviews the change. |
 | **O** Lock update requires no project migration | Lock update only. MUST NOT set NEEDS_MIGRATION. |
-| **P** Skill upgrade requires Project Contract migration | VALID package → MIGRATION_REQUIRED. ACTIVE → NEEDS_MIGRATION semantics. Plan/source-state-bound approval; re-evaluate/re-approve if material change before Apply. P5 applies. Plan approval ≠ Submit authorization. |
+| **P** Skill upgrade requires Project Contract migration | VALID package → MIGRATION_REQUIRED. ACTIVE → NEEDS_MIGRATION semantics. Plan/source-state/envelope-bound approval; re-evaluate/re-approve for material unexpected divergence. Approved expected checkpoints retain applicability. P5 applies through PREPARED/APPLYING/VALIDATING/COMPLETED or recovery. Plan approval ≠ Submit authorization. |
 | **Q** Skill cannot interpret current Record schema | MUST NOT silently rewrite records. MIGRATION_REQUIRED (or INCOMPATIBLE/UNKNOWN if no path). P3 history rules stand. |
 | **R** Cursor natively loads Skill package | NATIVE LOAD. Canonical package remains authority. |
 | **S** Claude requires a thin bridge | THIN BRIDGE to AGENTS + canonical resolver. Bridge is not a second Skill. |
@@ -1165,13 +1197,14 @@ Contract-level behavior. No fixtures.
 | **AF** Submit detects source defect needing repair | Handoff to Develop. Submit MUST NOT silently become Develop. New candidate required. |
 | **AG** Repair | Develop `repair` mode. Not a fifth Skill. |
 | **AH** Adoption | Understand `bootstrap`. Not a fifth Skill. |
-| **AI** No-SCM project | Lock + manifests + evaluation still work. Lock remains a persistent host artifact without SCM. P8 owns finalization; P4 invents no no-SCM Commit. |
+| **AI** No-SCM project | Lock + manifests + evaluation still work. Lock remains a persistent host artifact without SCM. P8 owns atomic/conflict-detectable durable S10 finalization; no SCM Commit is invented. Success survives restart; failure does not create submitted history. |
 | **AJ** Actual compatible version ≠ lock | COMPATIBLE. Surfaced. Lock unchanged unless explicit update. Durable outputs MUST NOT claim the locked version ran. |
 | **AK** Client adapter duplicates stale architecture/Rules | Adapter is not authority. Detectable staleness / knowledge conflict. Thin or regenerate. MUST NOT fork project truth. |
 | **AL** Skill tries to persist `submit_authorized: true` | Forbidden in package, lock, and records (P3). Not authorization. |
 | **AM** Unknown client supports only generated text imports | GENERATED DERIVED COPY rules apply. Source identity required. Still not authority. |
 | **AN** Skill version change during an active Task | No silent lock rewrite. Task Book not silently rewritten. Compatibility still applies; MIGRATION_REQUIRED may block; COMPATIBLE MAY continue with surfaced difference. |
 | **AO** Compatibility succeeds; user does not want lock update | COMPATIBLE execution MAY proceed under policy. Lock stays. Difference remains explicit. MUST NOT rewrite the lock anyway. |
+| **AP** Migration interrupted during Apply | Retain bounded execution checkpoints. If safe completion is uncertain, use RECOVERY_REQUIRED. Resume only from a provable expected approved checkpoint; unexpected divergence invalidates approval applicability. ABORTED requires no mutation or proven coherent reversion. |
 
 ---
 
@@ -1212,3 +1245,4 @@ Contract-level behavior. No fixtures.
 | AE | Actual executed Skill version is reportable |
 | AF | No-SCM Skill resolution works |
 | AG | Missing/malformed lock or package blocks guessing |
+| AH | Migration execution has recoverable PREPARED/APPLYING/VALIDATING/COMPLETED/RECOVERY_REQUIRED/ABORTED semantics |

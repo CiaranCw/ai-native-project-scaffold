@@ -14,7 +14,11 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **P3 — CLOSED / BASELINED** at `6a0091de9c4575e607bd8687744ee154cea7226c`.
 
-**P4 — Skill Contract & Versioning** (current design phase; not closed).
+**P4 — CLOSED / BASELINED** at `56c7bdb3fa1e193b6fc54693ca635fa3c86e5f77`.
+
+**FA-1 — ACTIVE / REMEDIATION.**
+
+**P5 — BLOCKED BY FA-1.**
 
 There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product.
 
@@ -35,7 +39,7 @@ Read in this order:
 11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
 12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
 
-If these documents conflict, **Constitution wins**. Runtime, live `skills/` packages, and host `.scaffold/skills.lock` are out of scope for P4.
+If these documents conflict, **Constitution wins**. Runtime, live `skills/` packages, and host `.scaffold/skills.lock` remain absent during FA-1 remediation.
 
 ## Historical v1
 
@@ -46,13 +50,13 @@ If these documents conflict, **Constitution wins**. Runtime, live `skills/` pack
 - Do **not** copy the v1 tree into v2.
 - Later phases MAY selectively reuse qualified v1 capabilities after inspect → qualify → map → migrate → revalidate. See Architecture.
 
-## Allowed at P4
+## Allowed during FA-1 remediation
 
-- Read P0–P3 baselines plus the two P4 Skill-contract documents.
-- Human review of P4.
-- After P4 human review passes, an approved P4 baseline commit exists, and the working tree is clean: start **P5** (Understand Skill).
+- Inspect the P0–P4 foundation authorities.
+- Apply only human-triaged foundation corrections.
+- Perform ordinary static consistency validation.
 
-## Forbidden at P4
+## Forbidden during FA-1 remediation
 
 - Implement Skills, runtime, CLI, resolver, compatibility engine, or validators.
 - Create live `skills/` packages or host `.scaffold/skills.lock` **in this distribution repository**.
@@ -63,7 +67,8 @@ If these documents conflict, **Constitution wins**. Runtime, live `skills/` pack
 - Invent a fifth top-level Skill.
 - Treat Test PASS as permission to commit or push.
 - Auto-commit or auto-push.
-- Start P5 before P4 is baselined.
+- Claim `FA1_PASS`.
+- Start P5 before FA-1 passes.
 
 ## Four Skills (names only)
 
@@ -84,8 +89,9 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 | **P1** | Adoption / Bootstrap Contract — CLOSED / BASELINED |
 | **P2** | Project Contract — CLOSED / BASELINED |
 | **P3** | Records Contract — CLOSED / BASELINED |
-| **P4** | Skill Contract & Versioning — current |
-| P5 | Understand Skill |
+| **P4** | Skill Contract & Versioning — CLOSED / BASELINED |
+| **FA-1** | Foundation Architecture Audit — ACTIVE / REMEDIATION |
+| P5 | Understand Skill — BLOCKED BY FA-1 |
 | P6 | Test Skill |
 | P7 | Develop Skill |
 | P8 | Submit Skill |
@@ -96,6 +102,6 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-**P5 — Understand Skill.**
+**FA-1 — Foundation Architecture Audit remediation.**
 
-P5 MUST NOT start until P4 human review has passed **and** an approved P4 baseline commit exists with a clean working tree.
+P5 MUST NOT start until FA-1 passes. The repository MUST NOT claim `FA1_PASS` during remediation.

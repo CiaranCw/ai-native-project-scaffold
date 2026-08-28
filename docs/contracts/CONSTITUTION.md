@@ -180,7 +180,7 @@ Skill **bodies** MUST have a single real source. Client-specific files MAY point
 
 ## 6. Develop
 
-Develop is **task-driven development**. It is not “let the AI write code.” Develop MUST NOT commit.
+Develop is **task-driven development**. It is not “let the AI write code.” Develop MUST NOT perform Submit-S10 durable finalization, including SCM Commit.
 
 Complete development MUST be driven by a **Task Book** that states:
 
@@ -234,7 +234,7 @@ The normal successful Develop path reaches READY_FOR_REVIEW only when:
 
 If required tests fail, Develop ↔ Test continues. MUST NOT silently mark a failed task READY_FOR_REVIEW merely because those tests executed.
 
-READY_FOR_REVIEW is **not** submit authorization and MUST NOT start Commit / Push. Future WIP / checkpoint-submit exceptions are out of P0.
+READY_FOR_REVIEW is **not** submit authorization and MUST NOT start S10 durable finalization or Push. Future WIP / checkpoint-submit exceptions are out of P0.
 
 ---
 
@@ -253,8 +253,8 @@ Other bounded artifacts MAY exist only when they have a clearly different purpos
 | Record | Answers | Lifecycle |
 | --- | --- | --- |
 | **Task Book** | What are we preparing to do, and where are we? | Live during the task. After success: completed / historical. |
-| **Develop Session** | What did this Develop run explicitly produce? | Temporary. Assists Submit in explaining the current diff. After successful Commit: MUST be cleaned up (mechanism is P3). |
-| **Change Record** | What is the final reviewed candidate, and (after S10 succeeds) what was committed? | Finalized at **S9 before Commit**. Before Commit it describes the candidate. After Commit succeeds it becomes long-term as-built history for that Commit. If Commit fails, it MUST NOT be described as already-submitted history. Draft / final state mechanics are **P3**. |
+| **Develop Session** | What did this Develop run explicitly produce? | Temporary. Assists Submit in explaining the current diff. After successful Submit-S10 durable finalization: MUST be cleaned up (mechanism is P3). |
+| **Change Record** | What is the final reviewed candidate, and (after S10 succeeds) what was durably submitted? | Finalized at **S9 before durable finalization**. Before S10 success it describes the candidate. After S10 succeeds it becomes long-term as-built history for that finalization. If S10 fails or is interrupted, it MUST NOT be described as already-submitted history. Draft / final state mechanics are **P3**. |
 
 Analogy: Task Book = construction plan. Develop Session = temporary site notes. Change Record = as-built packet prepared before handover, then filed after the handover succeeds.
 
@@ -326,7 +326,7 @@ A Test PASS is **TEST_PASS** only for the batch that actually ran. See §9.
 | **TEST_PASS** | A specific executed test batch passed. |
 | **TASK_COMPLETE** | All development stages in the Task Book are done. |
 | **TEST_COMPLETE** | For the **current real submission candidate**: every required test has a terminal recorded result; required-test coverage is complete; and there is no unresolved required-test blocker. |
-| **SUBMIT_AUTHORIZED** | A developer has **explicitly** authorized **this reviewed candidate**. |
+| **SUBMIT_AUTHORIZED** | A human has **currently and explicitly** authorized **this reviewed candidate** for Submit-S10 durable submission finalization. On an SCM host where S10 is Commit, this is the required human Commit authorization for that candidate. |
 
 MUST:
 
@@ -342,11 +342,11 @@ TEST_COMPLETE MUST NOT become true merely because failing required tests were ex
 
 TEST_PASS MUST NOT by itself launch Submit.
 
-Develop MUST NOT auto-commit.
+Develop MUST NOT auto-finalize or auto-commit.
 
-**Submit is the only Skill allowed to enter the real Commit / Push flow.**
+**Submit is the only Skill allowed to enter the real durable submission finalization / optional Push flow.**
 
-When a Task Book exists, Commit’s minimum conditions are:
+When a Task Book exists, Submit-S10’s minimum conditions are:
 
 ```text
 TASK_COMPLETE
@@ -378,11 +378,11 @@ Submit MUST NOT trust the previous Agent’s summary. It MUST re-read the real r
 | S7 | Repository Sync |
 | S8 | Re-review / Re-test |
 | S9 | Finalize Records |
-| S10 | Commit |
+| S10 | Commit / Durable Finalization |
 | S11 | Optional Push |
 | S12 | Cleanup |
 
-After S3–S5 pass and before S6 authorization, the pipeline MUST stop at **READY_FOR_HUMAN_APPROVAL**. That is still not Commit.
+After S3–S5 pass and before S6 authorization, the pipeline MUST stop at **READY_FOR_HUMAN_APPROVAL**. That is still not authorization to perform S10.
 
 ### S3 Structural Review
 
@@ -425,7 +425,7 @@ MUST NOT reuse authorization from another Submit attempt.
 
 MUST NOT let an Agent flip the submit switch for itself.
 
-**Commit and Push are separately authorized.** Allowed pairs: Commit yes / Push no; Commit yes / Push yes. Push MUST have extra authorization. Push MUST NOT be the default. Commit authorization MUST NOT be treated as Push authorization.
+`SUBMIT_AUTHORIZED` is the current, candidate-bound human authorization for **Submit-S10**. It is the Commit authorization when S10 is realized as an SCM Commit; there is no second foundational `COMMIT_AUTHORIZED` state or gate. Push is separate: it MUST have additional current explicit authorization, MUST NOT be the default, and MUST NOT inherit authorization from `SUBMIT_AUTHORIZED`. Neither permission is a reusable persisted bit.
 
 ### S7–S8 after sync
 
@@ -442,7 +442,7 @@ If S7 / S8 changes the real submission candidate:
 - return to **S6**
 - the human MUST explicitly authorize **Candidate B**
 
-Only then may S10 Commit occur.
+Only then may S10 durable finalization occur.
 
 This is a loop, not a thirteenth stage:
 
@@ -450,17 +450,17 @@ This is a loop, not a thirteenth stage:
 S8 → S3 / S4 / S5 → S6
 ```
 
-Submit MUST NOT commit on a changed, un-reviewed, or un-reauthorized candidate. Authorization from an earlier Submit attempt is never reusable.
+Submit MUST NOT durably finalize a changed, un-reviewed, or un-reauthorized candidate. Authorization from an earlier Submit attempt is never reusable.
 
 ### S9 Change Record
 
-S9 finalizes the Change Record **before** S10 Commit, so it can be included in the same Commit.
+S9 finalizes the exact logical Change Record content/representation for the authorized final candidate **before** S10. On an SCM host, it can therefore be included in the same Commit.
 
 ```text
 final reviewed candidate
   → S9 finalize Change Record
-  → S10 Commit
-  → S11 Optional Push
+  → S10 Commit / Durable Finalization
+  → S11 Optional Push or N/A
   → S12 Cleanup
 ```
 
@@ -475,13 +475,20 @@ MUST NOT be generated from “the Agent remembers what it did.”
 
 Temporal semantics:
 
-- Before Commit, the Change Record describes the final **candidate** submission.
-- After Commit succeeds, that same Change Record becomes the long-term as-built history for that Commit.
-- If Commit fails, it MUST NOT be described as an already-submitted historical fact.
+- Before S10 succeeds, the Change Record describes the final **candidate** submission and is not yet durable as-built history.
+- After S10 succeeds, the same S9-finalized logical Change Record content becomes long-term durable as-built history. No second content rewrite is required.
+- If S10 fails or is interrupted, it MUST NOT be described as an already-submitted historical fact, and completed Develop Sessions MUST NOT be cleaned up as submitted history.
 
 P3 defines draft / final state mechanics.
 
-After successful Commit:
+S10 is the authoritative durable submission finalization operation:
+
+- On an SCM host with Commit capability, S10 is Commit of the final candidate.
+- On a no-SCM host, S10 is a P8-defined atomic or conflict-detectable durable finalization/publication operation. Its success MUST be durably distinguishable after restart; failure or interruption MUST NOT create false submitted history. It MUST NOT pretend that an SCM Commit occurred.
+- S11 Push is optional when a push-capable SCM exists and **N/A** otherwise.
+- Concrete no-SCM success-marker/publication and recovery mechanics belong to P8; these semantics do not add a thirteenth stage.
+
+After successful S10:
 
 - Develop Session → clean up (S12)
 - Task Book → completed / historical
@@ -501,7 +508,7 @@ Important changes MUST have an explicit verification basis (tests actually run, 
 
 ### 3. Every important change is handoff-ready
 
-A later member MUST be able to understand important changes without the original chat. That is what Task Book (intent/progress), Change Record (as-built after successful Commit), and knowledge docs are for.
+A later member MUST be able to understand important changes without the original chat. That is what Task Book (intent/progress), Change Record (as-built after successful S10 durable finalization), and knowledge docs are for.
 
 ### 4. Knowledge evolves with the project
 
@@ -529,7 +536,7 @@ If a Gate claims to be mandatory, the system MUST be able to tell whether that G
 
 ### 10. Temporary memory must expire
 
-Every temporary state MUST have a lifecycle. Examples: Adoption Session cleaned after Adoption; Develop Session cleaned after successful Commit (S12); analysis caches with explicit retention. MUST NOT accumulate unbounded session logs, scratchpads, temporary diffs, agent notes, or intermediate plans. Long-term knowledge MAY enter only the explicit long-term structures.
+Every temporary state MUST have a lifecycle. Examples: Adoption Session cleaned after Adoption; Develop Session cleaned after successful S10 durable finalization (S12); analysis caches with explicit retention. MUST NOT accumulate unbounded session logs, scratchpads, temporary diffs, agent notes, or intermediate plans. Long-term knowledge MAY enter only the explicit long-term structures.
 
 ### 11. Knowledge freshness is testable
 
@@ -537,7 +544,7 @@ Whether docs are stale MUST be checkable. It MUST NOT depend only on human memor
 
 ### 12. Human controls submission
 
-AI MUST NEVER decide to commit because tests succeeded. Authorization defaults to false, is per attempt, and splits Commit vs Push.
+AI MUST NEVER decide to perform S10 because tests succeeded. `SUBMIT_AUTHORIZED` defaults to false and is candidate-bound. Where S10 is Commit, it is that candidate’s Commit authorization; Push remains separately and currently authorized.
 
 ---
 
@@ -576,8 +583,8 @@ ordinary project
   → Repository Sync
   → if the candidate changed: S8 → S3/S4/S5 → S6 (new candidate)
   → S9 finalize Change Record
-  → S10 Commit
-  → S11 Optional Push (separate authorization)
+  → S10 Commit / Durable Finalization
+  → S11 Optional Push (separate authorization) or N/A
   → S12 Cleanup
   → Understand Refresh when needed
   → next development round

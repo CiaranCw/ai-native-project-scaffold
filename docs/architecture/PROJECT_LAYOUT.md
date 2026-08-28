@@ -14,7 +14,8 @@ This distribution repository does **not** contain a live host tree.
 <ProjectRoot>/
 │
 ├── AGENTS.md                     Layer 1 — thin router
-│                                 GENERATED | MANAGED | HUMAN_OWNED+bridge
+│                                 GENERATED | MANAGED | HUMAN_OWNED
+│                                 (bridge is a separate strategy/artifact)
 │
 ├── docs/project/                 Layer 2 — canonical knowledge entries
 │   ├── overview.md               REQUIRED
@@ -125,8 +126,8 @@ project.yaml     identity, lifecycle + maintenance conditions,
        │                  (no result history)                 → P6 executes
        ├─ skills.lock     expected versions                   → P4 defines
        ├─ tasks/          Task Books                          → P3
-       ├─ changes/        Change Records: candidate before Commit;
-       │                  as-built after successful Commit    → P3
+       ├─ changes/        Change Records: candidate before S10;
+       │                  as-built after successful S10       → P3
        ├─ ext/<ns>/       optional domain metadata
        └─ runtime/        NOT knowledge
               ├─ sessions / caches
@@ -175,6 +176,10 @@ Artifact in project.yaml ownership registry?
 
 Pointer/reference is not a fourth mode.
 Referencing a physical file does not transfer ownership.
+Ownership does not imply authority.
+Every shared durable Scaffold-touched artifact/region is covered,
+including non-authoritative client bridges and generated copies.
+Ordinary local ephemeral runtime state needs no durable registry entry.
 ```
 
 ---
@@ -219,7 +224,7 @@ No implementation in P2.
  thin      thin       thin
 ```
 
-If a client requires a file copy: **one-way generate** from canonical source.
+If a client requires a file copy: **one-way generate** from canonical source. The copy remains non-authoritative, but a durable Scaffold-generated copy or managed client region is still covered by the ownership registry.
 
 ---
 

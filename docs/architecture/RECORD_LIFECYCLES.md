@@ -24,7 +24,7 @@ This distribution repository does **not** contain live Task Books, Change Record
         × not as-built       × not human proof         × not Task intent
 ```
 
-A later Agent with no chat MUST still be able to answer all four questions. Session files are **optional assistance** and are **deleted** after successful Commit.
+A later Agent with no chat MUST still be able to answer all four questions. Session files are **optional assistance** and are **deleted** after successful Submit-S10 durable finalization.
 
 ---
 
@@ -34,9 +34,10 @@ A later Agent with no chat MUST still be able to answer all four questions. Sess
 .scaffold/
 ├── tasks/<task-id>.yaml                         SHARED / DURABLE / GENERATED
 ├── changes/<change-id>.yaml                     SHARED / DURABLE / GENERATED
-│                                                (candidate before Commit;
+│                                                (candidate before S10;
 │                                                 same staged/normalized bytes
-│                                                 become as-built after success)
+│                                                 or finalized logical content
+│                                                 becomes as-built after success)
 └── runtime/                                     LOCAL / TEMPORARY
     ├── develop-sessions/<dev-id>/
     │   ├── session.yaml                         overlays + coverage
@@ -85,7 +86,7 @@ Do not add another `.scaffold/` root namespace. Do not create these directories 
            + declared Task-level acceptance satisfied
                 ▼
          READY_FOR_REVIEW          ← Develop MUST stop here
-                │                     MUST NOT Commit
+                │                     MUST NOT perform S10 / Commit
                 │                     MUST NOT mark this merely because tests ran
                 │                     no acceptance_met boolean
                 ▼
@@ -98,14 +99,15 @@ Do not add another `.scaffold/` root namespace. Do not create these directories 
          (deterministic artifact; not a Task Book edit)
                 │
                 ▼
-         Submit-S10 Commit
+         Submit-S10 Commit / Durable Finalization
                 │
-                ├─ FAIL → Task Book still live
+                ├─ FAIL / INTERRUPT → Task Book still live
                 │         status is NOT “submitted history”
                 │
                 └─ SUCCESS → Task Book historical / generally immutable
                              (contextual: durable Change Record lists this task
-                              AND repository history contains that record)
+                              AND authoritative S10 success evidence
+                              establishes that durable record)
                              MUST NOT rewrite the plan to absorb unplanned Diff
 ```
 
@@ -155,7 +157,7 @@ No Task Book: Submit still starts; **TASK_COMPLETE = NOT APPLICABLE**. Do not in
  Submit observes Observed-S2 (fresh; not stored as Session truth)
         │
         ▼
- successful authorized Commit
+ successful authorized S10 durable finalization
  + durable Change Record
         │
         ▼
@@ -260,51 +262,51 @@ Advisory review attention order: MIXED → POST → PREEXISTING → UNATTRIBUTED
         │  MUST NOT list/count this Change Record file itself
         │
         ▼
- COMMIT CANDIDATE TREE
+ S10 FINALIZATION CANDIDATE
    = reviewed candidate
    + deterministic S9 Change Record artifact
         │
-        ×  MUST NOT wait until after Commit to create the file
+        ×  MUST NOT wait until after S10 to create the record
         ×  MUST NOT store this Commit’s SHA inside the file
         ×  MUST NOT persist submitted: true
         ×  MUST NOT persist submit_authorized: true as permission
         ×  MUST NOT mutate Task Books at S9
         ×  any other S9 mutation is NOT silently review-exempt
         ▼
- Submit-S10 Commit attempt
+ Submit-S10 Commit / Durable Finalization attempt
         │
-        ├─ FAIL ──► still a candidate
+        ├─ FAIL / INTERRUPT ──► still a candidate
         │           MUST NOT call it submitted history
-        │           unchanged staged/normalized record → retry
+        │           MUST NOT clean completed Sessions as submitted
+        │           unchanged finalized representation → retry
         │           material reviewed-diff change → regenerate first
         │
-        └─ SUCCESS ► staged/normalized record bytes
-                     become durable as-built
-                     (working-tree CRLF/LF MAY differ from the blob)
-                     SCM history binds Commit ↔ record
-                     full Commit Diff INCLUDES the Change Record file
-                     Submit-S11 optional Push (separate auth)
+        └─ SUCCESS ► same S9-finalized logical content
+                     becomes durable as-built
+                     SCM: staged/normalized bytes in Commit
+                     no SCM: P8 atomic/conflict-detectable durable publication
+                     success distinguishable after restart
+                     Submit-S11 optional Push / N/A (separate auth if present)
                      Submit-S12 MUST clean completed SEALED Sessions
 ```
 
 ```text
- Uncommitted / not in successful Commit     = candidate Change Record
- Same staged/normalized bytes in a
- successful Commit                          = durable as-built Change Record
+ S9-finalized / no successful S10            = candidate Change Record
+ Same logical content in successful S10      = durable as-built Change Record
 ```
 
-No second Commit solely to flip a status field. No post-Commit record rewrite to become “submitted.”
+No second operation solely to flip a status field. No post-S10 record rewrite to become “submitted.” No-SCM finalization MUST NOT pretend an SCM Commit occurred.
 
 ---
 
 ## Task Book vs Change Record (after success)
 
 ```text
- Historical Task Book              Durable Change Record           Repository
- remaining intent & stages         compact as-built summary        exact Commit Diff
- Session IDs if present:           of REVIEWED CANDIDATE DIFF      (includes Change
-  advisory / non-required          provenance COUNTS not            Record artifact)
-  (no S9 mutation required)        Session directories
+ Historical Task Book              Durable Change Record           Finalized reality
+ remaining intent & stages         compact as-built summary        exact S10 result
+ Session IDs if present:           of REVIEWED CANDIDATE DIFF      (SCM Commit or
+  advisory / non-required          provenance COUNTS not            no-SCM publication
+  (no S9 mutation required)        Session directories              includes record)
                                    task_book_ids → Task(s)
 
  MUST NOT copy Session hashes/patches into the Task Book.
@@ -368,42 +370,87 @@ LOCAL / TEMPORARY / DELETE AFTER SUCCESSFUL ACTIVATION.
 
 ---
 
+## Migration Execution lifecycle (bounded operational artifact)
+
+```text
+ PREPARED
+   bound to plan + source host + source lock
+   + relevant generations + target intent + mutation envelope
+   × not persisted approval
+   │ revalidate binding + current approval before first mutation
+   ▼
+ APPLYING
+   persistent mutation begun
+   checkpoints: completed / remaining / expected observed state
+   rollback/recovery only where defined; no universal rollback
+   │
+   ▼
+ VALIDATING
+   actions ran; host is NOT yet successfully migrated
+   │
+   ├─ required validation succeeds ───────────────► COMPLETED
+   │                                                update/clear applicable
+   │                                                P2 maintenance/recovery state
+   │
+   └─ interruption / uncertainty / divergence ───► RECOVERY_REQUIRED
+                                                    observe actual host
+                                                    + read checkpoints
+                                                    + compare approved envelope
+                                                          │
+                   provable expected prefix/checkpoint ────┤ resume MAY proceed
+                   unexpected/material divergence ─────────┤ approval inapplicable
+                                                          │ re-evaluate, new plan,
+                                                          │ human re-approval
+                                                          ▼
+                                                        ABORTED only if
+                                                        no mutation occurred OR
+                                                        coherent safe reversion proven
+```
+
+Expected approved Apply checkpoints do not themselves invalidate plan approval. Unknown partial mutation MUST remain RECOVERY_REQUIRED, never ABORTED. The artifact survives while needed for recovery and is not a fourth canonical development record or a Change Record replacement.
+
+---
+
 ## Cleanup summary
 
 ```text
                     after successful
-                    authorized Commit
+                    authorized S10 durable finalization
                     + durable Change Record
 
  Develop Sessions   ──► Submit-S12 MUST delete corresponding
                          completed SEALED Session directories
                          OPEN: never silent-delete; surface conflicts
                          cleanup failure: report + retry;
-                         do not invalidate the Commit
+                         do not invalidate the durable finalization
  Task Book          ──► historical; stop mutating
                          (no S9 mutation)
- Change Record      ──► keep (already in the Commit)
+ Change Record      ──► keep (already durably finalized)
  Adoption Session   ──► delete on activation success (different lifecycle)
  Push               ──► not required for Develop Session cleanup
 ```
 
-Draft/canceled Task Books with no durable history: explicit user/project action only. Committed Change Records: no routine deletion.
+Draft/canceled Task Books with no durable history: explicit user/project action only. Durably finalized Change Records: no routine deletion.
 
 ---
 
 ## Concurrency (Task Book)
 
 ```text
- Agent A reads revision N
- Agent B writes revision N+1
- Agent A writes expecting N
-        │
-        ▼
- MUST NOT overwrite
- re-read → reconcile → increment
+ Agent A reads revision N        Agent B reads revision N
+             │                                │
+             └──── atomic conditional publication ────┘
+                              │
+                    only one may publish N+1
+                              │
+                    other writer gets conflict/block
+                              │
+                    re-read → reconcile/re-plan
+                              │
+                    retry as a new mutation
 ```
 
-No lock service. Develop Sessions use distinct IDs per execution.
+Plain read N → re-read N → write N+1 is insufficient without atomic conditional publication or safe serialization. P3 does not require a central/distributed lock service and does not freeze or forbid a particular safe mechanism; implementations may use CAS, local/per-record locking, serialization, transactions, centralized or distributed coordination where appropriate, or equivalent conflict-producing publication. If safety cannot be established, mutation blocks.
 
 ---
 
@@ -417,7 +464,11 @@ No lock service. Develop Sessions use distinct IDs per execution.
         ▼
  Session digests still compare local files
  Change Record still summarizes the candidate
- durable association to SCM history MAY be limited  → P8
+ Submit-S10 uses P8 atomic/conflict-detectable durable finalization
+ success is distinguishable after restart
+ failure/interruption creates no submitted history or Session cleanup
+ S11 Push is N/A
+ × do not pretend Commit occurred
 ```
 
 ---
@@ -430,7 +481,8 @@ No lock service. Develop Sessions use distinct IDs per execution.
  P6  Evidence schema / test execution
  P7  creating Task Books & sealing Sessions
  P8  Observed-S2, classification execution,
-     reviews, human gate, Commit/Push, cleanup
+     reviews, SUBMIT_AUTHORIZED, SCM Commit or
+     no-SCM durable finalization, optional Push, cleanup
 ```
 
-This file is maps only. If it conflicts with [../contracts/RECORDS_CONTRACT.md](../contracts/RECORDS_CONTRACT.md), the Records Contract wins; if both conflict with the Constitution, the Constitution wins.
+This file is maps only. For record representation/lifecycle topics, [../contracts/RECORDS_CONTRACT.md](../contracts/RECORDS_CONTRACT.md) governs this visualization; Adoption behavior remains owned by P1. Product-wide conflicts remain governed by the Constitution.

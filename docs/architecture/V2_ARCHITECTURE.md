@@ -64,7 +64,7 @@ Task Book                     ← “what we intend to do”
          │                     ← TEST_PASS MUST NOT auto-start Submit
          │                     ← failed required tests MUST NOT arrive here
          ▼
-      Submit                   ← only Skill that may Commit / Push
+      Submit                   ← only Skill that may durably finalize / Push
          │
          ├─ S1 Intake
          ├─ S2 Delta Classification
@@ -73,14 +73,16 @@ Task Book                     ← “what we intend to do”
          ├─ S5 Test Completeness      ← TEST_COMPLETE for this candidate
          │         │
          │         ▼
-         │  READY_FOR_HUMAN_APPROVAL  ← still not Commit
-         ├─ S6 Human Approval         ← candidate-bound; Commit ≠ Push
+         │  READY_FOR_HUMAN_APPROVAL  ← still not S10-authorized
+         ├─ S6 Human Approval         ← SUBMIT_AUTHORIZED for S10; Push separate
          ├─ S7 Repository Sync
          ├─ S8 if candidate changed → S3/S4/S5 → S6 (Candidate B)
          ├─ S9 Finalize Records       ← Change Record for this candidate
-         ├─ S10 Commit                ← requires candidate-bound authorization
-         ├─ S11 Optional Push         ← extra authorization
-         └─ S12 Cleanup               ← Develop Session after successful Commit
+         ├─ S10 Commit / Durable Finalization
+         │                            ← SUBMIT_AUTHORIZED; SCM Commit or no-SCM
+         │                               atomic/conflict-detectable publication
+         ├─ S11 Optional Push / N/A   ← extra authorization if push-capable SCM
+         └─ S12 Cleanup               ← Develop Session after successful S10
                 │
                 ▼
          Understand Refresh if knowledge drifted
@@ -112,7 +114,8 @@ Submit MUST accept work that **never** used Develop (human-only or tool-only dif
          Develop invokes Test             │
          for stage / final tests          │
                                           │
-                    Submit re-reads SCM   │
+                    Submit re-reads real │
+                    project/SCM if any   │
                     Submit MAY call Test  │
                     Submit MAY require    │
                     Understand Refresh    │
@@ -122,12 +125,12 @@ Submit MUST accept work that **never** used Develop (human-only or tool-only dif
 | --- | --- | --- |
 | Understand | all others | Authority map, commands, tests, constraints, freshness |
 | Develop | Test | Stage validation and Task final tests |
-| Develop | — | Stops at READY_FOR_REVIEW; **no Commit** |
+| Develop | — | Stops at READY_FOR_REVIEW; **no S10 durable finalization / Commit** |
 | Test | caller | Scoped evidence; **never** “you may submit” |
 | Submit | real tree | Sole authority for “what changed” |
 | Submit | Test | Completeness / re-test after sync |
 | Submit | Understand | Refresh when knowledge is stale |
-| Submit | SCM | Commit / optional Push after human gate |
+| Submit | finalization capability | SCM Commit or no-SCM durable finalization after `SUBMIT_AUTHORIZED`; optional Push separately authorized |
 
 ---
 
@@ -176,14 +179,14 @@ create / accept Task Book
                 ▼
            READY_FOR_REVIEW
                 │
-                ×  MUST NOT Commit
+                ×  MUST NOT perform S10 / Commit
                 ▼
            human starts Submit (separate Skill)
 ```
 
 MUST NOT mark READY_FOR_REVIEW merely because final tests ran.
 
-Task Book is the **plan**. It is not proof of the final committed tree. Submit may discover undeclared files; those still count.
+Task Book is the **plan**. It is not proof of the final durably finalized result. Submit may discover undeclared files; those still count.
 
 The development / handoff lifecycle has exactly three **canonical development records**: Task Book, Develop Session, Change Record. Other artifacts (Test Report / Evidence, Adoption Session, migration or analysis artifacts) MAY exist only with a different purpose, authority, lifecycle, and retention. MUST NOT duplicate those three with scratchpad / work-log / handoff-log / session-history / changelog copies.
 
@@ -209,7 +212,7 @@ Submit starts → S2 (real tree wins)
         │
         ×  no HUMAN_CHANGE class
         ▼
-successful Commit → clean up session (P3 defines how)
+successful S10 durable finalization → clean up session (P3 defines how)
 ```
 
 If Submit never succeeds, **P3** MUST define retention / expiry for abandoned sessions. P0 only forbids unbounded accumulation.
@@ -248,7 +251,9 @@ S5 Test Completeness
     ▼
 S6 Human Approval of Candidate A
     authorization = false by default
-    candidate-bound; Commit token ≠ Push token
+    SUBMIT_AUTHORIZED = candidate-bound S10 authorization
+    for SCM Commit, this is Commit authorization
+    no second COMMIT_AUTHORIZED gate; Push remains separate
     │
     ▼
 S7 Repository Sync
@@ -261,10 +266,12 @@ S7 Repository Sync
             → S6 for Candidate B
     │
     ▼
-S9 Finalize Change Record     ← candidate record; included in the Commit
-S10 Commit
-S11 Optional Push             ← separate authorization
-S12 Cleanup                   ← Develop Session after successful Commit
+S9 Finalize Change Record     ← candidate record; included in S10
+S10 Commit / Durable Finalization
+    SCM: Commit
+    no SCM: P8 atomic/conflict-detectable durable publication
+S11 Optional Push / N/A       ← separate authorization when capability exists
+S12 Cleanup                   ← Develop Session after successful S10
 ```
 
 `DEVELOP_KNOWN` still receives S3–S5. It is not a fast-pass.
@@ -285,20 +292,24 @@ final reviewed candidate
 S9 finalize Change Record     ← describes this candidate; not yet as-built
         │
         ▼
-S10 Commit
+S10 Commit / Durable Finalization
         │
-        ├─ failure → MUST NOT treat that record as submitted history
+        ├─ failure/interruption → MUST NOT treat record as submitted history
+        │                        MUST NOT clean Sessions as submitted
         └─ success → that Change Record becomes long-term as-built
-                     → S11 Optional Push
+                     using the same S9-finalized logical content
+                     → S11 Optional Push / N/A
                      → S12 Cleanup
         │
         ×  not “Agent memory of the session”
-        ×  MUST NOT create the Change Record after Commit
+        ×  MUST NOT create the Change Record after S10
 ```
 
 P3 defines draft / final state mechanics.
 
-| After successful Commit | Fate |
+On an SCM host, S10 success is the Commit containing the S9-finalized Change Record representation. On a no-SCM host, P8 defines a recoverable atomic or conflict-detectable durable finalization/publication whose success is distinguishable after restart. A no-SCM path MUST NOT pretend a Commit occurred. Neither path rewrites the logical Change Record content after S10.
+
+| After successful S10 durable finalization | Fate |
 | --- | --- |
 | Develop Session | Clean up (S12) |
 | Task Book | Completed / historical |
@@ -354,7 +365,7 @@ Each thin entry: where authority lives; rare client-only config; tool wiring. No
 | **P5** | Understand Skill | Full / Refresh / Compatibility |
 | **P6** | Test Skill | Native tests + v1 test-runtime reuse |
 | **P7** | Develop Skill | Staged tasks + Develop Session |
-| **P8** | Submit Skill | Diff, reviews, human gate, sync, commit |
+| **P8** | Submit Skill | Diff, reviews, human gate, sync, SCM Commit or no-SCM durable finalization |
 | **P9** | Repair Migration | v1 Repair → Develop Repair Mode |
 | **P10** | Incremental Understanding / Multi-Agent | Change-driven refresh, handoff, clients |
 | **P11** | Cross-Project E2E | Multiple structurally different hosts |

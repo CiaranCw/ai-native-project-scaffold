@@ -154,7 +154,7 @@ MUST NOT treat these as one number.
     ×  TEST_PASS ≠ READY_FOR_REVIEW
     ×  TEST_PASS ≠ SUBMIT_AUTHORIZED
     ×  Test MUST NOT edit source
-    ×  Test MUST NOT Commit
+    ×  Test MUST NOT perform S10 / Commit
 ```
 
 ---
@@ -310,15 +310,33 @@ After material knowledge/candidate change: existing S3/S4/S5/S6 loop. No new Sub
               │     → explicit human re-approval
               │
               ▼
-           P5 Understand Compatibility applies
+           PREPARED
+           revalidate binding + current plan approval
               │
               ▼
-           normal Submit for persistent committed changes
+           APPLYING
+           checkpoint approved actions + expected state
+              │
+              ▼
+           VALIDATING
+              │
+              ├─ success → COMPLETED
+              └─ interruption / uncertainty / divergence
+                   → RECOVERY_REQUIRED
+                   → observe host + checkpoints + approved envelope
+                   → expected prefix MAY resume
+                   → unexpected divergence requires
+                     re-evaluation + updated plan + human re-approval
+              │
+              ▼
+           normal Submit for persistent finalized changes
               │
               × newer package existence is not approval
-              × plan approval ≠ P8 Commit authorization
+              × plan approval ≠ P8 SUBMIT_AUTHORIZED
               × MUST NOT silently rewrite P3 historical Change Records
 ```
+
+`ABORTED` is valid only before persistent mutation or after proven coherent safe reversion/neutralization; unknown partial mutation remains `RECOVERY_REQUIRED`. Expected approved Apply checkpoints do not themselves invalidate approval applicability. Universal rollback is not required. Migration Execution is a bounded operational artifact, not a fifth Skill or fourth canonical development record.
 
 Installing a local package ≠ migrating the host.
 
@@ -366,6 +384,7 @@ Installing a local package ≠ migrating the host.
               source skill_id + skill_version
               stale MUST be detectable
               NOT authority
+              still ownership-registered when durably Scaffold-generated
               does not make an INVALID package VALID
 
  All clients
@@ -376,6 +395,8 @@ Installing a local package ≠ migrating the host.
  same Project Rules
  same records
 ```
+
+Authority and ownership are independent: durable Scaffold-created thin bridges, generated copies, and managed client regions remain non-authoritative but are covered by P2 ownership registration as GENERATED or MANAGED as applicable.
 
 ```text
  Agent A (Cursor, Dist 2.0.x)     Agent B (Claude, Dist 2.1.y)
@@ -447,9 +468,13 @@ Ephemeral. Not a P3 canonical record. No chat / chain-of-thought storage.
  skills.lock remains a persistent host artifact
  even without SCM
  a lock update is still a project mutation
- P8 owns submission / finalization
+ P8 owns concrete submission / finalization
  SCM history / Commit exist only when SCM exists
- P4 MUST NOT invent no-SCM Commit semantics
+ no SCM: S10 uses atomic/conflict-detectable durable publication
+ success distinguishable after restart
+ failure/interruption creates no false submitted history
+ S11 Push is N/A
+ MUST NOT pretend an SCM Commit occurred
 ```
 
 ---
@@ -461,7 +486,8 @@ Ephemeral. Not a P3 canonical record. No chat / chain-of-thought storage.
      migration application
  P6  Test execution / Evidence
  P7  Develop + Repair + Sessions
- P8  Submit reviews, authorization, Change Record, Commit/Push
+ P8  Submit reviews, SUBMIT_AUTHORIZED, Change Record,
+     SCM Commit or no-SCM durable finalization, optional Push
 ```
 
 This file is maps only. If it conflicts with [../contracts/SKILL_CONTRACT.md](../contracts/SKILL_CONTRACT.md), the Skill Contract wins; if both conflict with the Constitution, the Constitution wins.

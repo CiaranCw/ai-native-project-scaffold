@@ -34,7 +34,7 @@ This **distribution** repository MUST NOT contain a live host `.scaffold/`, host
 | **Declared command** | A named operation recorded in commands metadata. |
 | **Validated execution** | Evidence that a declared command was actually run and observed. Distinct from declaration. |
 | **Adoption Mutation Envelope** | P1: authorized first-attach mutations. P2 assumes activation already happened or is in progress. |
-| **Ownership registry** | Machine-readable map of Scaffold-touched artifact → GENERATED / MANAGED / HUMAN_OWNED. |
+| **Ownership registry** | Machine-readable coverage of each shared durable Scaffold-touched artifact and, for MANAGED files, each controlled region. Every artifact has one of GENERATED / MANAGED / HUMAN_OWNED. Ownership controls mutation; it does not declare authority. |
 
 Canonical development records remain Task Book, Develop Session, Change Record. Adoption Session remains a temporary non-canonical artifact (P1 / P3).
 
@@ -201,10 +201,11 @@ Exact YAML keys are **not** frozen here. Each file MUST be capable of representi
 | `.scaffold/tests.yaml` | Testing index | Required (Active) | Shared | Durable | GENERATED or MANAGED | Observed systems + declared policy | **P6** semantics |
 | `.scaffold/skills.lock` | Version lock | Required (Active) | Shared | Durable | GENERATED or MANAGED | Expected versions | **P4** contents |
 | `.scaffold/tasks/` | Task Books | Reserved | Shared | Durable | Deferred to P3; MUST stay compatible with the three modes | Task intent/progress | **P3** |
-| `.scaffold/changes/` | Change Records | Reserved | Shared | Durable | Deferred to P3; MUST stay compatible with the three modes | Candidate before Commit; as-built after successful Commit | **P3** |
+| `.scaffold/changes/` | Change Records | Reserved | Shared | Durable | Deferred to P3; MUST stay compatible with the three modes | Candidate before S10; as-built after successful S10 durable finalization | **P3** |
 | `.scaffold/runtime/` | Temporary local state | Reserved | **Local** | **Temporary** | N/A (local temporary; not knowledge-ownership) | Non-authoritative | P3/P5/P7 |
 | `.scaffold/runtime/local/` | Machine-local values | Optional | **Local** | Temporary / machine | N/A (local temporary) | Non-shared paths/overrides | P5 |
 | `.scaffold/ext/` | Namespaced extensions | Optional / reserved | Shared if used | Durable if tracked | GENERATED or MANAGED | Domain extras; not core | later domain phases |
+| Client bridge / derived copy / managed client region | Client integration | Conditional | Shared | Durable | GENERATED, MANAGED, or HUMAN_OWNED | Normally non-authoritative routing/compatibility artifact | P5/P4 |
 
 Active hosts MAY have empty `tasks/` and `changes/` directories. They MUST NOT put Task/Change **schemas** in `project.yaml`.
 
@@ -227,21 +228,25 @@ P1 modes remain the **only** three: **GENERATED**, **MANAGED**, **HUMAN_OWNED**.
 
 Pointer / reference is **not** a fourth mode. A canonical entry that points at existing physical authority still has exactly one of the three modes (for example a GENERATED thin pointer, a MANAGED pointer region, or a HUMAN_OWNED file containing an approved pointer).
 
+**Authority and ownership are independent dimensions.** Authority answers whether an artifact is a source of truth. Ownership answers how Scaffold may create, manage, update, or remove an artifact or bounded region. A non-authoritative artifact MAY still be Scaffold-owned; an ownership mode MUST NOT imply authority.
+
 **Reference does not transfer ownership.** If `docs/project/architecture.md` references `docs/engine/architecture.md`, Scaffold ownership of the entry does **not** make the physical target Scaffold-owned. The target retains its own ownership. The registry covers artifacts Scaffold may actually touch. Merely referenced HUMAN_OWNED authorities do not become writable.
 
 **Canonical registry location:** `.scaffold/project.yaml`.
 
 MUST NOT add `.scaffold/ownership.yaml` or another `.scaffold/` root file for ownership.
 
-The registry MUST be capable of identifying every Scaffold-touched authoritative artifact and assigning **exactly one** whole-artifact mode: GENERATED, MANAGED, or HUMAN_OWNED.
+The registry MUST be capable of identifying every **shared durable Scaffold-touched artifact**, whether authoritative or non-authoritative, and assigning **exactly one** whole-artifact mode: GENERATED, MANAGED, or HUMAN_OWNED.
 
 For MANAGED artifacts, the registry MUST also be able to identify the approved managed-region ids whose actual boundaries are represented by managed markers.
+
+Coverage includes, where Scaffold durably creates or manages them: authoritative generated artifacts, thin client bridges, generated derived client copies, managed regions inside existing client files, and other durable compatibility artifacts. Ordinary local ephemeral `.scaffold/runtime/` state does **not** require durable registry entries.
 
 Exact field grammar is later work.
 
 **Chosen representation (combination):**
 
-1. **Central ownership registry in `project.yaml`:** every Scaffold-touched authoritative path → one whole-artifact mode.
+1. **Central ownership registry in `project.yaml`:** every shared durable Scaffold-touched path → one whole-artifact mode, regardless of authority role.
 2. **Embedded managed regions** (only for MANAGED files): explicit begin/end bounds with a unique id.
 
 Whole-file GENERATED: Scaffold MAY regenerate the artifact per Contract.  
@@ -371,7 +376,7 @@ Location: `.scaffold/skills.lock`. Shared and durable. Declares expected Scaffol
 | Path | Role | Owner of schema |
 | --- | --- | --- |
 | `tasks/` | Canonical Task Books; shared durable | **P3** |
-| `changes/` | Canonical Change Record namespace. During Submit a finalized **candidate** MAY exist here **before** Commit. After Commit **succeeds**, that same record becomes durable as-built history. If Commit fails, it MUST NOT be described as successfully submitted history. Candidate/final representation is **P3**. | **P3** |
+| `changes/` | Canonical Change Record namespace. During Submit a finalized **candidate** MAY exist here **before** S10. After S10 durable finalization **succeeds**, that same logical record content becomes durable as-built history. If S10 fails or is interrupted, it MUST NOT be described as successfully submitted history. Candidate/final representation is **P3**. | **P3** |
 | `runtime/` | Temporary local: Adoption Session, Develop Session, caches, `local/` | **P3/P5/P7**; not knowledge |
 
 `runtime/` MUST NOT be canonical project knowledge, MUST NOT be required durable handoff, MUST normally be SCM-ignored, MUST have cleanup.
@@ -452,7 +457,7 @@ MUST NOT silently fabricate reconciliation. The mismatch is a detectable inconsi
 
 `CLAUDE.md`, Cursor rules, Codex config, future clients MUST be **thin**: tool wiring, rare client constraints, pointer to AGENTS / canonical knowledge.
 
-They MUST NOT be independent encyclopedias. If a client format technically requires a copy: one source is canonical; copies MUST be one-way derived/generated, not hand-synced.
+They MUST NOT be independent encyclopedias. If a client format technically requires a copy: one source is canonical; copies MUST be one-way derived/generated, not hand-synced. When Scaffold durably creates or manages a bridge, derived copy, or client-file region, the ownership registry MUST cover that artifact or region even though it remains non-authoritative.
 
 Client-entry **strategies** remain P1: PRESERVE / MANAGED_UPDATE / THIN_BRIDGE / DEFER. Generic Plan actions remain the five P1 classes.
 
@@ -518,7 +523,7 @@ Prefer **index / reference** existing authority over copy / rewrite / reorganize
 
 ## 32. No-SCM project
 
-Status MUST be able to say SCM unavailable / not configured. MUST NOT invent Git/P4 state. Freshness MAY be partial / UNKNOWN. Submit limitations are **P8**.
+Status MUST be able to say SCM unavailable / not configured. MUST NOT invent Git/P4 state. Freshness MAY be partial / UNKNOWN. Submit-S10 still requires durable finalization, but MUST NOT pretend an SCM Commit occurred; **P8** owns the atomic/conflict-detectable no-SCM finalization mechanism.
 
 ---
 
@@ -538,6 +543,8 @@ These are **two dimensions**. They MUST NOT be a single exclusive status enum.
 | **RECOVERY_REQUIRED** | Partial/broken Scaffold state is unsafe to continue blindly. |
 
 Mapping from P1 names: in-progress/interrupted → **ADOPTING**; needs recovery/re-planning → **RECOVERY_REQUIRED**.
+
+An interrupted or uncertain migration after persistent mutation begins also uses **RECOVERY_REQUIRED** when coherent safe completion cannot be proven. Such a host MUST NOT return to normal ACTIVE use merely because some planned actions ran; P4 defines migration execution/recovery semantics and P5 applies them.
 
 ### B. Maintenance conditions
 
@@ -582,7 +589,7 @@ Compatibility MUST NOT be assumed silently. Detailed protocol: **P4**.
 | **P5** | Creating/updating these artifacts in practice; Full / Refresh / Compatibility; freshness maintenance |
 | **P6** | `tests.yaml` **execution**, Test Matrix, native tests, Evidence |
 | **P7** | Task-driven edits; Develop Session |
-| **P8** | Diff-derived consistency and test completeness; human gate; final Change Record; Commit/Push |
+| **P8** | Diff-derived consistency and test completeness; `SUBMIT_AUTHORIZED`; final Change Record; SCM Commit or no-SCM durable finalization; optional Push |
 
 ---
 

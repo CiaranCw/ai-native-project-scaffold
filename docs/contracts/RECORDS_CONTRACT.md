@@ -6,7 +6,15 @@ It does **not** implement Develop, Submit, Test, YAML parsers, validators, hashi
 
 **Normative words:** MUST, MUST NOT, SHOULD, MAY.
 
-**Authority order for this phase:** [CONSTITUTION.md](CONSTITUTION.md) → this Records Contract together with [PROJECT_CONTRACT.md](PROJECT_CONTRACT.md) → [ADOPTION_CONTRACT.md](ADOPTION_CONTRACT.md) → [../architecture/V2_ARCHITECTURE.md](../architecture/V2_ARCHITECTURE.md) → [../architecture/PROJECT_LAYOUT.md](../architecture/PROJECT_LAYOUT.md) → [../architecture/ADOPTION_FLOW.md](../architecture/ADOPTION_FLOW.md) → [../architecture/RECORD_LIFECYCLES.md](../architecture/RECORD_LIFECYCLES.md) → ADR → README. Constitution wins on product rules. This contract MUST NOT silently redefine P0/P1/P2.
+**Authority is topic-scoped, not “later phase wins.”**
+
+- [CONSTITUTION.md](CONSTITUTION.md) owns the highest product-wide invariants.
+- [ADOPTION_CONTRACT.md](ADOPTION_CONTRACT.md) owns Adoption lifecycle, approval envelope, resume/recovery behavior, and B1–B9 semantics.
+- [PROJECT_CONTRACT.md](PROJECT_CONTRACT.md) owns host structure, ownership model, and project lifecycle/maintenance representation.
+- This Records Contract owns record representation, record lifecycle, record retention, record relationships, and record-specific concurrency/provenance semantics.
+- [SKILL_CONTRACT.md](SKILL_CONTRACT.md) owns Skill package, routing, version, compatibility, and migration protocol within those higher invariants.
+
+Architecture documents visualize their corresponding Contracts and do not reverse this topic ownership. For Adoption Session specifically, P1 owns **what Adoption does** and how approval/resume/recovery behaves; P3 owns **how those facts and states are represented and retained**. P3 MUST NOT use record representation semantics to override P1 Adoption behavior.
 
 P3 freezes **how Scaffold records intent, temporary Develop provenance, and durable submitted facts**. Runtime behavior belongs to later phases unless this contract names a required invariant.
 
@@ -44,7 +52,7 @@ There are exactly **three canonical development record** kinds:
 | --- | --- | --- |
 | **Task Book** | What are we trying to do, how is it divided, and where are we now? | Development **plan / progress**. NOT final submitted truth. NOT the physical Diff. |
 | **Develop Session** | What state transition was explicitly observed during **one** Develop execution? | **Temporary advisory provenance**. NOT repository truth. NOT human-authorship proof. |
-| **Change Record** | What actually ended up in the final submission candidate and became durable after successful Commit? | Durable **submitted-change summary** derived from **real** final repository state. The repository / SCM remains authority for the physical Diff. |
+| **Change Record** | What actually ended up in the final submission candidate and became durable after successful Submit-S10 finalization? | Durable **submitted-change summary** derived from **real** final project state. The repository/workspace and any available SCM remain authority for the physical Diff. |
 
 MUST NOT introduce another record that duplicates the lifecycle or duty of these three. MUST NOT create parallel work-log, handoff-log, scratchpad, session-history, developer-diary, or mega-CHANGELOG copies of the same development facts.
 
@@ -55,7 +63,8 @@ Other artifacts MAY exist when they have a clearly different purpose, authority,
 | **Adoption Session** | First-attach resume/recovery only. Temporary. P1 authority. |
 | **Test Report / Evidence** | What a specified test scope actually verified. P6 schema. |
 | External CI result | External verification input. Not development plan or as-built summary. |
-| Analysis / migration artifact | Bounded later-phase work. Must not clone Task/Session/Change duties. |
+| Analysis artifact | Bounded later-phase work. Must not clone Task/Session/Change duties. |
+| **Migration Execution** | Bounded operational checkpoints for P5 migration interruption/recovery. Not development plan or submitted-change history. |
 
 The four questions a later Agent MUST be able to answer without chat history:
 
@@ -77,7 +86,7 @@ P3 fills filenames **inside** P2-reserved directories. It MUST NOT add another `
 | Record | Canonical location | Shared | Durable |
 | --- | --- | --- | --- |
 | Task Book | `.scaffold/tasks/<task-id>.yaml` | YES | YES |
-| Change Record | `.scaffold/changes/<change-id>.yaml` | YES | YES after successful Commit; candidate before Commit (same path) |
+| Change Record | `.scaffold/changes/<change-id>.yaml` | YES | YES after successful Submit-S10 durable finalization; candidate before S10 (same logical content) |
 | Develop Session | `.scaffold/runtime/develop-sessions/<develop-session-id>/` | NO — local | NO — temporary |
 | Adoption Session | `.scaffold/runtime/adoption-sessions/<adoption-session-id>/` | NO — local | NO — temporary |
 
@@ -122,7 +131,7 @@ Observed-S2 is **not** stored as permanent Develop Session truth. Submit MUST ob
 
 ## 5. Common metadata and versioning
 
-Every durable YAML record, and every Session `session.yaml`, MUST be self-describing.
+Every durable canonical Task/Change YAML record, and every Adoption/Develop Session `session.yaml`, MUST be self-describing.
 
 Minimum header:
 
@@ -363,9 +372,9 @@ Frozen Task Book `status` values (exactly these four):
 | `READY_FOR_REVIEW` | Develop’s terminal success state for this Task Book (§11) |
 | `CANCELED` | Explicitly abandoned; not submitted |
 
-MUST NOT persist `SUBMITTED` (or equivalent) as a Task status that would be written **before** Commit and could lie if Commit fails.
+MUST NOT persist `SUBMITTED` (or equivalent) as a Task status that would be written **before** S10 and could lie if durable finalization fails or is interrupted.
 
-Successful submission is established through **Change Record + repository history**, not by pre-writing submitted into the Task Book.
+Successful submission is established through a **durably finalized Change Record + the host’s authoritative S10 success evidence**, not by pre-writing submitted into the Task Book.
 
 If work continues after `READY_FOR_REVIEW` and before a durable Change Record exists, `status` MUST return to `IN_PROGRESS` until §11 holds again.
 
@@ -383,7 +392,7 @@ For a standard Task Book:
 TASK_COMPLETE  =  all required Task stages are COMPLETE
 ```
 
-TASK_COMPLETE alone does **not** imply: final task-level tests accepted; TEST_COMPLETE; Structural Review pass; submission authorization; Commit readiness.
+TASK_COMPLETE alone does **not** imply: final task-level tests accepted; TEST_COMPLETE; Structural Review pass; submission authorization; S10 readiness.
 
 **READY_FOR_REVIEW** (persisted Task `status`) requires:
 
@@ -395,7 +404,7 @@ all stages COMPLETE
 
 MUST NOT mark `READY_FOR_REVIEW` merely because final tests **ran**. MUST NOT persist a separate `acceptance_met` flag; `READY_FOR_REVIEW` itself asserts that the declared Task-level `acceptance` is satisfied.
 
-READY_FOR_REVIEW is **not** submit authorization and MUST NOT start Commit / Push (Constitution).
+READY_FOR_REVIEW is **not** submit authorization and MUST NOT start S10 durable finalization or Push (Constitution).
 
 ---
 
@@ -466,7 +475,7 @@ OPEN → SEALED
 OPEN → ABORTED
 ```
 
-MUST NOT create `SUBMITTED` as a Session state. Successful Commit causes **cleanup**, not another durable Session transition.
+MUST NOT create `SUBMITTED` as a Session state. Successful S10 durable finalization causes **cleanup**, not another durable Session transition.
 
 A SEALED session remains locally available until successful Submit cleanup (or explicit cancel/stale cleanup). It MUST NOT be silently deleted while Submit is incomplete or blocked.
 
@@ -731,7 +740,7 @@ P8 owns classification **execution**. P3 freezes the classes, definitions, and p
 
 Canonical: `.scaffold/changes/<change-id>.yaml`
 
-Shared: **YES**. Durable after successful Commit: **YES**.
+Shared: **YES**. Durable after successful Submit-S10 finalization: **YES**.
 
 Generated/finalized by Submit from:
 
@@ -744,7 +753,7 @@ REVIEWED CANDIDATE DIFF
 
 MUST NOT be generated merely from Agent memory, Task Book claims, or Develop Session claims.
 
-Repository/SCM remains authority for the exact physical Diff, including the Change Record artifact in the Commit. Change Record is a **compact durable summary**, not a second diff store.
+Repository/workspace reality remains authority for the exact physical Diff. On an SCM host, the Commit Diff includes the Change Record artifact. Change Record is a **compact durable summary**, not a second diff store.
 
 ---
 
@@ -756,7 +765,7 @@ A Change Record MUST be capable of representing:
 | --- | --- |
 | `record_type`, `schema_version`, `record_id`, `created_at` | Header. `updated_at` only while still a **candidate** being regenerated. |
 | `summary` | Concise human summary |
-| `base` | Final **pre-Commit** parent/baseline (known before Commit; SCM-agnostic) |
+| `base` | Final **pre-S10** parent/baseline or project-defined base (known before durable finalization; SCM-agnostic) |
 | `affected` | Modules / areas |
 | `path_summary` | Changed-path summary (exact or grouped) |
 | `structural_summary` | Structural change summary |
@@ -771,7 +780,7 @@ MUST NOT embed: full diff, full logs, full Test Evidence, Develop Session hashes
 
 MUST NOT persist `submit_authorized: true` (or equivalent) as a reusable permission bit.
 
-MUST NOT persist `status: submitted` (or equivalent) before Commit.
+MUST NOT persist `status: submitted` (or equivalent) before successful S10 durable finalization.
 
 `tests: pass` (or similar) inside a Change Record MUST NOT automatically authorize submission. The record stores final facts. It does not grant permission. TEST_COMPLETE remains a Submit-S5 judgment (P8).
 
@@ -800,7 +809,7 @@ path_summary:
 
 MUST NOT create megabyte-scale Change Records merely to duplicate Git/Perforce.
 
-`path_summary` describes the **REVIEWED CANDIDATE DIFF** (§23). It MUST NOT recursively count or list its own `.scaffold/changes/<change-id>.yaml` as part of the change set it summarizes. The complete Commit Diff still includes that artifact; repository/SCM remains authority for that full Diff.
+`path_summary` describes the **REVIEWED CANDIDATE DIFF** (§23). It MUST NOT recursively count or list its own `.scaffold/changes/<change-id>.yaml` as part of the change set it summarizes. The complete S10-finalized result still includes that artifact/content; on SCM hosts the Commit Diff includes it. Repository/workspace reality remains authority for the full physical Diff.
 
 ### 22.2 Tasks
 
@@ -831,35 +840,35 @@ Preserve P0/P2 exactly. Do **not** add a Submit stage. Distinguish:
 | Term | Meaning |
 | --- | --- |
 | **REVIEWED CANDIDATE DIFF** | The real project/change-set reviewed through Submit-S3/S4/S5/S6 (and the Submit-S8 loop if needed). This is the **input** to Submit-S9. |
-| **COMMIT CANDIDATE TREE** | That reviewed candidate **plus** the deterministic Submit-S9 Change Record artifact. |
+| **S10 FINALIZATION CANDIDATE** | That reviewed candidate **plus** the deterministic Submit-S9 Change Record artifact/content in the representation P8 will durably finalize. On SCM hosts this is the Commit candidate tree. |
 
 ```text
 REVIEWED CANDIDATE DIFF
   → Submit-S9 finalize Change Record into .scaffold/changes/
-  → COMMIT CANDIDATE TREE = reviewed candidate + that artifact
-  → Submit-S10 Commit
+  → S10 FINALIZATION CANDIDATE = reviewed candidate + that artifact
+  → Submit-S10 Commit / Durable Finalization
 ```
 
-MUST NOT create the Change Record **after** Commit.
+MUST NOT create the Change Record **after** S10.
 
 The Change Record `path_summary` describes the **REVIEWED CANDIDATE DIFF**. It MUST NOT recursively include itself.
 
 Any Submit-S9 mutation **other than** that expected deterministic Change Record finalization is **not** silently exempt from candidate-bound review. Submit-S9 MUST NOT mutate Task Books (see §28.3).
 
-If the reviewed candidate **materially** changes before retry (including after Submit-S7/S8 sync): the Change Record MUST be regenerated or revalidated **before** the next Commit attempt. A Change Record describing Candidate A MUST NOT be committed with Candidate B.
+If the reviewed candidate **materially** changes before retry (including after Submit-S7/S8 sync): the Change Record MUST be regenerated or revalidated **before** the next S10 attempt. A Change Record describing Candidate A MUST NOT be durably finalized with Candidate B.
 
-If only the Commit attempt failed and the candidate record representation is unchanged: the same candidate record MAY be retried.
+If only the S10 attempt failed and the candidate record representation is unchanged: the same candidate record MAY be retried.
 
 ---
 
 ## 24. Candidate vs durable semantics
 
-Publication is **contextual**. There is no second Commit solely to flip a status field.
+Publication is **contextual**. There is no second operation solely to flip a status field.
 
 | Context | Meaning |
 | --- | --- |
-| Record exists in the working tree / index and is **not** in a successful Commit | **Candidate** Change Record |
-| **Same bytes** are contained in a **successful** Commit | **Durable as-built** Change Record |
+| S9-finalized record exists but authoritative S10 success has **not** occurred | **Candidate** Change Record |
+| The same S9-finalized logical content/representation is included in a **successful** S10 durable finalization | **Durable as-built** Change Record |
 
 **“Same bytes”** means the exact Change Record content representation **selected/staged for the SCM commit after** repository-configured normalization / clean filtering (P2 already recognizes CRLF/LF and repository text policy).
 
@@ -871,13 +880,15 @@ It does **not** require raw Windows working-tree bytes to equal the committed bl
 | SCM without such filtering | The finalized serialized record bytes |
 | No SCM | The project-defined finalized record representation (P8) |
 
-The candidate Change Record MUST NOT be rewritten after Commit merely to become “submitted.” MUST NOT invent a second post-Commit record mutation. This contract does **not** design Git-specific runtime filtering.
+The candidate Change Record MUST NOT be rewritten after S10 merely to become “submitted.” MUST NOT invent a second post-finalization record mutation. This contract does **not** design Git-specific runtime filtering or the no-SCM publication mechanism.
 
-If Commit fails: the record remains an uncommitted candidate. MUST NOT be described as successfully submitted history.
+If S10 fails or is interrupted: the record remains a candidate. MUST NOT be described as successfully submitted history.
 
-This avoids lying if Commit fails, avoids a self-referential Commit SHA, and avoids a second mutation after Commit.
+This avoids lying if durable finalization fails, avoids a self-referential Commit SHA on SCM hosts, and avoids a second content mutation after S10.
 
-No-SCM: do not invent a revision. “Durable” then means P8’s project-defined successful finalization of that candidate (P8 owns limitations). Session cleanup follows that successful durable finalization, not Push, and not an invented SHA.
+For an SCM host with Commit capability, S10 success is the successful Commit containing the finalized record representation. For a no-SCM host, S10 success is a P8-defined **atomic or conflict-detectable durable finalization/publication** of that candidate. It MUST be durably distinguishable after restart, MUST NOT pretend a Git/SCM Commit occurred, and MUST NOT create false submitted history on failure or interruption. P8 owns the concrete recoverable success marker/publication mechanism.
+
+Before S10 success, the record remains candidate/not-yet-durable as-built history. After S10 success, the same S9-finalized logical content becomes durable as-built history; no second content rewrite is required. Session cleanup follows that successful durable finalization, not Push and not an invented revision.
 
 ---
 
@@ -897,13 +908,13 @@ MUST NOT invent a post-Commit second mutation merely to insert the Commit SHA.
 
 ## 26. Change Record immutability
 
-Once a Change Record is contained in a successful durable Commit, it SHOULD be treated as historical / immutable.
+Once a Change Record becomes durable as-built through successful S10 finalization, it SHOULD be treated as historical / immutable.
 
 Future corrections SHOULD normally create a **new change** and/or a **new corrective Change Record**, rather than rewriting old submitted history.
 
 History rewriting remains explicit exceptional human/SCM action, not normal Scaffold behavior.
 
-Candidate files MAY be replaced before a successful Commit.
+Candidate files MAY be replaced before successful S10 durable finalization.
 
 ---
 
@@ -911,7 +922,9 @@ Candidate files MAY be replaced before a successful Commit.
 
 `SUBMIT_AUTHORIZED` requires **current explicit** human authorization of **this** reviewed candidate (Constitution).
 
-P3 MUST NOT create a reusable YAML boolean such as `submit_authorized: true` that an Agent can persist and later reuse as authority to Commit.
+It is the authorization to perform Submit-S10 durable finalization for that candidate. When an SCM host realizes S10 as Commit, `SUBMIT_AUTHORIZED` is the required human Commit authorization; P3 MUST NOT introduce a second `COMMIT_AUTHORIZED` state or gate. Push remains separately and currently authorized.
+
+P3 MUST NOT create a reusable YAML boolean such as `submit_authorized: true` that an Agent can persist and later reuse as authority to perform S10.
 
 A record MAY later retain a **non-authoritative historical statement** that human authorization occurred, if P8 needs an audit note. That statement MUST NEVER grant future authorization.
 
@@ -923,13 +936,13 @@ The same principle applies to Adoption Plan approval snapshots (P1): persisted h
 
 ### 28.1 Develop Session cleanup
 
-Constitution: after successful Commit, the Develop Session **MUST** be cleaned up. P3 does not weaken that.
+Constitution: after successful Submit-S10 durable finalization, the Develop Session **MUST** be cleaned up. P3 does not weaken that.
 
 ```text
 Develop starts            → Session OPEN (Session-S0)
 Develop ends normally     → SEALED (Session-S1)
 Submit incomplete/blocked → retain
-Successful authorized Commit
+Successful authorized S10 durable finalization
   + durable Change Record established
                           → Submit-S12 MUST clean corresponding
                             completed SEALED Develop Sessions
@@ -940,9 +953,9 @@ In this storage model, cleanup means **deleting** the corresponding local Sessio
 
 OPEN Sessions MUST NOT be silently deleted. If an OPEN Session unexpectedly conflicts with finalization, surface it for P8 / human handling rather than pretending cleanup succeeded.
 
-If mandatory post-Commit cleanup fails because of a local operational error: report the cleanup failure and retry cleanup. MUST NOT rewrite or invalidate the successful Commit solely for that reason.
+If mandatory post-S10 cleanup fails because of a local operational error: report the cleanup failure and retry cleanup. MUST NOT rewrite or invalidate the successful durable finalization solely for that reason.
 
-If the task is **CANCELED**: explicit cleanup MAY remove Sessions. That is not the successful-Commit rule.
+If the task is **CANCELED**: explicit cleanup MAY remove Sessions. That is not the successful-S10 rule.
 
 A stale detector MAY **prompt** cleanup of stale/ABORTED Sessions. MUST NOT silently delete an **OPEN** Session. Temporary memory MUST NOT accumulate unboundedly (Constitution principle 10).
 
@@ -950,17 +963,17 @@ ABORTED Sessions MAY be removed by explicit cleanup or stale prompt; they MUST N
 
 ### 28.2 Task Book after successful submission
 
-After a successful Commit represented by a Change Record:
+After successful S10 durable finalization represented by a Change Record:
 
 - the Task Book becomes **historical task evidence**
 - it SHOULD normally stop mutating
 - lasting role: what was intended, how work was staged, what task-level acceptance was reached
 - Change Record describes what actually shipped in the **REVIEWED CANDIDATE DIFF**
-- repository history describes the exact physical Commit Diff (including the Change Record artifact)
+- repository/workspace reality and the host’s S10 success evidence describe the exact finalized result (including the Change Record artifact/content)
 
 MUST NOT rewrite the Task Book to pretend unplanned final changes were always part of the original plan.
 
-Historicity is **contextual**: a Task Book is historical when a **durable as-built** Change Record lists its `record_id` **and** repository history contains that durable Change Record. Until that Commit succeeds, `READY_FOR_REVIEW` is **not** submitted history.
+Historicity is **contextual**: a Task Book is historical when a **durable as-built** Change Record lists its `record_id` **and** authoritative S10 success evidence establishes that durable finalization. Until S10 succeeds, `READY_FOR_REVIEW` is **not** submitted history.
 
 No Task-side Change Record back-reference is required or permitted as a contract field.
 
@@ -973,7 +986,7 @@ No Task-side Change Record back-reference is required or permitted as a contract
 - **not required** for interpretation
 - allowed to become non-resolvable after runtime cleanup
 
-After successful Commit, a historical Task Book MUST already be understandable without `runtime/`. Durable provenance lives in the Change Record as a compact summary. MUST NOT copy Session hashes or patches into the Task Book.
+After successful S10, a historical Task Book MUST already be understandable without `runtime/`. Durable provenance lives in the Change Record as a compact summary. MUST NOT copy Session hashes or patches into the Task Book.
 
 If P8 chooses to remove or compact operational Session IDs, that mutation MUST occur **before** the candidate is finalized through Submit-S3 / S4 / S5 / S6 review and human authorization.
 
@@ -1036,6 +1049,55 @@ MUST NOT silently delete an active/recoverable adoption state.
 
 ---
 
+## Migration Execution operational artifact
+
+A migration MAY use a bounded operational **Migration Execution** artifact/session so P5 can reason about interruption after Apply begins. It is **not** a fourth canonical development record, not a Change Record replacement, and not development handoff history. P5 owns its exact path/schema and runtime use; any representation MUST remain within P2-approved storage/ownership boundaries and survive process restart while recovery may be required.
+
+Minimum representation obligations:
+
+- migration plan identity/content binding
+- source host state/fingerprint
+- source `skills.lock`
+- relevant source record/metadata generation
+- target intent
+- approved mutation envelope
+- current execution state
+- approved actions/checkpoints completed and remaining
+- observed expected state needed for recovery
+- rollback/recovery information where the plan defines it
+- timestamps and concise blocker/error facts
+
+It MUST NOT persist human approval as a reusable permission bit. A remembered approval observation is revalidation input only.
+
+Frozen execution states:
+
+| State | Representation meaning |
+| --- | --- |
+| **PREPARED** | Execution context is bound to the plan, source state, lock, generations, target intent, and mutation envelope. This does **not** mean approval is currently granted. Before first mutation, bindings MUST be revalidated and valid current Migration Plan Approval MUST exist. |
+| **APPLYING** | Persistent mutation has begun. Checkpoints MUST show completed/remaining approved actions and enough observed expected state for deterministic recovery reasoning. Universal rollback is **not** required. |
+| **VALIDATING** | Approved mutation actions ran, but required post-apply validation has not established successful migration. Normal operation MUST NOT treat migration as complete. |
+| **COMPLETED** | Approved actions and required validation succeeded. P5 may then update/clear applicable P2 maintenance/recovery state and clean temporary execution state according to its lifecycle. |
+| **RECOVERY_REQUIRED** | Partial/uncertain mutation, unexpected divergence, failed coherence validation, or an unsafe-to-decide restart prevents proof of safe completion. P2 `RECOVERY_REQUIRED` semantics apply where host consistency is uncertain. |
+| **ABORTED** | Valid only when no persistent migration mutation occurred, or every applied mutation is proven safely reverted/neutralized and the host is coherent. Unknown partial mutation MUST be `RECOVERY_REQUIRED`, not ABORTED. |
+
+Conceptual transitions include:
+
+```text
+PREPARED → APPLYING → VALIDATING → COMPLETED
+PREPARED → ABORTED
+APPLYING / VALIDATING → RECOVERY_REQUIRED
+RECOVERY_REQUIRED → APPLYING or VALIDATING
+RECOVERY_REQUIRED → ABORTED only after proven safe reversion/neutralization
+```
+
+Recovery MUST observe the actual host, read checkpoints, and compare both against the approved mutation envelope. A provable expected prefix/checkpoint MAY be resumed by P5 according to the approved recovery protocol. Expected Apply actions moving the host through approved checkpoints do **not** by themselves invalidate approval applicability.
+
+Material unexpected divergence, or a changed remaining mutation envelope/assumption, invalidates the prior Migration Plan Approval’s applicability: re-evaluate compatibility, update/regenerate the plan, and obtain human re-approval before further mutation.
+
+The artifact MUST be retained while interruption/recovery reasoning is required and cleaned only according to a lifecycle that does not erase uncertain partial mutation. It MUST NOT duplicate the final submitted-change role of Change Record.
+
+---
+
 ## 30. Historical-reference behavior
 
 | From | To | Survival |
@@ -1051,7 +1113,7 @@ Change Record MUST NOT require Develop Session directories to survive.
 
 Task Book MUST NOT require deleted Sessions to survive after submission.
 
-A later Agent with only committed `tasks/` + `changes/` + repository history MUST be able to interpret intent vs as-built **without** `runtime/`.
+A later Agent with durably finalized `tasks/` + `changes/` and the host’s authoritative S10 success evidence MUST be able to interpret intent vs as-built **without** `runtime/`.
 
 ---
 
@@ -1059,13 +1121,23 @@ A later Agent with only committed `tasks/` + `changes/` + repository history MUS
 
 Task Book is a **shared mutable** record during development. Multiple Agents MAY interact with it.
 
-Lightweight stale-write guard:
+`record_revision` is a required stale-write token, but a read/re-read/write sequence alone is **not** sufficient concurrency control.
 
-- Task Book contains a monotonically increasing integer `record_revision` (start at `1`).
-- Every semantic mutation: re-read the current Task Book; verify the expected revision; write the update; increment `record_revision`.
-- A stale Agent MUST NOT blindly overwrite a newer revision.
+Every semantic Task Book mutation MUST use:
 
-MUST NOT build locking infrastructure. MUST NOT assume one Agent.
+```text
+expected revision N
++ atomic conditional publication
+→ publish revision N+1 only if the current published revision is still N
+```
+
+Two writers based on the same revision N MUST NOT both successfully publish different revision N+1 states. A successful mutation increments the revision exactly once.
+
+P3 does not freeze one implementation mechanism. P7 MAY use an atomic compare-and-swap backend, per-record file lock or serialization guard, single-writer coordinator, transactional storage, or another conflict-producing conditional publication mechanism. If compare-and-swap is unavailable, writers MUST be safely serialized. If safe serialization or conditional publication cannot be established, the mutation MUST **BLOCK** or surface a conflict; it MUST NOT silently overwrite another successful mutation.
+
+On conflict, the writer MUST re-read the current Task Book, reconcile/re-plan as appropriate, and retry as a **new mutation** against the new expected revision.
+
+P3 does not require a central or distributed lock service. This MUST NOT be interpreted to forbid local/per-record synchronization needed to satisfy the atomic conditional-publication invariant. Implementations MUST NOT assume one Agent.
 
 Develop Session is local / session-specific (one execution). Concurrent Develop executions SHOULD use **distinct** Session IDs.
 
@@ -1089,11 +1161,11 @@ MUST NOT invent SHA/changelist.
 
 Develop Session file digests still permit local provenance assistance.
 
-Change Record remains valid, though exact repository-history association MAY be limited.
+Change Record remains valid. Before S10 success it is candidate-only; after S10 success the same S9-finalized logical content is durable as-built history.
 
-P8 owns no-SCM Submit limitations. P3 MUST NOT pretend a Commit SHA exists.
+P8 owns the no-SCM atomic or conflict-detectable finalization/publication mechanism and recoverable durable success evidence. S10 success MUST be distinguishable after restart. Failure/interruption MUST NOT create false submitted history or trigger submitted-history cleanup. P3 MUST NOT pretend a Commit or Commit SHA exists.
 
-Session cleanup still requires **successful authorized durable finalization** of the Change Record as defined by P8 for that host — not Push, and not an invented revision.
+Session cleanup still requires **successful authorized durable finalization** of the Change Record as defined by P8 for that host — not Push and not an invented revision.
 
 ---
 
@@ -1104,7 +1176,7 @@ P2 left detailed Task/Change ownership to P3. P2’s three modes remain the **on
 | Record | Ownership |
 | --- | --- |
 | **Task Books** | **GENERATED** durable record artifacts. Mutable according to the Task lifecycle; that does not change the ownership mode. |
-| **Change Records** | **GENERATED** durable record artifacts finalized by Submit. Immutable after successful Commit; that does not change the ownership mode. |
+| **Change Records** | **GENERATED** durable record artifacts finalized by Submit. Immutable after successful S10 durable finalization; that does not change the ownership mode. |
 | **Develop Sessions** | LOCAL / TEMPORARY / non-authoritative. Not durable knowledge entries. |
 | **Adoption Sessions** | LOCAL / TEMPORARY / non-authoritative. Not durable knowledge entries. |
 
@@ -1127,8 +1199,8 @@ Runtime Sessions MUST NOT be registered as durable knowledge authority.
 
 | Record | Deletion |
 | --- | --- |
-| Durable committed Change Records | MUST NOT be routinely deleted |
-| Historical Task Books represented by committed changes | SHOULD NOT be routinely deleted |
+| Durable S10-finalized Change Records | MUST NOT be routinely deleted |
+| Historical Task Books represented by durably finalized changes | SHOULD NOT be routinely deleted |
 | Temporary runtime Sessions | Cleaned by lifecycle rules (§28, §29) |
 | Draft / canceled Task Books with no durable historical value | MAY be removed only through **explicit** project/user action |
 
@@ -1142,10 +1214,10 @@ MUST NOT silently clean history. MUST NOT accumulate unbounded session logs (Con
 | --- | --- |
 | **P3** (this contract) | Data/lifecycle contracts: schemas, IDs, states, provenance classes, cleanup invariants, candidate/durable publication |
 | **P4** | Skill package, Skill routing, Rule loading, `skills.lock` contents, compatibility/migration protocol |
-| **P5** | Adoption execution, Understand Full / Refresh / Compatibility, Adoption Session **operational use** |
+| **P5** | Adoption execution, Understand Full / Refresh / Compatibility, Adoption Session **operational use**, Migration Execution operational use |
 | **P6** | Test Report/Evidence schema, test execution, Test Matrix, evidence storage/resolution, native tests, Game Legibility runtime |
 | **P7** | Task-driven Develop behavior; creating/updating Task Books in practice; creating/sealing Develop Sessions; Repair Mode |
-| **P8** | Observed-S2; provenance classification **execution**; Structural Review; Knowledge Consistency; Test Completeness; human authorization; Change Record finalization; Commit/Push; Session cleanup |
+| **P8** | Observed-S2; provenance classification **execution**; Structural Review; Knowledge Consistency; Test Completeness; candidate-bound human authorization; Change Record finalization; SCM Commit or no-SCM durable finalization; optional Push; Session cleanup |
 
 P3 MUST NOT implement those runtimes.
 
@@ -1161,7 +1233,7 @@ P3 MUST NOT implement:
 - Test Evidence schema or Test runner
 - Develop runtime or Submit runtime
 - automatic cleanup code, hashing implementation, or patch generator
-- locks / database / agent-memory service / changelog generator
+- central/distributed lock service, database mandate, agent-memory service, or changelog generator (local/per-record synchronization needed by §31 remains allowed)
 
 ---
 
@@ -1174,7 +1246,7 @@ P3 only makes those advisory mechanics precise:
 1. **`UNATTRIBUTED`** is the honest fallback when Session/baseline/overlay evidence cannot safely establish a tighter class (including human-only Submit).
 2. **`MIXED_CHANGE`** includes “already dirty, then Develop edited” and “Session gap,” as well as Develop-touched paths whose Observed-S2 diverges from Session-S1, so they are not mislabeled `DEVELOP_KNOWN` or `PREEXISTING_CHANGE`.
 3. **`PREEXISTING_CHANGE`** and **`POST_DEVELOP_ADDITIONAL`** require the Session boundary-overlay evidence in §16 and §19. Insufficient evidence → `UNATTRIBUTED`.
-4. Task “completed / historical” after success is **contextual** (durable Change Record listing the Task Book + repository history), not a pre-Commit `SUBMITTED` field.
+4. Task “completed / historical” after success is **contextual** (durable Change Record listing the Task Book + authoritative S10 success evidence), not a pre-S10 `SUBMITTED` field.
 
 Do not silently patch P0 documents. If an implementer believes a later runtime conflicts with Constitution, stop and raise a human design question.
 
@@ -1437,21 +1509,22 @@ Contract-level behavior. No fixtures.
 | **M** Human-only; no Task Book and no Session | Submit still starts. TASK_COMPLETE = NOT APPLICABLE. Provenance typically UNATTRIBUTED. MUST NOT synthesize a Task Book. |
 | **N** Task exists but manual/external changes exceed Task scope | Task Book MUST NOT be silently rewritten. Extra paths still count in the real Diff. Provenance classes apply. P8 reviews/resolves. |
 | **O** Several Task Books enter one Submit candidate | One Change Record MAY list multiple `task_book_ids`. Each listed Task Book SHOULD not be reused afterwards once that Change Record is durable. |
-| **P** Submit sync changes the final Diff after a Change Record candidate existed | Candidate A record MUST NOT ship with Candidate B. Regenerate/revalidate Change Record before the next Commit. Prior S6 authorization is invalid (Constitution). |
-| **Q** Commit fails after Change Record was finalized | Record remains a **candidate**. MUST NOT be described as submitted history. No SUBMITTED field to lie with. Retry the same staged/normalized record if the reviewed candidate is unchanged; otherwise regenerate. |
-| **R** Commit succeeds but Push is not authorized | Change Record representation in the Commit is durable as-built. Submit-S12 MUST clean corresponding completed SEALED Sessions. Push remains optional and separately authorized. |
-| **S** Successful Commit cleans Develop Sessions | Submit-S12 MUST delete corresponding completed SEALED Session directories. Task Book is not mutated at S9 for compaction. `develop_session_ids` if still present are advisory and not required. Push not required. |
+| **P** Submit sync changes the final Diff after a Change Record candidate existed | Candidate A record MUST NOT ship with Candidate B. Regenerate/revalidate Change Record before the next S10 attempt. Prior S6 authorization is invalid (Constitution). |
+| **Q** S10 fails after Change Record was finalized | Record remains a **candidate**. MUST NOT be described as submitted history. No SUBMITTED field may lie. Retry the same finalized representation if the reviewed candidate is unchanged; otherwise regenerate. Completed Develop Sessions remain retained. |
+| **R** SCM Commit succeeds but Push is not authorized | Change Record representation in the Commit is durable as-built. Submit-S12 MUST clean corresponding completed SEALED Sessions. Push remains optional and separately authorized. |
+| **S** Successful S10 cleans Develop Sessions | Submit-S12 MUST delete corresponding completed SEALED Session directories. Task Book is not mutated at S9 for compaction. `develop_session_ids` if still present are advisory and not required. Push not required. |
 | **T** Binary/large file touched by Develop | Manifest + digests + kind/class. MUST NOT store the body. Provenance still works from digests. |
 | **U** Sensitive local file touched | MUST NOT store a content patch. Metadata/digest only if safe. Not a secrets product. |
 | **V** External CI/human Test Evidence referenced | Opaque `evidence_ref.locator` only. P6 owns schema/resolution. MUST NOT copy CI logs into Task/Change records. |
 | **W** Stale/open Develop Session exists | MUST NOT silently delete OPEN. Stale detector MAY prompt. OPEN/ABORTED Sessions do not complete a DEVELOP_KNOWN chain. |
 | **X** Adoption interrupted and resumed | Session retained (`INTERRUPTED`/`BLOCKED`) with baseline, plan digest, steps, mutations, pending validation. P5 revalidates Plan identity, host, approval. `observed_approved` is not standing permission. |
 | **Y** Historical Task Book after Session cleanup | Task Book (Session IDs advisory / not required) + Change Record + repository Diff suffice. MUST NOT require `runtime/develop-sessions/` to understand history. MUST NOT depend on an S9 Task Book mutation. |
-| **Z** Two Agents update the same Task Book from stale revisions | Writer with old `record_revision` MUST NOT overwrite. Re-read, reconcile, increment. No lock service. |
-| **AA** No SCM project | `baseline.kind: none` or `unavailable`. No invented SHA. Digests still assist provenance. Change Record valid; history association may be limited (P8). |
+| **Z** Two Agents update the same Task Book from revision N | Atomic conditional publication permits at most one N→N+1 result. The other writer gets conflict/block, re-reads, reconciles/re-plans, and retries as a new mutation. Re-read/re-read/write without CAS or serialization is insufficient. |
+| **AA** No SCM project | `baseline.kind: none` or `unavailable`. No invented SHA or Commit. Digests still assist provenance. P8 provides atomic/conflict-detectable durable S10 finalization whose success survives restart; failure does not create submitted history or cleanup Sessions. S11 is N/A. |
 | **AB** Change Record would otherwise need its own final Commit SHA | Forbidden. Record stores pre-Commit `base` only. SCM history binds the Commit to the record. |
 | **AC** Unplanned extra file neither Session-covered nor clearly pre-existing | UNATTRIBUTED. Insufficient S0/S1 boundary evidence to prove PREEXISTING or POST. Still part of actual Diff. Not an error. Timestamps/mtimes alone MUST NOT promote it to POST. |
 | **AD** Task Book says tests complete but actual Diff adds another module | Planned Task tests ≠ TEST_COMPLETE. Submit derives required tests from actual Diff + `tests.yaml` + Task Book + policy. Extra module still requires its tests. |
+| **AE** Migration Apply interrupted after persistent mutation begins | Retain Migration Execution checkpoints; use RECOVERY_REQUIRED unless safe completion or coherent reversion is proven. Resume only from a provable approved checkpoint/prefix. Unexpected divergence invalidates approval applicability and requires re-evaluation, updated plan, and human re-approval. |
 
 ---
 
@@ -1481,15 +1554,16 @@ Agents implementing later phases MUST preserve:
 | R | Simple task stays lightweight using the same schema |
 | S | Multiple Sessions compose deterministically |
 | T | Change Record never depends on retained Session files |
-| U | Change Record is finalized before Commit |
-| V | Commit failure does not create false submitted history |
+| U | Change Record is finalized at S9 before S10 |
+| V | S10 failure/interruption does not create false submitted history |
 | W | No final Commit SHA inside the same Change Record |
 | X | No persisted boolean grants Submit authorization |
-| Y | Successful authorized Commit + durable Change Record → Submit-S12 MUST clean corresponding completed SEALED Sessions; Push not required |
+| Y | Successful authorized S10 + durable Change Record → Submit-S12 MUST clean corresponding completed SEALED Sessions; Push not required |
 | Z | Task Book remains understandable after Session cleanup without an S9 Task mutation |
 | AA | Runtime Sessions are local/temporary |
 | AB | No chain-of-thought/chat logs are stored |
 | AC | Large/binary/sensitive files do not require body copies |
-| AD | Task Book stale writes are detectable via `record_revision` |
-| AE | No-SCM is supported |
-| AF | P4–P8 runtimes are not specified as implementations here |
+| AD | `record_revision` participates in atomic conditional publication; stale writes cannot both publish N+1 |
+| AE | No-SCM has durable S10 success semantics without pretending an SCM Commit |
+| AF | Migration interruption retains bounded recovery checkpoints without becoming a canonical development record |
+| AG | P4–P8 runtimes are not specified as implementations here |
