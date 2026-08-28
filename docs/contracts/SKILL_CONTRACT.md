@@ -49,7 +49,7 @@ It does **not** cover Skill business workflows (P5–P8), Test Evidence schema (
 | **Canonical package** | The Distribution-side Skill package identified by `skill_id` + `skill_version`. |
 | **Lock** | `.scaffold/skills.lock` — exact **expected** Skill identities/versions for this host. |
 | **Actual package** | The package the local Distribution Resolver found and would execute. |
-| **Selected Distribution Release** | The exact, explicitly identifiable Distribution instance/release selected to perform first attachment before host lock authority exists. |
+| **Selected Distribution Release** | The exact, explicitly identifiable Distribution instance/release and its coherent exact core-package set selected to perform first attachment before host lock authority exists. |
 | **Pre-Adoption Bootstrap Preflight** | Distribution-anchored Compatibility Preflight context used only for legitimate first attachment before host Scaffold identity/lock exists. |
 | **Host Compatibility Preflight** | Host-anchored Compatibility Preflight context that evaluates established host metadata/lock against actual manifests. |
 | **Compatibility Preflight** | One Distribution support layer that selects the applicable preflight context and establishes safe resolution **before** a Skill starts. Not a fifth Skill. |
@@ -841,10 +841,24 @@ Before host lock authority exists, bootstrap resolution MUST be anchored to an e
 
 If multiple possible releases/packages exist and the invoked Distribution release cannot be uniquely determined: MUST NOT guess. **BLOCK** and require explicit release resolution/selection.
 
+Before Understand `bootstrap` may execute, the actual resolved bootstrap Understand package MUST be established as the **exact Understand package pinned by that Selected Distribution Release’s coherent core-package set**. This exact identity relation includes, as applicable under the existing package/release rules:
+
+- `skill_id` is `understand`
+- actual `skill_version` equals the release-pinned Understand version
+- actual package/release identity corresponds to that released package member
+- immutable package/release identity and integrity checks pass
+
+Matching `skill_id` and `skill_version` strings alone MUST NOT establish this relation when released-package identity or integrity cannot be established. A mutated or otherwise INVALID package does not become the release-pinned package merely because those strings match.
+
+If the actual resolved bootstrap Understand does not exactly match the release-pinned Understand identity: **BLOCK before Understand bootstrap executes** and require explicit release/package resolution. Pre-Adoption Bootstrap Preflight MUST NOT use the established-host `COMPATIBLE` substitution model, silently execute or substitute the alternative package, or treat the mismatch as `EXACT`, `COMPATIBLE`, or a new compatibility-result value.
+
+If a different Understand package is intended, a coherent Distribution Release/core-package set that pins that exact intended package MUST be explicitly selected/resolved, then Pre-Adoption Bootstrap Preflight MUST be rerun. P4 does not freeze how releases are installed, acquired, or selected.
+
 Pre-Adoption Bootstrap Preflight MUST at minimum establish:
 
 - Selected Distribution Release identity
-- actual Understand package identity and `skill_version`
+- the Selected Distribution Release’s pinned Understand package identity/version
+- actual Understand package identity and `skill_version`, and its exact identity binding to that release-pinned package
 - intrinsic package validity (`VALID` / `INVALID`)
 - immutable release identity/integrity as applicable
 - Understand declares/supports `bootstrap`
@@ -878,11 +892,21 @@ P4 specializes the package/version portion of the existing P1 B3 Adoption Plan. 
 - exact intended initial `.scaffold/skills.lock` values
 - mutation envelope that creates/normalizes host metadata and the initial lock
 
+These are not independent arbitrary facts. For Understand, the Plan MUST preserve one coherent identity relation:
+
+```text
+Selected Distribution Release pinned Understand
+= actual resolved bootstrap Understand
+= initial skills.lock expected Understand
+```
+
+The intended `develop`, `test`, and `submit` lock entries MUST come from the same coherent Selected Distribution Release/core-package set. The Plan MUST NOT combine a release-pinned Understand with a different actual bootstrap Understand or a mixed-release initial package set.
+
 The Plan remains subject to existing P1 Human Plan Approval. No host metadata or initial lock may be created before P1’s approved mutation stage merely to satisfy preflight.
 
-The initial `skills.lock` MUST contain exact expected versions for **all four** core Skills (`understand`, `develop`, `test`, `submit`) derived from the coherent Selected Distribution Release/core-package set used for Adoption. Executing only Understand during bootstrap does not permit an Understand-only lock. Version ranges, machine-local paths, secrets, and permission bits remain forbidden.
+The initial `skills.lock` MUST contain exact expected versions for **all four** core Skills (`understand`, `develop`, `test`, `submit`) derived from the one coherent Selected Distribution Release/core-package set used for Adoption. Its expected Understand identity/version MUST equal both the release-pinned and actual resolved bootstrap Understand identity/version. Executing only Understand during bootstrap does not permit an Understand-only lock. Mixed-release package sets, version ranges, machine-local paths, secrets, and permission bits remain forbidden.
 
-If, before Apply, the Selected Distribution Release identity, bootstrap Understand identity/version, intended core Skill set, initial lock content, target contract generation, or approved mutation envelope materially changes, existing Adoption Plan Approval MUST NOT silently carry over. Re-discover/re-evaluate as needed, update/regenerate the Plan, and obtain human re-approval under P1. No new permission type is created.
+If, before Apply, the Selected Distribution Release identity, its release-pinned Understand identity, actual bootstrap Understand identity/version, intended core Skill set, initial lock content, target contract generation, or approved mutation envelope materially changes—or if the required release/actual/lock identity binding otherwise no longer holds—existing Adoption Plan Approval MUST NOT silently carry over. Re-resolve/re-discover/re-evaluate as needed, update/regenerate the Plan, and obtain human re-approval under P1. No new permission type is created.
 
 ### 27.4 Authority handoff
 
@@ -1305,9 +1329,15 @@ Contract-level behavior. No fixtures.
 | **AQ** Legitimate ordinary project has no Scaffold metadata | Read-only context establishes NOT_ADOPTED with no recovery evidence. Use Distribution-anchored Pre-Adoption Bootstrap Preflight; absence of `project.yaml` / `skills.lock` is expected and is not a compatibility result. |
 | **AR** Missing lock but prior Scaffold footprint exists | MUST NOT infer bootstrap. Use P1/P2 ADOPTING / RECOVERY_REQUIRED / UNKNOWN / CONFLICTING or block semantics as evidence requires. |
 | **AS** Multiple Distribution releases are available | Selected Distribution Release must be uniquely identifiable. If invocation does not determine it, BLOCK; MUST NOT choose latest/whatever-installed Understand. |
-| **AT** Initial Adoption Plan approved | Plan binds selected release, actual bootstrap Understand version, target contract intent, exact four-Skill initial lock, and mutation envelope. Material pre-Apply source/lock change requires updated Plan and human re-approval. |
-| **AU** Initial host lock is created | Only inside the approved Adoption mutation stage. Contains exact versions for understand/develop/test/submit from the coherent selected release set; no ranges, paths, or permissions. |
+| **AT** Initial Adoption Plan approved | Plan binds one coherent relation among selected-release-pinned Understand, actual bootstrap Understand, and intended lock Understand, plus target contract intent, the same-release four-Skill lock, and mutation envelope. Material pre-Apply identity/source/lock change requires updated Plan and human re-approval. |
+| **AU** Initial host lock is created | Only inside the approved Adoption mutation stage. Its Understand entry equals the release-pinned and actual bootstrap Understand; all four exact versions come from the coherent selected release set. No ranges, paths, or permissions. |
 | **AV** Later Agent enters with another local Distribution | Reads durable host lock and runs Host Compatibility Preflight against actual packages. Bootstrap release is not a second durable version authority; no prior chat is required. |
+| **AW** Selected release pins U1; resolver provides that exact released U1 package | Exact bootstrap identity binding is established; if all other bootstrap checks pass, Understand bootstrap may proceed. |
+| **AX** Selected release pins U1; resolver provides U2 | BLOCK before Understand bootstrap. No pre-lock `COMPATIBLE` substitution and no Adoption Plan based on mismatched identities. |
+| **AY** Selected release pins U1; user intends U2 | MUST NOT combine that release set with U2. Explicitly select/resolve a coherent release set that pins U2, rerun Pre-Adoption Bootstrap Preflight, and proceed only after exact identity binding is established. |
+| **AZ** Approved Plan bound release/U1; actual package changes to U2 before Apply | Prior Plan Approval MUST NOT silently carry over. Re-resolve/re-evaluate, update or regenerate the Plan, and obtain human re-approval under P1. |
+| **BA** Package claims the same `understand` id/version but released identity/integrity cannot be established | Strings alone are insufficient. BLOCK / resolve; MUST NOT treat the package as the exact release-pinned member. |
+| **BB** After Adoption, host lock expects U1 and explicit host evaluation finds local U1.1 compatible | Normal Host Compatibility Preflight MAY return `COMPATIBLE`; the pre-adoption exact-binding rule does not remove established-host compatible substitution. |
 
 ---
 
@@ -1354,3 +1384,5 @@ Contract-level behavior. No fixtures.
 | AK | Bootstrap resolution uses a uniquely identifiable Selected Distribution Release and surfaces actual Understand version |
 | AL | Initial Adoption Plan binds selected release and exact four-Skill lock intent under P1 approval |
 | AM | Initial lock becomes the durable expected-version SSOT; bootstrap source does not remain a competing authority |
+| AN | Pre-adoption actual Understand exactly matches the Selected Distribution Release’s pinned Understand package identity before bootstrap executes |
+| AO | Initial lock Understand equals release-pinned and actual bootstrap Understand; all four entries derive from one coherent release set |

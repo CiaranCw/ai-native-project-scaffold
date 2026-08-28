@@ -23,9 +23,11 @@ This distribution repository does **not** contain Skill packages or a host lock.
         │       ▼
         │  PRE-ADOPTION BOOTSTRAP PREFLIGHT
         │  selected exact Distribution release
-        │  validates/surfaces actual Understand bootstrap package
+        │  release-pinned Understand = actual bootstrap package
+        │  validates identity/integrity before Skill execution
         │       │
-        │       └─ safe → Understand / bootstrap
+        │       ├─ exact + safe → Understand / bootstrap
+        │       └─ mismatch → BLOCK / explicit coherent release selection
         │
         ├─ established host identity/metadata/lock
         │       │
@@ -362,6 +364,9 @@ Installing a local package ≠ migrating the host.
         │       authority: explicitly Selected Distribution Release
         │       establish:
         │         exact Distribution release identity
+        │         release-pinned Understand package identity
+        │         = actual resolved bootstrap Understand
+        │         = intended initial lock Understand
         │         actual Understand id/version (surface it)
         │         package VALIDITY / immutable release identity
         │         bootstrap mode
@@ -369,8 +374,10 @@ Installing a local package ≠ migrating the host.
         │         bootstrap runtime/client/dependency capabilities
         │       × no host lock required
         │       × no invented EXACT lock comparison
+        │       × no pre-lock COMPATIBLE substitution
         │       × no “whatever/latest installed Understand”
-        │       ambiguity → BLOCK / explicit release selection
+        │       mismatch/ambiguity → BLOCK / explicit coherent
+        │                            release-package selection
         │       safe → Understand bootstrap (P1 workflow)
         │
         ├─ established/prior Scaffold host
@@ -396,12 +403,23 @@ Pre-Adoption Bootstrap Preflight and Host Compatibility Preflight are two contex
 
 ```text
 Selected Distribution Release R
-  → Bootstrap Preflight surfaces R + actual Understand version
-  → B3 Plan binds R + exact intended four-Skill initial lock
+  → coherent release set pins Understand U
+  → Bootstrap Preflight establishes actual bootstrap Understand = U
+      by package/release identity and integrity, not strings alone
+  → B3 Plan binds:
+      R pinned Understand U
+      = actual bootstrap Understand U
+      = intended initial lock Understand U
+      + develop/test/submit from the same coherent release set
   → P1 human approval
   → approved Apply creates project.yaml + skills.lock
   → skills.lock becomes durable expected-version authority
   → later Agent reads lock and uses Host Compatibility Preflight
+
+actual bootstrap Understand ≠ release-pinned Understand
+  → BLOCK before bootstrap
+  → select/resolve a coherent release that pins the intended package
+  → rerun Bootstrap Preflight
 
 × no chat-memory dependency
 × R does not remain a competing durable host version authority
