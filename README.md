@@ -20,7 +20,7 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **P5 — UNBLOCKED / NOT STARTED.**
 
-There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product. First remote Push is still pending.
+There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product. FA-1 closure does not itself publish remote refs; remote publication is a separate Git operation, and current remote/upstream state is authoritative for publication status.
 
 ## Authority
 
