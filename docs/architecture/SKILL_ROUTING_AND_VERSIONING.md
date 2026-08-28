@@ -14,34 +14,37 @@ This distribution repository does **not** contain Skill packages or a host lock.
  User intent
         │
         ▼
-    AGENTS.md          portable entry router (P2)
-        │
-        ▼
- Skill Resolver / Compatibility Preflight
+ read-only preflight context classification
    (Distribution support layer — NOT a fifth Skill)
-   reads project.yaml + skills.lock
-   inspects available manifests
         │
-        ├─ package/input INVALID → BLOCK (not a compatibility result)
-        │     (intrinsic declaration / release defects only)
+        ├─ legitimate first attachment
+        │  NOT_ADOPTED + no host identity/lock + no recovery evidence
+        │       │
+        │       ▼
+        │  PRE-ADOPTION BOOTSTRAP PREFLIGHT
+        │  selected exact Distribution release
+        │  validates/surfaces actual Understand bootstrap package
+        │       │
+        │       └─ safe → Understand / bootstrap
         │
-        └─ VALID package
-              │
-              ▼
-         current resolver / environment
-         can satisfy declared format + capabilities?
-              │
-              ├─ EXACT / COMPATIBLE → requested Skill may start
-              ├─ MIGRATION_REQUIRED → Compatibility / migration path
-              │    ACTIVE host: NEEDS_MIGRATION semantically applies
-              ├─ INCOMPATIBLE       → BLOCK
-              │    (includes known-unsatisfied VALID requires,
-              │     or well-formed format this resolver cannot use)
-              └─ UNKNOWN            → BLOCK (do not guess)
-              × current-environment miss ≠ rewrite package INVALID
+        ├─ established host identity/metadata/lock
+        │       │
+        │       ▼
+        │     AGENTS.md
+        │       │
+        │       ▼
+        │  HOST COMPATIBILITY PREFLIGHT
+        │  project.yaml + skills.lock + actual packages
+        │       │
+        │       ├─ EXACT / COMPATIBLE → requested Skill may start
+        │       ├─ MIGRATION_REQUIRED → Compatibility / migration path
+        │       ├─ INCOMPATIBLE       → BLOCK
+        │       └─ UNKNOWN            → BLOCK (do not guess)
         │
-        ▼
- understand | develop | test | submit
+        └─ partial/conflicting/uncertain Scaffold footprint
+                → ADOPTING / RECOVERY_REQUIRED / UNKNOWN /
+                  CONFLICTING or BLOCK under P1/P2
+                × missing lock alone does not mean bootstrap
 ```
 
 One user sentence → **one** top-level Skill. Nested Skills are invocations, not co-owners.
@@ -345,29 +348,63 @@ Installing a local package ≠ migrating the host.
 ## Compatibility Preflight
 
 ```text
- requested Skill
+ requested entry
         │
         ▼
- Preflight (not a Skill)
+ read-only context classification
         │
-        ├─ lock missing / incomplete / malformed
-        │     MUST NOT invent pins from whatever is installed
-        │     → Understand compatibility / recovery if that
-        │       Understand package can interpret this host generation
-        │     else BLOCK
+        ├─ legitimate NOT_ADOPTED first attachment
+        │  no established host identity / project.yaml / skills.lock
+        │  no recovery evidence
+        │       │
+        │       ▼
+        │  PRE-ADOPTION BOOTSTRAP PREFLIGHT
+        │       authority: explicitly Selected Distribution Release
+        │       establish:
+        │         exact Distribution release identity
+        │         actual Understand id/version (surface it)
+        │         package VALIDITY / immutable release identity
+        │         bootstrap mode
+        │         interpretable package format
+        │         bootstrap runtime/client/dependency capabilities
+        │       × no host lock required
+        │       × no invented EXACT lock comparison
+        │       × no “whatever/latest installed Understand”
+        │       ambiguity → BLOCK / explicit release selection
+        │       safe → Understand bootstrap (P1 workflow)
         │
-        ├─ package missing / INVALID / self-contradictory
-        │     VALIDITY BLOCK — not a compatibility result
-        │     MUST NOT score EXACT or COMPATIBLE
-        │     no generic-chat substitute
+        ├─ established/prior Scaffold host
+        │       │
+        │       ▼
+        │  HOST COMPATIBILITY PREFLIGHT
+        │       authority: project.yaml + skills.lock
+        │                  + actual local Distribution packages
+        │       package/input INVALID → validity blocker
+        │       VALID package → EXACT | COMPATIBLE |
+        │                       MIGRATION_REQUIRED |
+        │                       INCOMPATIBLE | UNKNOWN
+        │       missing/incomplete established-host lock
+        │         → consistency/recovery blocker
+        │         × do not regenerate from installed packages
         │
-        └─ VALID package
-              current environment may still fail to satisfy
-              a legal requires / package-format capability
-              → INCOMPATIBLE / UNKNOWN / distribution blocker
-              → MUST NOT rewrite the package as INVALID
-              EXACT / COMPATIBLE → start Skill
-              otherwise as above
+        └─ partial/prior/conflicting footprint or cannot tell
+                × MUST NOT fall back to bootstrap
+                → existing P1/P2 recovery/conflict/block semantics
+```
+
+Pre-Adoption Bootstrap Preflight and Host Compatibility Preflight are two contexts of one support layer. They are not Skills, lifecycle states, or compatibility-result values.
+
+```text
+Selected Distribution Release R
+  → Bootstrap Preflight surfaces R + actual Understand version
+  → B3 Plan binds R + exact intended four-Skill initial lock
+  → P1 human approval
+  → approved Apply creates project.yaml + skills.lock
+  → skills.lock becomes durable expected-version authority
+  → later Agent reads lock and uses Host Compatibility Preflight
+
+× no chat-memory dependency
+× R does not remain a competing durable host version authority
 ```
 
 ---
@@ -467,6 +504,8 @@ Ephemeral. Not a P3 canonical record. No chat / chain-of-thought storage.
  resolution still works
  skills.lock remains a persistent host artifact
  even without SCM
+ selected bootstrap Distribution release identity
+ does not depend on SCM in the ordinary host
  a lock update is still a project mutation
  P8 owns concrete submission / finalization
  SCM history / Commit exist only when SCM exists

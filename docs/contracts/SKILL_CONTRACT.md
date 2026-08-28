@@ -49,7 +49,10 @@ It does **not** cover Skill business workflows (P5–P8), Test Evidence schema (
 | **Canonical package** | The Distribution-side Skill package identified by `skill_id` + `skill_version`. |
 | **Lock** | `.scaffold/skills.lock` — exact **expected** Skill identities/versions for this host. |
 | **Actual package** | The package the local Distribution Resolver found and would execute. |
-| **Compatibility Preflight** | Distribution support layer that evaluates lock vs actual manifests **before** a Skill starts. Not a fifth Skill. |
+| **Selected Distribution Release** | The exact, explicitly identifiable Distribution instance/release selected to perform first attachment before host lock authority exists. |
+| **Pre-Adoption Bootstrap Preflight** | Distribution-anchored Compatibility Preflight context used only for legitimate first attachment before host Scaffold identity/lock exists. |
+| **Host Compatibility Preflight** | Host-anchored Compatibility Preflight context that evaluates established host metadata/lock against actual manifests. |
+| **Compatibility Preflight** | One Distribution support layer that selects the applicable preflight context and establishes safe resolution **before** a Skill starts. Not a fifth Skill. |
 | **REVIEWED CANDIDATE DIFF** | P3 term. Submit’s reviewed change-set. Unchanged here. |
 
 ---
@@ -486,7 +489,7 @@ MUST NOT contain: absolute local installation paths, credentials, runtime Sessio
 
 Do **not** create this file in this distribution repository.
 
-### 19.1 Discovery / resolution
+### 19.1 Established-host discovery / resolution
 
 ```text
 Host skills.lock
@@ -496,6 +499,8 @@ Host skills.lock
   → Compatibility Evaluation
   → execute  or  block / Compatibility
 ```
+
+This is the normal **Host Compatibility Preflight** model after host lock authority exists. Legitimate first attachment before `project.yaml` / `skills.lock` exists uses §27 **Pre-Adoption Bootstrap Preflight**, not a fabricated host lock.
 
 Exact local installation mechanism is later implementation.
 
@@ -511,7 +516,7 @@ Capable of representing:
 | optional expected `package_format_version` | Format compatibility hint |
 | optional distribution / source **identity** | Reproducible resolution — **not** a machine-local path |
 
-MUST NOT duplicate the Project Contract version already owned by `project.yaml`. Compatibility Preflight **reads** `project.yaml` instead.
+MUST NOT duplicate the Project Contract version already owned by `project.yaml`. Host Compatibility Preflight **reads** `project.yaml` instead.
 
 ---
 
@@ -808,7 +813,95 @@ There is a bootstrap problem: a Skill MUST NOT blindly run before compatibility 
 
 **Skill Resolver / Compatibility Preflight** is a **Distribution support layer**. It is **not** a fifth Skill.
 
-It MAY:
+It supports exactly two **resolution contexts**, not two Skills, workflows, compatibility enums, or lifecycle states:
+
+| Context | Authority anchor | Applies when |
+| --- | --- | --- |
+| **Pre-Adoption Bootstrap Preflight** | Explicitly Selected Distribution Release | Legitimate first attachment before host Scaffold identity and lock authority exist |
+| **Host Compatibility Preflight** | Host `project.yaml` + `skills.lock` expectations, resolved against actual local Distribution packages | Host Scaffold metadata/lock exists or prior Scaffold identity/state means normal host/recovery reasoning applies |
+
+Context selection MUST use read-only evidence and P1/P2 lifecycle semantics. It MUST NOT mutate the project or pre-create host metadata merely to make preflight succeed.
+
+### 27.1 Pre-Adoption Bootstrap Preflight
+
+This narrow context is allowed only when read-only first-contact classification can establish:
+
+```text
+ordinary project
++ legitimate NOT_ADOPTED condition
++ no established Scaffold host identity
++ no evidence requiring Adoption recovery
+```
+
+P4 does not redefine P1 B1/B2 Discovery or P2 lifecycle semantics. The support layer establishes only enough read-only context to choose the safe preflight path; Understand `bootstrap` then owns the P1 Adoption workflow.
+
+In this context, absence of `.scaffold/project.yaml` and `.scaffold/skills.lock` is expected. It MUST NOT automatically mean corruption, `INCOMPATIBLE`, package `INVALID`, or missing-lock recovery for an ACTIVE host. The absence is acceptable only because durable host authority has not yet been established.
+
+Before host lock authority exists, bootstrap resolution MUST be anchored to an exact, explicitly identifiable **Selected Distribution Release**. The invoked Distribution instance MUST expose an unambiguous release identity and a coherent exact core-package set. Resolution MUST NOT mean “use whatever Understand package happens to be installed” or silently select the newest available package.
+
+If multiple possible releases/packages exist and the invoked Distribution release cannot be uniquely determined: MUST NOT guess. **BLOCK** and require explicit release resolution/selection.
+
+Pre-Adoption Bootstrap Preflight MUST at minimum establish:
+
+- Selected Distribution Release identity
+- actual Understand package identity and `skill_version`
+- intrinsic package validity (`VALID` / `INVALID`)
+- immutable release identity/integrity as applicable
+- Understand declares/supports `bootstrap`
+- package format is interpretable by the selected/current Distribution
+- required bootstrap runtime/client capabilities are satisfied
+- bootstrap-required dependency capabilities are resolvable
+- actual Understand version is surfaced
+
+It MUST NOT require a host `project.yaml` or `skills.lock` that legitimately does not yet exist. It MUST NOT report `EXACT` from a lock comparison when no initial host lock exists. Pre-Adoption Bootstrap Preflight is a resolution context, not a sixth compatibility result.
+
+### 27.2 Missing metadata is not a bootstrap signal
+
+MUST NOT define:
+
+```text
+skills.lock missing → bootstrap
+```
+
+Missing/incomplete metadata may instead indicate interrupted Adoption, partial adoption, a corrupted previously ACTIVE host, `RECOVERY_REQUIRED`, or conflicting Scaffold footprint.
+
+If prior Scaffold identity, partial durable state, or conflicting/insufficient evidence makes legitimate first attachment unsafe to establish, preflight MUST NOT silently downgrade to bootstrap. It MUST block or use existing `ADOPTING`, `RECOVERY_REQUIRED`, `UNKNOWN`, `CONFLICTING`, and recovery semantics according to P1/P2 authority. P4 adds no lifecycle state.
+
+### 27.3 Initial Adoption Plan and lock intent
+
+P4 specializes the package/version portion of the existing P1 B3 Adoption Plan. The Plan MUST bind, directly or by stable exact reference:
+
+- Selected Distribution Release identity
+- actual bootstrap Understand package identity/version
+- target Project Contract generation/intent as applicable
+- exact intended initial four-core-Skill set
+- exact intended initial `.scaffold/skills.lock` values
+- mutation envelope that creates/normalizes host metadata and the initial lock
+
+The Plan remains subject to existing P1 Human Plan Approval. No host metadata or initial lock may be created before P1’s approved mutation stage merely to satisfy preflight.
+
+The initial `skills.lock` MUST contain exact expected versions for **all four** core Skills (`understand`, `develop`, `test`, `submit`) derived from the coherent Selected Distribution Release/core-package set used for Adoption. Executing only Understand during bootstrap does not permit an Understand-only lock. Version ranges, machine-local paths, secrets, and permission bits remain forbidden.
+
+If, before Apply, the Selected Distribution Release identity, bootstrap Understand identity/version, intended core Skill set, initial lock content, target contract generation, or approved mutation envelope materially changes, existing Adoption Plan Approval MUST NOT silently carry over. Re-discover/re-evaluate as needed, update/regenerate the Plan, and obtain human re-approval under P1. No new permission type is created.
+
+### 27.4 Authority handoff
+
+```text
+before approved initial host lock exists
+  → bootstrap resolution authority = Selected Distribution Release
+
+approved Adoption creates project.yaml + initial skills.lock
+  → normal resolution authority = durable host metadata/lock
+  → actual local Distribution packages are evaluated against that lock
+```
+
+After creation, `skills.lock` is the durable expected-version source of truth. The bootstrap-selected release MUST NOT remain a second durable host version authority. If its identity is retained as source/provenance inside the lock or historical Adoption evidence, it MUST NOT compete with the lock’s exact expected Skill entries.
+
+A later Agent with no chat history reads the durable host lock and runs Host Compatibility Preflight. It does not require the adopting Agent’s memory to determine expected versions.
+
+### 27.5 Host Compatibility Preflight
+
+For established/adopted hosts, normal lock-based behavior is unchanged. Preflight MAY:
 
 - read `project.yaml`
 - read `skills.lock`
@@ -818,8 +911,6 @@ It MAY:
 - compare package / contract compatibility **only for VALID packages**
 - decide whether a requested Skill may start
 
-It MUST NOT perform project development.
-
 An `INVALID` package is a validity blocker. It MUST NOT be scored `EXACT` or `COMPATIBLE`.
 
 A VALID package whose current environment cannot satisfy a legal prerequisite MUST NOT be rewritten as INVALID. Use `INCOMPATIBLE`, `UNKNOWN`, or an explicit resolution/distribution blocker as appropriate. MUST NOT guess.
@@ -827,6 +918,8 @@ A VALID package whose current environment cannot satisfy a legal prerequisite MU
 When compatibility **work** itself is required: route to Understand `compatibility` **if** the available Understand package declares it can safely interpret the **current host generation**.
 
 If even that cannot be established: **BLOCK** and require a compatible Distribution / explicit migration path.
+
+Compatibility Preflight MUST NOT perform project development in either context.
 
 ---
 
@@ -841,11 +934,13 @@ If an expected Skill cannot be found, has a malformed manifest, has invalid pack
 
 If a **VALID** package cannot establish supported contract compatibility: evaluate to `INCOMPATIBLE` or `UNKNOWN` as appropriate. MUST NOT guess.
 
-Active host `skills.lock` that is missing, malformed, incomplete, or lacks one of the four core Skill entries is a Scaffold consistency problem.
+An ACTIVE or previously established host whose `skills.lock` is missing, malformed, incomplete, or lacks one of the four core Skill entries has a Scaffold consistency problem.
 
 MUST NOT silently regenerate the lock from whatever is installed and continue as though nothing happened.
 
 Route to Understand Compatibility / recovery planning **where safely possible** (P5 owns operational repair). Otherwise BLOCK.
+
+This established-host rule MUST NOT be applied to legitimate first attachment merely because no initial host lock exists. Conversely, missing lock alone MUST NOT select bootstrap; §27 context classification governs.
 
 ---
 
@@ -965,6 +1060,8 @@ This supports reproducibility and multi-Agent debugging without storing chat his
 Skill resolution and version compatibility MUST NOT require Git / Perforce.
 
 `skills.lock` remains usable on no-SCM hosts. It is still a **persistent host artifact** even without SCM.
+
+A Selected Distribution Release identity used for Pre-Adoption Bootstrap Preflight MUST NOT depend on SCM being present in the ordinary host. A Distribution MAY expose its own stable release identity independently of host SCM.
 
 A lock update is still a project mutation. P8 owns the concrete submission/finalization mechanism. SCM-dependent history / Commit capabilities exist **only when SCM exists**. On a no-SCM host, Submit-S10 instead uses P8’s atomic or conflict-detectable durable finalization/publication operation; P4 freezes only that success is recoverably distinguishable after restart, failure/interruption creates no false submitted history, no Git/SCM Commit is pretended, and Submit-S11 Push is N/A.
 
@@ -1205,6 +1302,12 @@ Contract-level behavior. No fixtures.
 | **AN** Skill version change during an active Task | No silent lock rewrite. Task Book not silently rewritten. Compatibility still applies; MIGRATION_REQUIRED may block; COMPATIBLE MAY continue with surfaced difference. |
 | **AO** Compatibility succeeds; user does not want lock update | COMPATIBLE execution MAY proceed under policy. Lock stays. Difference remains explicit. MUST NOT rewrite the lock anyway. |
 | **AP** Migration interrupted during Apply | Retain bounded execution checkpoints. If safe completion is uncertain, use RECOVERY_REQUIRED. Resume only from a provable expected approved checkpoint; unexpected divergence invalidates approval applicability. ABORTED requires no mutation or proven coherent reversion. |
+| **AQ** Legitimate ordinary project has no Scaffold metadata | Read-only context establishes NOT_ADOPTED with no recovery evidence. Use Distribution-anchored Pre-Adoption Bootstrap Preflight; absence of `project.yaml` / `skills.lock` is expected and is not a compatibility result. |
+| **AR** Missing lock but prior Scaffold footprint exists | MUST NOT infer bootstrap. Use P1/P2 ADOPTING / RECOVERY_REQUIRED / UNKNOWN / CONFLICTING or block semantics as evidence requires. |
+| **AS** Multiple Distribution releases are available | Selected Distribution Release must be uniquely identifiable. If invocation does not determine it, BLOCK; MUST NOT choose latest/whatever-installed Understand. |
+| **AT** Initial Adoption Plan approved | Plan binds selected release, actual bootstrap Understand version, target contract intent, exact four-Skill initial lock, and mutation envelope. Material pre-Apply source/lock change requires updated Plan and human re-approval. |
+| **AU** Initial host lock is created | Only inside the approved Adoption mutation stage. Contains exact versions for understand/develop/test/submit from the coherent selected release set; no ranges, paths, or permissions. |
+| **AV** Later Agent enters with another local Distribution | Reads durable host lock and runs Host Compatibility Preflight against actual packages. Bootstrap release is not a second durable version authority; no prior chat is required. |
 
 ---
 
@@ -1246,3 +1349,8 @@ Contract-level behavior. No fixtures.
 | AF | No-SCM Skill resolution works |
 | AG | Missing/malformed lock or package blocks guessing |
 | AH | Migration execution has recoverable PREPARED/APPLYING/VALIDATING/COMPLETED/RECOVERY_REQUIRED/ABORTED semantics |
+| AI | Compatibility Preflight has Distribution-anchored pre-adoption and host-lock-anchored contexts without becoming another Skill |
+| AJ | Missing lock alone never implies bootstrap |
+| AK | Bootstrap resolution uses a uniquely identifiable Selected Distribution Release and surfaces actual Understand version |
+| AL | Initial Adoption Plan binds selected release and exact four-Skill lock intent under P1 approval |
+| AM | Initial lock becomes the durable expected-version SSOT; bootstrap source does not remain a competing authority |
