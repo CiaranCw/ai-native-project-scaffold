@@ -1,0 +1,9 @@
+# TEST FIXTURE — simulated submit package metadata. Not a P8 implementation.
+skill_id: submit
+skill_version: 2.0.0
+package_format_version: "1"
+entry: SKILL.md
+modes: []
+provides:
+  - submit.review
+requires: []

@@ -1,0 +1,6 @@
+skill_id: understand
+skill_version: 9.9.9
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - bootstrap

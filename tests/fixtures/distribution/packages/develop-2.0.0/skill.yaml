@@ -1,0 +1,11 @@
+# TEST FIXTURE — simulated develop package metadata. Not a P7 implementation.
+skill_id: develop
+skill_version: 2.0.0
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - normal_task
+  - repair
+provides:
+  - develop.normal_task
+requires: []

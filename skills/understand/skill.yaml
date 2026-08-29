@@ -1,0 +1,29 @@
+skill_id: understand
+skill_version: 2.0.0
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - bootstrap
+  - full
+  - refresh
+  - compatibility
+contracts:
+  constitution: "2"
+  adoption_contract: "1"
+  project_contract: "1"
+  records_contract: "1"
+  skill_contract: "1"
+  project_contract_generations:
+    - "1"
+  record_schema_capabilities:
+    adoption_session:
+      - "1"
+provides:
+  - understand.bootstrap
+  - understand.full
+  - understand.refresh
+  - understand.compatibility
+requires: []
+runtime:
+  language: python
+  min_language_version: "3.10"

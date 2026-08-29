@@ -1,0 +1,22 @@
+# TEST FIXTURE — compatible substitute for understand 2.0.0
+skill_id: understand
+skill_version: 2.0.1
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - bootstrap
+  - full
+  - refresh
+  - compatibility
+contracts:
+  project_contract_generations:
+    - "1"
+provides:
+  - understand.bootstrap
+  - understand.full
+  - understand.refresh
+  - understand.compatibility
+requires: []
+may_substitute_for:
+  - skill_id: understand
+    skill_version: "2.0.0"

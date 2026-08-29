@@ -1,0 +1,19 @@
+# TEST FIXTURE — no compatibility declaration
+skill_id: understand
+skill_version: 2.2.0
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - bootstrap
+  - full
+  - refresh
+  - compatibility
+contracts:
+  project_contract_generations:
+    - "1"
+provides:
+  - understand.bootstrap
+  - understand.full
+  - understand.refresh
+  - understand.compatibility
+requires: []

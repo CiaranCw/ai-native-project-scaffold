@@ -1,0 +1,26 @@
+# TEST FIXTURE — simulated Distribution release. Not a live host lock.
+# develop/test/submit packages below are simulated release members only.
+# They are not P6/P7/P8 Skill implementations.
+release_id: rel-r1
+schema_version: "1"
+core:
+  understand:
+    skill_id: understand
+    skill_version: "2.0.0"
+    package_digest: "9e60909a32b5fcd4e46ef782b826d70e54f10611782686c8ace407d8f9c9e7c2"
+    package_format_version: "1"
+  develop:
+    skill_id: develop
+    skill_version: "2.0.0"
+    package_digest: "76a2eb11f888e801225213464cc60daf023cbc5a46ecd25a3879f5d95272eae4"
+    package_format_version: "1"
+  test:
+    skill_id: test
+    skill_version: "2.0.0"
+    package_digest: "80ffe3dd3b4d005c547edd9c1895da24b5812b53b46160a1cbabbbac711f2377"
+    package_format_version: "1"
+  submit:
+    skill_id: submit
+    skill_version: "2.0.0"
+    package_digest: "b5cb21ba250e97271d9ab05520f21f32bbfda3d4976908e654d24a3a38010261"
+    package_format_version: "1"

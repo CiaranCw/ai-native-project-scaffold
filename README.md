@@ -18,9 +18,11 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **FA-1 — PASS / CLOSED** at `2bf5a9a96acca45ccc919dd542bc914420674316`. Independent re-audit of the current P0–P4 Foundation passed. All blocking findings are closed.
 
-**P5 — UNBLOCKED / NOT STARTED.**
+**P5 — CLOSED / BASELINED.** Understand implementation passed final design, source, and local test review. Git history is authoritative for the exact P5 baseline commit identity.
 
-There is no Skill runtime, CLI, schema package, or adoption tooling in this repository yet. Do not treat this tree as an installable product. FA-1 closure does not itself publish remote refs; remote publication is a separate Git operation, and current remote/upstream state is authoritative for publication status.
+**P6 — UNBLOCKED / NOT STARTED.**
+
+This tree is not an installable product release. Local P5 baseline does not itself publish remote refs; remote publication is a separate Git operation, and current remote/upstream state is authoritative for publication status.
 
 ## Authority
 
@@ -39,7 +41,7 @@ Read in this order:
 11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
 12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
 
-If these documents conflict, **Constitution wins**. Runtime, live `skills/` packages, and host `.scaffold/skills.lock` remain absent. P5 has not started.
+If these documents conflict, **Constitution wins**. P5 implementation notes: [docs/implementation/P5_UNDERSTAND.md](docs/implementation/P5_UNDERSTAND.md). This distribution repository must not contain a live adopted-host `.scaffold/project.yaml` or `.scaffold/skills.lock`.
 
 ## Historical v1
 
@@ -52,13 +54,15 @@ If these documents conflict, **Constitution wins**. Runtime, live `skills/` pack
 
 ## Current
 
-P0–P4 Foundation is independently audited and closed. P5 is unblocked and has **not started**.
+P0–P4 Foundation is independently audited and closed. P5 Understand is **CLOSED / BASELINED**. No P6 implementation exists yet.
 
-Until P5 starts, this repository remains foundation documents only:
+Current tree (P5 baselined, not a v2.0 release):
 
-- no Skill runtime, CLI, resolver, or validators
-- no live `skills/` packages or host `.scaffold/skills.lock` **in this distribution repository**
-- no `skills/`, `src/`, `runtime/`, `bootstrap/`, `contracts/schemas/`, `examples/`, `tests/`, or `tools/`
+- Understand package at `skills/understand/`
+- P5 runtime at `src/scaffold_p5/`
+- ordinary local P5 tests and non-authoritative fixtures at `tests/`
+- no live adopted-host `.scaffold/` lock/project state at the distribution repository root
+- no Develop / Test / Submit Skill implementations (P6–P8 remain absent)
 - no Claude / Cursor / Codex client configs
 - no v1 source tree and no fifth top-level Skill
 - no auto-commit or auto-push
@@ -84,8 +88,8 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 | **P3** | Records Contract — CLOSED / BASELINED |
 | **P4** | Skill Contract & Versioning — CLOSED / BASELINED |
 | **FA-1** | Foundation Architecture Audit — PASS / CLOSED |
-| **P5** | Understand Skill — UNBLOCKED / NOT STARTED |
-| P6 | Test Skill |
+| **P5** | Understand Skill — CLOSED / BASELINED |
+| **P6** | Test Skill — UNBLOCKED / NOT STARTED |
 | P7 | Develop Skill |
 | P8 | Submit Skill |
 | P9 | Repair Migration (into Develop Repair Mode) |
@@ -95,6 +99,6 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-**P5 — Understand Skill. Unblocked. Not started.**
+**P6 — Test Skill**
 
 This repository does **not** claim v2.0 release. P6–P12 remain future work.

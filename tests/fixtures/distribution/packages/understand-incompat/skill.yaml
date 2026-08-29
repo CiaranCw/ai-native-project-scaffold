@@ -1,0 +1,18 @@
+# TEST FIXTURE — declared incompatible with locked 2.0.0
+skill_id: understand
+skill_version: 2.3.0
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - bootstrap
+  - full
+  - refresh
+  - compatibility
+provides:
+  - understand.bootstrap
+  - understand.full
+  - understand.refresh
+  - understand.compatibility
+requires: []
+incompatible_with:
+  - "2.0.0"
