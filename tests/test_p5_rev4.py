@@ -454,8 +454,12 @@ class P5Rev4Tests(unittest.TestCase):
             set(OWNERSHIP_MODES),
             {"GENERATED", "MANAGED", "HUMAN_OWNED"},
         )
-        self.assertFalse((REPO / "src/scaffold_p6").exists())
+        self.assertTrue((REPO / "src/scaffold_p6").is_dir())
+        self.assertTrue((REPO / "skills/test").is_dir())
+        self.assertFalse((REPO / "src/scaffold_p7").exists())
+        self.assertFalse((REPO / "src/scaffold_p8").exists())
         self.assertFalse((REPO / "skills/develop").exists())
+        self.assertFalse((REPO / "skills/submit").exists())
 
     def test_rev4_session_before_project_is_recoverable(self):
         plan_data = engine(self.host).run("bootstrap").extras["plan"]

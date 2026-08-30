@@ -1,0 +1,20 @@
+skill_id: test
+skill_version: 2.0.0
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - scoped_verification
+contracts:
+  constitution: "2"
+  adoption_contract: "1"
+  project_contract: "1"
+  records_contract: "1"
+  skill_contract: "1"
+  project_contract_generations:
+    - "1"
+provides:
+  - test.scoped_verification
+requires: []
+runtime:
+  language: python
+  min_language_version: "3.10"

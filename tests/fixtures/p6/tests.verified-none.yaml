@@ -1,0 +1,6 @@
+# P6 fixture — verified no required tests. Not a live host contract.
+schema_version: "1"
+applicable: false
+applicability: NOT_APPLICABLE
+confidence: VERIFIED
+profiles: []

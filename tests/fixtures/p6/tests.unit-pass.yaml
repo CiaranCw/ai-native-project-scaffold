@@ -1,0 +1,18 @@
+# P6 fixture — one required local profile. Not a live host contract.
+schema_version: "1"
+applicable: true
+applicability: APPLICABLE
+confidence: VERIFIED
+profiles:
+  - id: unit
+    purpose: unit verification
+    required: true
+    adapter: local
+    command_ref: cmd-unit
+    working_directory: "."
+    timeout_seconds: 15
+    success:
+      exit_code: 0
+    evidence_required:
+      - command_result
+    provenance: LOCAL_EXECUTION
