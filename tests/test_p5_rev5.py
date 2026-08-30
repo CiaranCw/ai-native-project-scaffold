@@ -542,5 +542,5 @@ class P5Rev5Tests(unittest.TestCase):
         self.assertEqual(CORE_SKILLS, ("understand", "develop", "test", "submit"))
         self.assertTrue((REPO / "src/scaffold_p6").is_dir())
         self.assertTrue((REPO / "skills/test").is_dir())
-        self.assertFalse((REPO / "src/scaffold_p7").exists())
+        self.assertTrue((REPO / "src/scaffold_p7").is_dir())
         self.assertFalse((REPO / "src/scaffold_p8").exists())

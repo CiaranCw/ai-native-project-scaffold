@@ -456,9 +456,9 @@ class P5Rev4Tests(unittest.TestCase):
         )
         self.assertTrue((REPO / "src/scaffold_p6").is_dir())
         self.assertTrue((REPO / "skills/test").is_dir())
-        self.assertFalse((REPO / "src/scaffold_p7").exists())
+        self.assertTrue((REPO / "src/scaffold_p7").is_dir())
         self.assertFalse((REPO / "src/scaffold_p8").exists())
-        self.assertFalse((REPO / "skills/develop").exists())
+        self.assertTrue((REPO / "skills/develop").is_dir())
         self.assertFalse((REPO / "skills/submit").exists())
 
     def test_rev4_session_before_project_is_recoverable(self):

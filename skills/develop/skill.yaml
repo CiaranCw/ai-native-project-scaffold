@@ -1,0 +1,27 @@
+skill_id: develop
+skill_version: 2.0.0
+package_format_version: "1"
+entry: SKILL.md
+modes:
+  - normal_task
+  - repair
+contracts:
+  constitution: "2"
+  adoption_contract: "1"
+  project_contract: "1"
+  records_contract: "1"
+  skill_contract: "1"
+  project_contract_generations:
+    - "1"
+  record_schema_capabilities:
+    task_book:
+      - "1"
+    develop_session:
+      - "1"
+provides:
+  - develop.implement
+  - develop.repair
+requires: []
+runtime:
+  language: python
+  min_language_version: "3.10"
