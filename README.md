@@ -22,9 +22,11 @@ This is **not** a game-test framework. Game projects are the primary research su
 
 **P6 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Test implementation passed final design, source, and local test review. Git history and `origin/main` are authoritative for the exact P6 baseline commit identity.
 
-**P7 — ACTIVE / IMPLEMENTATION.** Develop Skill implementation is in progress. This is not P7 PASS, not P7 BASELINED, not FA-2, and not a v2.0 release.
+**P7 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Develop implementation passed final design, source, and local test review. Git history and `origin/main` are authoritative for the exact P7 baseline commit identity.
 
-This tree is not an installable product release. Remote publication of P6 does not start P8.
+**P8 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Submit implementation passed final source and test review. Git history and `origin/main` are authoritative for the exact P8 baseline commit identity.
+
+This tree is not an installable product release. Remote publication of P8 does not start FA-2 or P9.
 
 ## Authority
 
@@ -43,7 +45,7 @@ Read in this order:
 11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
 12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
 
-If these documents conflict, **Constitution wins**. P5 implementation notes: [docs/implementation/P5_UNDERSTAND.md](docs/implementation/P5_UNDERSTAND.md). P6 implementation notes: [docs/implementation/P6_TEST.md](docs/implementation/P6_TEST.md). P7 implementation notes: [docs/implementation/P7_DEVELOP.md](docs/implementation/P7_DEVELOP.md). This distribution repository must not contain a live adopted-host `.scaffold/project.yaml` or `.scaffold/skills.lock`.
+If these documents conflict, **Constitution wins**. P5 implementation notes: [docs/implementation/P5_UNDERSTAND.md](docs/implementation/P5_UNDERSTAND.md). P6 implementation notes: [docs/implementation/P6_TEST.md](docs/implementation/P6_TEST.md). P7 implementation notes: [docs/implementation/P7_DEVELOP.md](docs/implementation/P7_DEVELOP.md). P8 implementation notes: [docs/implementation/P8_SUBMIT.md](docs/implementation/P8_SUBMIT.md). This distribution repository must not contain a live adopted-host `.scaffold/project.yaml` or `.scaffold/skills.lock`.
 
 ## Historical v1
 
@@ -56,19 +58,20 @@ If these documents conflict, **Constitution wins**. P5 implementation notes: [do
 
 ## Current
 
-P0–P4 Foundation is independently audited and closed. P5 Understand and P6 Test are **CLOSED / BASELINED / REMOTELY PUBLISHED**. P7 Develop is **ACTIVE / IMPLEMENTATION**.
+P0–P4 Foundation is independently audited and closed. P5 Understand, P6 Test, P7 Develop, and P8 Submit are **CLOSED / BASELINED / REMOTELY PUBLISHED**. FA-2 is the next mandatory gate and is not started. P9 is not started.
 
-Current tree (P7 implementation, not a v2.0 release):
+Current tree (P8 baseline, not a v2.0 release):
 
 - Understand package at `skills/understand/`
 - Test package at `skills/test/`
 - Develop package at `skills/develop/`
+- Submit package at `skills/submit/`
 - P5 runtime at `src/scaffold_p5/`
 - P6 runtime at `src/scaffold_p6/`
 - P7 runtime at `src/scaffold_p7/`
-- ordinary local P5/P6/P7 tests and non-authoritative fixtures at `tests/`
+- P8 runtime at `src/scaffold_p8/`
+- ordinary local P5/P6/P7/P8 tests and non-authoritative fixtures at `tests/`
 - no live adopted-host `.scaffold/` lock/project state at the distribution repository root
-- no Submit Skill implementation (P8 remains absent)
 - no Claude / Cursor / Codex client configs
 - no v1 source tree and no fifth top-level Skill
 - no auto-commit or auto-push
@@ -96,8 +99,8 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 | **FA-1** | Foundation Architecture Audit — PASS / CLOSED |
 | **P5** | Understand Skill — CLOSED / BASELINED / REMOTELY PUBLISHED |
 | **P6** | Test Skill — CLOSED / BASELINED / REMOTELY PUBLISHED |
-| **P7** | Develop Skill — ACTIVE / IMPLEMENTATION |
-| P8 | Submit Skill |
+| **P7** | Develop Skill — CLOSED / BASELINED / REMOTELY PUBLISHED |
+| **P8** | Submit Skill — CLOSED / BASELINED / REMOTELY PUBLISHED |
 | P9 | Repair Migration (into Develop Repair Mode) |
 | P10 | Incremental Understanding / Multi-Agent |
 | P11 | Cross-Project E2E |
@@ -105,8 +108,8 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-**P7 — Develop Skill implementation**
+**FA-2 — next mandatory gate, not started**
 
-Next: P7 human/source review. P8 is not started.
+P9 is not started.
 
-This repository does **not** claim v2.0 release. P8–P12 remain future work.
+This repository does **not** claim v2.0 release. FA-2 and P9–P12 remain future work.

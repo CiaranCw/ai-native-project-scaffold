@@ -58,9 +58,9 @@ class P6TestSkillTests(unittest.TestCase):
         self.assertTrue((REPO / "skills" / "understand").is_dir())
         self.assertTrue((REPO / "skills" / "test").is_dir())
         self.assertTrue((REPO / "skills" / "develop").is_dir())
-        self.assertFalse((REPO / "skills" / "submit").exists())
+        self.assertTrue((REPO / "skills" / "submit").is_dir())
         self.assertTrue((REPO / "src" / "scaffold_p7").is_dir())
-        self.assertFalse((REPO / "src" / "scaffold_p8").exists())
+        self.assertTrue((REPO / "src" / "scaffold_p8").is_dir())
 
     def test_T03_noscms_passing_profile(self):
         write_host(self.host, [passing_profile()])
