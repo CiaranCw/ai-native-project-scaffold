@@ -2,11 +2,21 @@
 
 This document records P6-owned concrete schemas and runtime boundaries. It is not a Foundation Contract and does not outrank P0–P5.
 
-P6 status: **ACTIVE / IMPLEMENTATION**. Not COMPLETE, BASELINED, or PASS. P5 remains **CLOSED / BASELINED / REMOTELY PUBLISHED**. P7/P8 are not started.
+P6 status: **CLOSED / BASELINED / REMOTELY PUBLISHED.** Implementation phase closed; later FA-2 corrections were applied in the current unreleased candidate. FA-2 is independently PASS / CLOSED. P9 Repair/Migration is PASS / CLOSED. P10 is PASS / CLOSED. Post-P10 Scenario-Aware Verification supporting plans are recorded in [DIVE_PILOT_CORRECTION_01.md](DIVE_PILOT_CORRECTION_01.md). This note does not claim DIVE Day-1 closed or v2.0 released.
 
 Rev4 closes remaining completed-report semantic coherence and fail-closed reader defects. Rev1–Rev3 host, GENERATED-authority, and cleanup corrections remain in force. The accepted P6 architecture is unchanged.
 
-P6 completeness is a support-artifact summary. It is **not** P8 Submit-S5 `TEST_COMPLETE` and not `SUBMIT_AUTHORIZED`.
+P6 completeness is a support-artifact summary consumed by P8 S5. Foundation
+`TEST_COMPLETE` cannot become true from a required FAIL or from unknown
+required policy. P6 `test_complete` is required-verification obligation
+completeness. `coverage_complete` is terminal accounting. They are not
+`SUBMIT_AUTHORIZED`.
+
+Develop may consume an already published completed report by `report_id`.
+`consume_published_report` reloads durable P6 storage, revalidates schema,
+`COMPLETED` status, local locators, candidate currentness, `candidate_match`,
+and claimed SAV coverage. Caller report dictionaries are not authority. This
+does not re-execute Test and does not relabel lawful `EXTERNAL_RESULT`.
 
 ## Role and boundaries
 
@@ -18,7 +28,7 @@ Test is the verification/evidence Skill. It:
 4. resolves `.scaffold/tests.yaml` and command authority;
 5. executes or collects permitted verification;
 6. compiles Evidence and a candidate-bound Test Report;
-7. computes batch `TEST_PASS` and P6 coverage completeness separately.
+7. computes batch `TEST_PASS`, terminal coverage, and required-obligation completeness separately.
 
 Test does **not** develop or repair source, authorize Submit, perform Structural Review, Commit, Push, create Develop Sessions, finalize Change Records, persist `NEEDS_MIGRATION`, update `skills.lock`, modify `project.yaml`, run Refresh or Migration, or treat a test PASS as Submit Test Completeness.
 
@@ -33,7 +43,7 @@ Frozen from P4 package/release convention and the P4 Test fixture identity:
 | Field | Value |
 | --- | --- |
 | `skill_id` | `test` |
-| `skill_version` | `2.0.0` |
+| `skill_version` | `2.0.1` |
 | modes | `scoped_verification` |
 | `provides` | `test.scoped_verification` |
 | `requires` | `[]` |
@@ -57,7 +67,7 @@ intake (TestEngine.run)
 → Target Adapter or supplied evidence
 → Evidence Compiler
 → observe_candidate (post)
-→ analyze completeness (batch TEST_PASS ⊥ coverage)
+→ analyze completeness (batch TEST_PASS ⊥ coverage_complete ⊥ test_complete)
 → persist evidence blobs / human summary
 → validate final report (schema + semantic consistency)
 → atomically publish report.yaml LAST
@@ -137,13 +147,28 @@ A present-but-invalid `project.yaml` is `non-executable`, not treated as an unad
 
 ## Candidate identity
 
-Implemented in `src/scaffold_p6/candidate.py`. This is a **P6-owned** projection. It does **not** change P5 `durable_inventory` or `scm_baseline` semantics.
+Implemented in `src/scaffold_p6/candidate.py`. This remains the canonical
+**P6-owned** candidate-binding projection. Shared P5 SCM observation supplies
+repository/worktree membership and project-root-scoped status; it does not
+create a second candidate digest.
 
 ### Git
 
-Uses ordinary local Git metadata (`scm_baseline` for HEAD/branch/detached, plus `git status --porcelain=v1 -z --untracked-files=all` for dirty paths). Porcelain `-z` preserves rename/copy source and destination as separate paths. Candidate binding digests current destination content and also records the origin path so a later mutation of the renamed target changes the fingerprint.
+Uses ordinary local Git metadata (HEAD/branch/detached/unborn plus NUL-delimited
+porcelain status). Repository membership is resolved through Git even when the
+project root is nested below the worktree root. Status is filtered and
+re-expressed relative to the Scaffold project root, so unrelated parent-repo
+changes do not enter the candidate. Porcelain `-z` preserves rename/copy source
+and destination as separate paths.
 
 A clean tree is not required. No commit is invented.
+
+Git membership with failed, malformed, or indeterminate observation produces
+an unusable candidate with an empty `candidate_digest`, explicit
+`OBSERVATION_FAILED`, and unknown dirty-state fields. Test blocks before
+adapter invocation; observation failure is never an empty clean candidate or a
+no-SCM fallback. Observation metadata is excluded from the successful
+candidate identity body, preserving the published digest semantics.
 
 Binding includes:
 
@@ -161,6 +186,12 @@ Dirty rename with no Test mutation of the destination may keep pre/post candidat
 ### Generated-output exclusion authority
 
 A Test Contract string does **not** gain authority to erase real candidate source.
+
+Before profile execution, P6 loads applicable global/module/path/test Project
+Rules through the shared P5-owned resolver. Structured hard prohibitions and
+Rule conflicts block before adapter invocation and route toward Understand
+Refresh. Rule loading is observational and never grants source mutation,
+Commit, Push, or Submit authority.
 
 Rules:
 
@@ -248,13 +279,22 @@ VERIFIED observed existence alone does not invent a new required policy.
 
 `test_complete` with `required_total == 0` is allowed only when the current valid Test Contract authoritatively establishes that the required set is empty. Examples that may establish it:
 
-- a verified explicit no-required / no-applicable-test contract (`VERIFIED` + `NOT_APPLICABLE` + `applicable: false` and no required profiles)
-- a fully authoritative verified Test Contract whose profiles are explicitly optional and whose required-policy set is known complete (`confidence == VERIFIED` and `applicability` in `{APPLICABLE, NOT_APPLICABLE}`)
+- an explicit no-required / no-applicable-test contract with
+  `required_authority: VERIFIED`, `NOT_APPLICABLE`, `applicable: false`, and no
+  required profiles
+- a fully authoritative Test Contract whose profiles are explicitly optional
+  and whose empty required-policy set is declared complete with
+  `required_authority: VERIFIED`
 
 Examples that must not:
 
 - INFERRED empty profiles
+- empty profiles with availability `confidence: VERIFIED` but no explicit
+  required-policy authority
+- verified absence of a discovered test surface
 - UNKNOWN applicability
+- observed availability with `required_authority: UNKNOWN`
+- `required: false` written only because a test surface was observed
 - malformed contract
 - absent `tests.yaml`
 - unresolved required-policy authority
@@ -284,6 +324,12 @@ When declared, `success` must be a mapping. When declared, `success.exit_code` m
 Selection is request scope, not Test Contract mutation.
 
 Report `selected` is the profiles actually selected/requested for this batch. It is not populated with every Contract profile, including `NOT_RUN` profiles. Keep separate: `selected`, `executed`, `required`, `optional`, `terminal_usable`.
+
+Report `scope.paths` and `scope.modules` persist the normalized,
+project-relative invocation area used for Project Rule resolution. Empty scope
+stays empty. Absolute machine paths are excluded. Together with the candidate
+digest, selected profiles, and required-policy state, this gives a zero-context
+consumer the effective verification scope.
 
 Malformed `tests.yaml` or `commands.yaml` blocks before Target Adapter execution.
 
@@ -389,13 +435,32 @@ Blocked invocations use one effective `ScenarioResult` list for `analyze()`, `_b
 
 `validate_report()` fail-closes unless `profiles` is a list of mappings, `completeness` and `verification` are mappings, and `candidate_match` plus `test_pass` / `test_complete` on both summaries are real booleans. Completeness id collections (`required`, `optional`, `selected`, `executed`, `terminal_usable`, `missing_required`, `blocked_required`) must exist and be lists of nonempty strings. Required numeric completeness fields (`required_total`, `optional_total`, and the required counters) must exist as integers, not bools. Required boolean completeness fields (`candidate_match`, `evidence_complete`, `batch_evidence_complete`, `test_pass`, `test_complete`, `required_set_authoritative`) must exist as strict booleans. Absence is not treated as zero or false. Malformed persisted fields return INCOMPLETE; they do not raise.
 
-`required_total` / `optional_total` must equal those list lengths. Required counters must match required profile results. `required_set_authoritative` is mandatory even when `test_complete` is false. `test_complete` may be true only when that authority is true, the candidate matches, required coverage evidence is complete, and every required profile is terminal usable (`PASS` or `FAIL`). A required FAIL may still yield `test_complete=true` and `test_pass=false`.
+`required_total` / `optional_total` must equal those list lengths. Required counters must match required profile results. `required_set_authoritative` is mandatory even when `test_complete` is false. `coverage_complete` may be true when that authority is true, the candidate matches, required coverage evidence is complete, and every required profile is terminal usable (`PASS` or `FAIL`). A required FAIL may still yield `coverage_complete=true` and `test_pass=false`, but it cannot yield `test_complete=true`. An optional FAIL may yield `test_pass=false` while still allowing `test_complete=true` when every required obligation is satisfactorily complete.
 
 Top-level `candidate_match` and `completeness.candidate_match` must be identical booleans. `batch_evidence_complete` must equal `all(evidence_complete)` over `result != NOT_RUN` profiles. `completeness.evidence_complete` must match required-coverage evidence from those profile rows. `test_pass=true` requires a nonempty executed PASS batch with complete batch evidence.
 
 Every profile `id` is a unique nonempty string and `profile.required` is a strict boolean. A required profile must appear exactly once in `completeness.required` and not in `optional`. An optional profile must appear exactly once in `completeness.optional` and not in `required`. A profile cannot belong to both sets or to neither. Duplicate profile ids are invalid.
 
 Every Evidence Ref must carry `ref_id`, `report_id`, and `candidate_digest` bound to the report. Locally `resolvable: true` refs also require a nonempty digest that matches the stored artifact.
+
+P6 also owns the locator-only reference used by Task Books and Change Records.
+`TestEngine.build_evidence_refs()` mints portable `test-runs/<run-id>/...`
+locators only from a validated completed report.
+`TestEngine.resolve_evidence()` returns the original Evidence item plus
+terminal profile accounting. Before durable finalization it reloads the owning
+runtime report and validates local Evidence Ref digests. A valid P6 durable
+capsule is independently sufficient for historical resolution, even when a
+stale/corrupt runtime run remains; `load_completed_report()` stays runtime-only
+and never accepts the capsule as repair. Report-fragment locators preserve
+result-bearing HUMAN, CI, and EXTERNAL Evidence without converting it to
+`command_result`.
+
+An active `PREPARED` materialization is a fail-closed durability barrier.
+While it holds a locator, `resolve_evidence()` returns healthy runtime truth
+with `resolution_source=runtime`; if runtime truth is unavailable or corrupt,
+resolution blocks for P8 durability reconciliation rather than describing the
+candidate-only capsule as durable. P6 never inspects Git history or Change
+Record durability to cross this barrier.
 
 A completed report is usable only when:
 
@@ -414,9 +479,10 @@ Missing or corrupt required local refs make the report unusable as a completed v
 
 A profile `FAIL` with persisted `verification.test_pass: true` is rejected. Internally contradictory reports do not load as completed. A coherent completed PASS report still loads.
 
-## TEST_PASS and P6 test_complete
+## TEST_PASS, coverage_complete, and test_complete
 
 These summaries are independent. `test_pass` is not derived from coverage.
+`coverage_complete` is not Foundation `TEST_COMPLETE`.
 
 `TEST_PASS` (`completeness.test_pass`) answers: did the actually selected/executed accepted verification batch pass?
 
@@ -429,37 +495,50 @@ It may be true only when:
 - required evidence for executed batch members is complete;
 - no batch-level infrastructure/contract blocker invalidates execution.
 
-Required tests outside the selected batch may remain `NOT_RUN`. Those make `test_complete = false` and must not automatically make `test_pass = false`.
+Required tests outside the selected batch may remain `NOT_RUN`. Those make `test_complete = false` and must not automatically make `test_pass = false`. Every `NOT_RUN` entry records `not_run_reason`.
 
-P6 `test_complete` answers: does this report's coverage model have terminal usable coverage for every required Test Contract entry, and is the required set authoritative?
+P6 `coverage_complete` answers: did every required Test Contract entry and
+every explicitly selected optional profile reach a terminal usable result, and
+is the required set authoritative?
 
 - `required_set_authoritative` is true;
 - candidate identity is current;
 - every required test has a terminal usable result (`PASS` or `FAIL`);
 - no required test is `BLOCKED` or `NOT_RUN`;
-- required evidence is present.
+- every explicitly selected optional profile has a terminal usable result;
+- required and selected-optional evidence is present.
 
-A required terminal FAIL counts as terminal usable. Infrastructure `BLOCKED` and `NOT_RUN` do not.
+A required or selected-optional terminal FAIL counts as terminal usable.
+Infrastructure `BLOCKED` and `NOT_RUN` do not. An unselected optional
+`NOT_RUN` is outside selected coverage and does not make coverage incomplete.
 
-Authoritative verified zero-required-tests with no executed tests: `test_pass = false`, `test_complete = true`.
+P6 `test_complete` answers: has the required verification obligation been
+satisfactorily completed for this candidate? It requires complete required
+coverage and `required_fail == 0`; selected optional status does not become a
+required obligation. A required FAIL cannot yield `test_complete`. Unknown
+required policy cannot yield `test_complete` merely because observed tests
+passed.
 
-INFERRED or otherwise non-authoritative empty required set: `test_complete = false`.
+Authoritative verified zero-required-tests with no executed tests: `test_pass = false`, `coverage_complete = true`, `test_complete = true`.
+
+INFERRED, observed-undeclared, or otherwise non-authoritative empty required set: `test_complete = false`.
 
 Candidate mismatch: both false.
 
-This P6 field is a support-artifact completeness summary for later P8 consumption. It is **not** Submit-S5 `TEST_COMPLETE` and not `SUBMIT_AUTHORIZED`.
+This P6 `test_complete` field is the current Test completeness result consumed by P8 S5. It is not `SUBMIT_AUTHORIZED`.
 
 Truth table (P6 support-artifact fields):
 
-| Situation | test_pass | test_complete |
-| --- | --- | --- |
-| selected required PASS + other required NOT_RUN | true | false |
-| full required PASS | true | true |
-| required PASS + required FAIL, full coverage | false | true |
-| required BLOCKED | false | false |
-| authoritative verified zero-required-tests | false | true |
-| INFERRED empty required set | false | false |
-| candidate mismatch / stale run | false | false |
+| Situation | test_pass | coverage_complete | test_complete |
+| --- | --- | --- | --- |
+| selected required PASS + other required NOT_RUN | true | false | false |
+| full required PASS | true | true | true |
+| required PASS + required FAIL, full coverage | false | true | false |
+| required BLOCKED | false | false | false |
+| authoritative verified zero-required-tests | false | true | true |
+| observed tests PASS, required policy UNKNOWN | true | false | false |
+| INFERRED empty required set | false | false | false |
+| candidate mismatch / stale run | false | false | false |
 
 ## Failure vs infrastructure blocker
 
@@ -510,12 +589,13 @@ P2 requires `.scaffold/runtime` to remain temporary local. P6 provides explicit 
 cleanup_test_run(root, run_id)
     remove .scaffold/runtime/test-runs/<exact-run-id>/
     only when run_id is one legal Test-run directory name
+    and no PREPARED durable materialization holds that run
 
 cleanup_incomplete_test_runs(root)
     remove abandoned incomplete Test-run directories only
 ```
 
-`cleanup_test_run()` refuses `"."`, `".."`, empty, absolute, or multi-component identities and deletes nothing for invalid input. It cannot broaden into the `test-runs/` container.
+`cleanup_test_run()` refuses `"."`, `".."`, empty, absolute, or multi-component identities and deletes nothing for invalid input. It cannot broaden into the `test-runs/` container. After S10, cleanup may delete a temporary run because referenced Evidence resolves from its deterministic metadata capsule and optional raw-byte sidecar under an already `GENERATED` `.scaffold/ext/test/evidence/` target. Fresh Adoption registers that area as GENERATED; Bootstrap does not create the directory. Only Change-Record-referenced locators are materialized.
 
 Cleanup is local housekeeping. It is not a Test mode, not Submit, not Develop, and not a canonical record lifecycle.
 
@@ -532,6 +612,45 @@ Inspected conceptually from Architecture/Constitution capability-class B. No v1 
 Reused as concepts, reimplemented under v2: Contract/profile, Target Adapter boundary, Evidence, Evidence Ref, Analysis.
 
 Rejected: v1 Game Legibility product identity, Repair loop, old record taxonomy, v1 lifecycle authority, CI/network harnesses, wholesale Test subsystem copy.
+
+## Scenario-Aware Verification supporting plans
+
+Scenario-Aware Verification belongs to Test. It is not a fifth Skill, not a
+fourth canonical development record, and not a replacement for Test Profile or
+Task Book.
+
+Supporting layout:
+
+```text
+.scaffold/runtime/test-plans/<plan_id>/plan.yaml
+.scaffold/runtime/test-plans/heads/<task_id>/<requirement_id>/head.yaml
+```
+
+Plans are `supporting: true` / `canonical: false`. A fresh Test Agent
+reconstructs scenario and proof obligations from the current head/locator.
+Required proof obligations are SATISFIED only by sufficient current Evidence.
+Association (`po_id` / `covers`) is not coverage. An explicit suite/regression
+strategy may use bound-profile PASS. State/trace presence, log text, file
+artifacts, and visual checkpoints do not by themselves prove a structural PO.
+Caller `adequacy.status` is not authority; engine-derived adequacy feeds
+`test_complete`. Optional Evidence `role` and `retention_class` are defined in
+[PC_SCF_H2_BOUNDED_VERIFICATION.md](PC_SCF_H2_BOUNDED_VERIFICATION.md).
+A required
+`INSUFFICIENT_OBSERVABILITY` obligation cannot yield requirement PASS; Test
+returns the existing Test→Develop observability handoff and does not edit
+product source. Profile `exit_code` 0 alone is not requirement PASS.
+
+Plans bind `task_id`, `task_revision` (historical), `task_contract_digest`
+(currentness for new plans), `requirement_id`, and profile. An optional
+`candidate_digest` is revalidated before execution. New-format plans stay
+current across completion-only Task revision changes. Legacy plans without
+`task_contract_digest` still require exact `task_revision`. Missing head,
+contract mismatch, or candidate mismatch fails closed.
+
+This is an unreleased `test@2.0.1` candidate extension. Released `test@2.0.0`
+is not mutated. SKILL_CONTRACT would require a version bump for a released
+identity; this working-tree candidate is the same in-place pattern used by
+P10 on `understand@2.1.0`.
 
 ## P7 / P8 boundaries
 

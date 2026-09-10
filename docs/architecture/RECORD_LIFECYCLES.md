@@ -43,8 +43,31 @@ A later Agent with no chat MUST still be able to answer all four questions. Sess
     │   ├── session.yaml                         overlays + coverage
     │   ├── files.yaml                           Develop-touched only
     │   └── patches/                             optional; no secrets
-    └── adoption-sessions/<adopt-id>/
-        └── session.yaml                         delete after activation
+    ├── adoption-sessions/<adopt-id>/
+    │   └── session.yaml                         delete after activation
+    └── understand-assessments/
+        ├── <ka-id>/
+        │   └── assessment.yaml                   S4 supporting artifact;
+        │                                        not a canonical record
+        └── heads/<binding-digest>/
+            └── head.yaml                        current Assessment authority
+                                                 for one (candidate, impact) binding
+    ├── repair-state/<task-id>.yaml              supporting Repair recovery;
+                                                 not a canonical record
+    ├── migration-executions/<mig-id>/           P5 operational artifact;
+    │   ├── execution.yaml                       not a canonical record
+    │   └── plan.yaml
+    ├── understand-currentness/                  supporting incremental
+        ├── <uc-id>/snapshot.yaml                understanding currentness;
+        ├── heads/project/head.yaml              not a canonical record
+        ├── completions/<rc-id>/                 refresh-completion receipts;
+        │   ├── completion.yaml                  supporting, not canonical
+        │   └── result.yaml
+        └── handoff.yaml                         derived summary only
+    └── test-plans/                              supporting Scenario-Aware
+        ├── <plan_id>/plan.yaml                  Verification plans;
+        └── heads/<task-id>/<requirement-id>/    Test-owned, not canonical
+            head.yaml
 ```
 
 Do not add another `.scaffold/` root namespace. Do not create these directories in this distribution repository.
@@ -68,12 +91,17 @@ Do not add another `.scaffold/` root namespace. Do not create these directories 
         │     PENDING → IN_PROGRESS ⇄ Test
         │                      │
         │                      ├─ required tests FAIL → stay non-complete
-        │                      └─ acceptance + required tests meet
-        │                         defined acceptance + no required-test blocker
+        │                      ├─ acceptance decision UNKNOWN/UNSATISFIED
+        │                      │     → stay non-complete
+        │                      └─ candidate-bound completion decision SATISFIED
+        │                         + required tests meet defined acceptance
+        │                         + no required-test blocker
         │                                → Stage COMPLETE
         ▼
  TASK_COMPLETE (derived: all required stages COMPLETE)
         │
+        ×  structural status aggregation only
+        ×  not current-candidate Stage or Task acceptance
         ×  not TEST_COMPLETE
         ×  not submit authorization
         ▼
@@ -82,21 +110,23 @@ Do not add another `.scaffold/` root namespace. Do not create these directories 
         ├─ FAIL / acceptance unmet → remain IN_PROGRESS (Develop ↔ Test)
         │
         └─ stages COMPLETE
+           + every Stage completion decision current for candidate
            + final required tests satisfy defined acceptance
-           + declared Task-level acceptance satisfied
+           + Task Completion Decision SATISFIED/current for candidate
+           + no required blocker
                 ▼
          READY_FOR_REVIEW          ← Develop MUST stop here
                 │                     MUST NOT perform S10 / Commit
                 │                     MUST NOT mark this merely because tests ran
-                │                     no acceptance_met boolean
+                │                     structured Task decision; no acceptance_met boolean
                 ▼
              Submit (separate Skill)
                 │
                 │  S3–S6 review the REVIEWED CANDIDATE DIFF
                 │  Task Book MUST NOT be mutated at S9
                 ▼
-         Submit-S9 Change Record only
-         (deterministic artifact; not a Task Book edit)
+         Submit-S9 deterministic Finalization Bundle
+         (Change Record + referenced support; not a Task Book edit)
                 │
                 ▼
          Submit-S10 Commit / Durable Finalization
@@ -115,8 +145,77 @@ Lightweight tasks use **the same schema** with **one** Stage.
 
 No Task Book: Submit still starts; **TASK_COMPLETE = NOT APPLICABLE**. Do not invent a fake Task Book.
 
+### Candidate currentness across Task publication
+
 ```text
- READY_FOR_REVIEW ──(more Develop before durable Change Record)──► IN_PROGRESS
+P6 candidate C
+   = source/business/project/config physical content
+   + semantic substantive Task authority projection
+       (goal, acceptance, scope, baseline, Stage/requirement plan,
+        explicit requirement→profile execution bindings)
+
+current Task control-plane facts
+   revision / updated_at / statuses / Session links
+   Evidence locators/outcomes / completion decisions
+        │
+        ├─ complete Task Book byte change remains in real Diff
+        └─ substantive projection unchanged → P6 candidate remains C
+           (content-deterministic; not writer-path knowledge)
+
+source/project/substantive Task change → P6 candidate C2
+        └─ old C Evidence/decisions/review/authorization stale
+```
+
+This is one P6-owned candidate projection, not a P7 digest and not a blanket
+`.scaffold/tasks/**` exclusion. Creating/removing a Task, changing intent or
+requirements, or mixing such changes into progress publication is
+candidate-significant. Malformed or lifecycle-illegal Task content gains no
+lifecycle authority. A non-CAS write of identical control-plane bytes remains
+candidate-equivalent and is still not publication-authorized.
+**candidate-equivalent != publication-authorized.** Git/no-SCM physical
+observation and Submit review still see every changed Task byte.
+
+### Planned requirement execution binding
+
+```text
+Task required_tests entry (durable)
+  requirement_id = task-required/check-save
+  execution_binding.profile_id = unit-save-check
+        │
+        ▼
+Develop→Test: exact R→P mapping; select P
+        │
+        ▼
+P6 public locator L; resolver(L).profile_id = P
+        │
+        ▼
+P7 attaches L to R only because current Task authority says R→P
+```
+
+No explicit binding means no fresh-execution attachment by equal names, list
+position, or guessing. A mismatched producing profile cannot satisfy R.
+Project-required profiles remain separate from Task requirement identities.
+An existing legitimate HUMAN/CI/EXTERNAL P6 locator may be cited directly.
+
+```text
+ READY_FOR_REVIEW
+      │
+      │ valid current submit_to_develop handoff
+      │ + explicit deterministically mapped target_stage_ids
+      │ + Task expected-revision / atomic conditional publication
+      ▼
+ IN_PROGRESS
+      └─ exact target Stages COMPLETE → IN_PROGRESS
+         old SATISFIED decisions → superseded / UNKNOWN for repair
+
+ C1 → repair mutation → C2
+      └─ target and non-target Stage decisions relied upon for READY
+         must be SATISFIED and current for C2 before READY returns
+         + Task Completion Decision must be SATISFIED/current for C2
+
+ READY_FOR_REVIEW + no valid Stage-targeted repair handoff
+      → no reopen; no first/last/all-Stage guess
+
  CANCELED  → explicit; Sessions not silently deleted
 ```
 
@@ -255,35 +354,41 @@ Advisory review attention order: MIXED → POST → PREEXISTING → UNATTRIBUTED
     and S8 loop if needed)
         │
         ▼
- Submit-S9  write/replace ONLY
- .scaffold/changes/<change-id>.yaml
+ Submit-S9 Finalization Bundle
+   exact .scaffold/changes/<change-id>.yaml
+   + zero or more deterministic support artifacts
+     required by its durable opaque references
         │
         │  path_summary describes REVIEWED CANDIDATE DIFF
         │  MUST NOT list/count this Change Record file itself
+        │  support content derives only from pre-S6 validated
+        │  authority/Evidence and adds no business intent
         │
         ▼
  S10 FINALIZATION CANDIDATE
    = reviewed candidate
-   + deterministic S9 Change Record artifact
+   + exact deterministic S9 Finalization Bundle
         │
         ×  MUST NOT wait until after S10 to create the record
         ×  MUST NOT store this Commit’s SHA inside the file
         ×  MUST NOT persist submitted: true
         ×  MUST NOT persist submit_authorized: true as permission
         ×  MUST NOT mutate Task Books at S9
-        ×  any other S9 mutation is NOT silently review-exempt
+        ×  any mutation outside the permitted bundle is
+           NOT silently review-exempt
         ▼
  Submit-S10 Commit / Durable Finalization attempt
         │
         ├─ FAIL / INTERRUPT ──► still a candidate
         │           MUST NOT call it submitted history
+        │           support artifacts require cleanup/recovery
         │           MUST NOT clean completed Sessions as submitted
-        │           unchanged finalized representation → retry
+        │           unchanged finalized bundle → retry
         │           material reviewed-diff change → regenerate first
         │
-        └─ SUCCESS ► same S9-finalized logical content
-                     becomes durable as-built
-                     SCM: staged/normalized bytes in Commit
+        └─ SUCCESS ► same S9-finalized bundle
+                     becomes durable as-built + referenced support
+                     SCM: exact staged/normalized bundle in Commit
                      no SCM: P8 atomic/conflict-detectable durable publication
                      success distinguishable after restart
                      Submit-S11 optional Push / N/A (separate auth if present)
@@ -330,7 +435,9 @@ No second operation solely to flip a status field. No post-S10 record rewrite to
         │    (no compaction, no Change back-reference,
         │     no cosmetic cleanup)
         ▼
- Submit-S9 writes Change Record only
+ Submit-S9 writes no Task mutation;
+   Finalization Bundle contains the Change Record
+   and only permitted referenced support artifacts
    durable provenance → Change Record summary
         │
         ▼

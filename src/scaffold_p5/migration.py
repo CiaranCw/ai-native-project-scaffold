@@ -12,6 +12,7 @@ from scaffold_p5.host_state import (
     SKILLS_LOCK,
     TESTS_YAML,
     inspect_project,
+    snapshot_host,
 )
 from scaffold_p5.io_util import file_digest, read_yaml, sha256_text, write_yaml_atomic
 from scaffold_p5.schemas import whole_file_mutation_allowed
@@ -280,7 +281,120 @@ def approval_matches(plan: dict[str, Any], approval: dict[str, Any] | None) -> b
     )
 
 
-def create_execution(root: Path, plan: dict[str, Any], observed_approved: bool) -> Path:
+def normalize_develop_binding(
+    binding: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Supporting Develop Task/Session locator. Not a canonical record field."""
+    if not isinstance(binding, dict):
+        return None
+    task_id = str(binding.get("task_id") or "")
+    if not task_id:
+        return None
+    revision = binding.get("task_revision")
+    try:
+        task_revision = int(revision)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "task_id": task_id,
+        "task_revision": task_revision,
+        "session_id": str(binding.get("session_id") or ""),
+        "candidate_digest": str(binding.get("candidate_digest") or ""),
+    }
+
+
+def task_application_binding_issues(
+    approval: dict[str, Any] | None,
+    *,
+    task_id: str,
+    task_revision: int,
+    candidate_digest: str,
+) -> list[str]:
+    """Issues for a claimed Migration application approval vs current Task.
+
+    Title/goal/prose are not consulted. Absence of an approved payload is not
+    an issue; that remains an unapproved Plan, not Task-bound application.
+    """
+    if not approval or not approval.get("approved"):
+        return []
+    issues: list[str] = []
+    bound_task = str(approval.get("task_id") or "")
+    if not bound_task:
+        issues.append(
+            "Migration application approval is not bound to a Task identity"
+        )
+    elif bound_task != str(task_id):
+        issues.append("Migration Plan approval is bound to a different Task")
+    try:
+        bound_revision = int(approval.get("task_revision"))
+    except (TypeError, ValueError):
+        issues.append(
+            "Migration application approval is not bound to a Task revision"
+        )
+        bound_revision = None
+    if bound_revision is not None and bound_revision != int(task_revision):
+        issues.append(
+            "Migration application binding is stale; re-review/re-approval required"
+        )
+    bound_digest = str(approval.get("candidate_digest") or "")
+    if not bound_digest:
+        issues.append(
+            "Migration application approval is not bound to the current candidate"
+        )
+    elif bound_digest != str(candidate_digest):
+        issues.append(
+            "Migration application binding is stale; re-review/re-approval required"
+        )
+    return issues
+
+
+def plan_application_issues(
+    plan: dict[str, Any],
+    approval: dict[str, Any] | None,
+) -> list[str]:
+    """Plan identity/digest issues for a claimed application approval."""
+    if not approval or not approval.get("approved"):
+        return []
+    issues: list[str] = []
+    if str(approval.get("plan_id") or "") != str(plan.get("plan_id") or ""):
+        issues.append(
+            "Migration application approval plan_id does not match the current Plan"
+        )
+    approved_digest = approval.get("plan_digest") or approval.get("digest")
+    if str(approved_digest or "") != str(plan.get("digest") or ""):
+        issues.append(
+            "Migration application approval plan_digest does not match the current Plan"
+        )
+    return issues
+
+
+def application_approval_matches(
+    plan: dict[str, Any],
+    approval: dict[str, Any] | None,
+    *,
+    task_id: str,
+    task_revision: int,
+    candidate_digest: str,
+) -> bool:
+    """Plan digest plus Task application binding. Understand plan-only
+    approval remains `approval_matches` and does not imply Develop apply.
+    """
+    if not approval_matches(plan, approval):
+        return False
+    return not task_application_binding_issues(
+        approval,
+        task_id=task_id,
+        task_revision=task_revision,
+        candidate_digest=candidate_digest,
+    )
+
+
+def create_execution(
+    root: Path,
+    plan: dict[str, Any],
+    observed_approved: bool,
+    develop_binding: dict[str, Any] | None = None,
+) -> Path:
     exec_id = make_id("mig")
     directory = root / MIGRATION_EXECS / exec_id
     directory.mkdir(parents=True, exist_ok=True)
@@ -312,9 +426,266 @@ def create_execution(root: Path, plan: dict[str, Any], observed_approved: bool) 
         "observed_expected_state": "PRE_MUTATION",
         "blockers": [],
     }
+    normalized = normalize_develop_binding(develop_binding)
+    if normalized is not None:
+        data["develop_binding"] = normalized
     write_yaml_atomic(directory / "plan.yaml", plan)
     write_yaml_atomic(directory / "execution.yaml", data)
     return directory
+
+
+def apply_fresh_migration_execution(
+    root: Path,
+    plan: dict[str, Any],
+    *,
+    distribution,
+    validation_distribution=None,
+    interrupt_after: str | None = None,
+    abort_before_mutation: bool = False,
+    develop_binding: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Canonical PREPARED→COMPLETED/RECOVERY_REQUIRED machine. P5 owns this.
+
+    Understand compatibility may plan and resume recovery. Fresh persistent
+    initiation is Task-bound Develop work that calls this helper. Plan-only
+    approval is not that authority.
+    """
+    from scaffold_p5.compatibility import evaluate_host
+
+    checker = validation_distribution or distribution
+    directory = create_execution(
+        root,
+        plan,
+        observed_approved=True,
+        develop_binding=develop_binding,
+    )
+    data = load_execution(directory)
+    extras: dict[str, Any] = {}
+    if abort_before_mutation:
+        data["status"] = "ABORTED"
+        extras["migration"] = dict(data)
+        delete_execution(directory)
+        return {
+            "outcome": "COMPLETED",
+            "completed": False,
+            "applied": False,
+            "mutations": "none",
+            "artifacts": [],
+            "blockers": [],
+            "evidence": ["ABORTED before mutation"],
+            "next_route": "",
+            "compatibility": "MIGRATION_REQUIRED",
+            "extras": extras,
+        }
+    pre_mutation_snapshot = snapshot_host(root)
+    pre_mutation_evaluation = evaluate_host(
+        pre_mutation_snapshot,
+        distribution,
+    )
+    pre_mutation_issues = bindings_still_hold(
+        root,
+        plan,
+        pre_mutation_snapshot,
+        pre_mutation_evaluation,
+    )
+    if pre_mutation_issues:
+        data["blockers"] = pre_mutation_issues
+        save_execution(directory, data)
+        extras["migration"] = data
+        return {
+            "outcome": "NEEDS_HUMAN",
+            "completed": False,
+            "applied": False,
+            "mutations": "none",
+            "artifacts": [],
+            "blockers": [
+                "migration source state changed before first persistent mutation"
+            ]
+            + pre_mutation_issues,
+            "evidence": [],
+            "next_route": (
+                "re-evaluate compatibility → regenerate plan → human re-approval"
+            ),
+            "compatibility": None,
+            "extras": extras,
+        }
+    data["status"] = "APPLYING"
+    data["checkpoints_completed"] = []
+    data["checkpoints_remaining"] = [
+        CONTRACT_GENERATION_UPDATED,
+        VALIDATION_PASSED,
+    ]
+    data["observed_expected_state"] = "PRE_MUTATION"
+    save_execution(directory, data)
+    if not apply_contract_generation(
+        root,
+        plan["target_contract_generation"],
+    ):
+        data["blockers"] = [
+            "project.yaml became non-executable before migration mutation"
+        ]
+        save_execution(directory, data)
+        extras["migration"] = data
+        return {
+            "outcome": "BLOCKED",
+            "completed": False,
+            "applied": False,
+            "mutations": "none",
+            "artifacts": [],
+            "blockers": list(data["blockers"]),
+            "evidence": [],
+            "next_route": "resolve project host schema/authority",
+            "compatibility": None,
+            "extras": extras,
+        }
+    data["status"] = "VALIDATING"
+    data["checkpoints_completed"] = [CONTRACT_GENERATION_UPDATED]
+    data["checkpoints_remaining"] = [VALIDATION_PASSED]
+    data["observed_expected_state"] = "VALIDATING"
+    save_execution(directory, data)
+    if interrupt_after in {"first_mutation", "validating"}:
+        data["status"] = "RECOVERY_REQUIRED"
+        save_execution(directory, data)
+        mark_recovery_required(root)
+        extras["migration"] = data
+        extras["post_compatibility"] = None
+        return {
+            "outcome": "BLOCKED",
+            "completed": False,
+            "applied": True,
+            "mutations": "partial",
+            "artifacts": [PROJECT_YAML],
+            "blockers": ["interrupted after persistent mutation; RECOVERY_REQUIRED"],
+            "evidence": [],
+            "next_route": "resume migration execution",
+            "compatibility": "MIGRATION_REQUIRED",
+            "extras": extras,
+        }
+    applied_issues = validate_applied_state(
+        plan,
+        snapshot_host(root),
+    )
+    if applied_issues:
+        data["status"] = "RECOVERY_REQUIRED"
+        save_execution(directory, data)
+        mark_recovery_required(root)
+        extras["migration"] = data
+        return {
+            "outcome": "FAILED",
+            "completed": False,
+            "applied": True,
+            "mutations": "none",
+            "artifacts": [],
+            "blockers": ["validation could not establish migrated host"]
+            + applied_issues,
+            "evidence": [],
+            "next_route": "",
+            "compatibility": None,
+            "extras": extras,
+        }
+    post_apply_evaluation = evaluate_host(
+        snapshot_host(root),
+        checker,
+    )
+    extras["post_apply_evaluation"] = post_apply_evaluation
+    extras["post_compatibility"] = post_apply_evaluation.get("overall")
+    extras.setdefault("pre_compatibility", plan.get("compatibility") or "MIGRATION_REQUIRED")
+    if post_apply_evaluation.get("overall") not in {
+        "EXACT",
+        "COMPATIBLE",
+    }:
+        data["status"] = "RECOVERY_REQUIRED"
+        data["blockers"] = [
+            "migration validation did not resolve the approved compatibility cause"
+        ]
+        save_execution(directory, data)
+        mark_recovery_required(root)
+        extras["migration"] = data
+        return {
+            "outcome": "BLOCKED",
+            "completed": False,
+            "applied": True,
+            "mutations": "partial",
+            "artifacts": [PROJECT_YAML],
+            "blockers": list(data["blockers"]),
+            "evidence": [],
+            "next_route": (
+                "retain RECOVERY_REQUIRED and resolve compatibility evidence"
+            ),
+            "compatibility": post_apply_evaluation.get("overall"),
+            "extras": extras,
+        }
+    data["checkpoints_completed"] = [
+        CONTRACT_GENERATION_UPDATED,
+        VALIDATION_PASSED,
+    ]
+    data["checkpoints_remaining"] = []
+    data["observed_expected_state"] = "VALIDATION_PASSED"
+    save_execution(directory, data)
+    if interrupt_after == "validation_passed":
+        data["status"] = "RECOVERY_REQUIRED"
+        save_execution(directory, data)
+        mark_recovery_required(root)
+        extras["migration"] = data
+        return {
+            "outcome": "BLOCKED",
+            "completed": False,
+            "applied": True,
+            "mutations": "partial",
+            "artifacts": [PROJECT_YAML],
+            "blockers": [
+                "interrupted after validation checkpoint; RECOVERY_REQUIRED"
+            ],
+            "evidence": [],
+            "next_route": "resume migration execution finalization",
+            "compatibility": "MIGRATION_REQUIRED",
+            "extras": extras,
+        }
+    if not complete_migration(
+        root,
+        plan["target_contract_generation"],
+    ):
+        extras["migration"] = data
+        return {
+            "outcome": "BLOCKED",
+            "completed": False,
+            "applied": True,
+            "mutations": "none",
+            "artifacts": [],
+            "blockers": [
+                "project.yaml became non-executable before migration completion"
+            ],
+            "evidence": [],
+            "next_route": "resolve project host schema/authority",
+            "compatibility": None,
+            "extras": extras,
+        }
+    data["status"] = "COMPLETED"
+    save_execution(directory, data)
+    delete_execution(directory)
+    extras["migration"] = {"status": "COMPLETED", "plan_id": plan["plan_id"]}
+    if develop_binding is not None:
+        extras["migration"]["develop_binding"] = normalize_develop_binding(
+            develop_binding
+        )
+    extras.setdefault(
+        "pre_compatibility",
+        plan.get("compatibility") or "MIGRATION_REQUIRED",
+    )
+    extras["post_compatibility"] = post_apply_evaluation.get("overall")
+    extras["current_compatibility"] = post_apply_evaluation.get("overall")
+    return {
+        "outcome": "COMPLETED",
+        "completed": True,
+        "applied": True,
+        "mutations": "bounded",
+        "artifacts": [PROJECT_YAML],
+        "blockers": [],
+        "evidence": ["PREPARED", "APPLYING", "VALIDATING", "COMPLETED"],
+        "next_route": "normal host operation",
+        "compatibility": post_apply_evaluation.get("overall"),
+        "extras": extras,
+    }
 
 
 def load_execution(directory: Path) -> dict[str, Any]:

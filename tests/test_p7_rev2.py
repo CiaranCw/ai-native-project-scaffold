@@ -9,6 +9,7 @@ from p7_support import (
     TASK_A,
     bind_develop_lock,
     develop_engine,
+    ready_lifecycle_opts,
     write_active_host,
     write_task,
 )
@@ -26,12 +27,10 @@ COMPLETE_STAGES = [
         "goal": "Write the fixture source.",
         "acceptance": "src/app.py has the expected content.",
         "status": "COMPLETE",
-        "required_tests": [
-            {"requirement_id": "unit", "observed_outcome": "PASS"}
-        ],
+        "required_tests": [],
     }
 ]
-FINAL_PASS = [{"requirement_id": "unit", "observed_outcome": "PASS"}]
+FINAL_PASS: list[dict] = []
 
 
 class P7Rev2Tests(unittest.TestCase):
@@ -117,7 +116,8 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F05_first_publication_conflict_blocks_source_and_aborts_session(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host)
 
@@ -165,6 +165,7 @@ class P7Rev2Tests(unittest.TestCase):
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
             before_ready_task_publish=capture,
         )
         self.assertEqual(result.outcome, "COMPLETED")
@@ -192,6 +193,7 @@ class P7Rev2Tests(unittest.TestCase):
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
             before_ready_task_publish=compete,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -208,7 +210,8 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F08_late_ready_conflict_keeps_source_mutation(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
 
@@ -227,6 +230,7 @@ class P7Rev2Tests(unittest.TestCase):
             task_id=TASK_A,
             writes=[{"path": "src/app.py", "content": "kept = True\n"}],
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
             before_ready_task_publish=compete,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -251,12 +255,16 @@ class P7Rev2Tests(unittest.TestCase):
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
             before_ready_task_publish=capture,
         )
         self.assertEqual(result.outcome, "COMPLETED")
         current = observe_candidate(self.host)
-        self.assertNotEqual(seen["before_ready"], current.digest)
+        # FA2-FND-003: READY control-plane publication is candidate-neutral.
+        self.assertEqual(seen["before_ready"], current.digest)
         self.assertEqual(result.extras["candidate"]["candidate_digest"], current.digest)
+        stored = read_yaml(self._task_path())
+        self.assertEqual(stored["status"], "READY_FOR_REVIEW")
 
     def test_F10_submit_handoff_uses_fresh_post_ready_candidate(self):
         write_active_host(self.host)
@@ -265,6 +273,7 @@ class P7Rev2Tests(unittest.TestCase):
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
         )
         self.assertEqual(result.outcome, "COMPLETED")
         current = observe_candidate(self.host)
@@ -280,6 +289,7 @@ class P7Rev2Tests(unittest.TestCase):
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
         )
         self.assertEqual(result.outcome, "COMPLETED")
         current = observe_candidate(self.host)
@@ -301,6 +311,7 @@ class P7Rev2Tests(unittest.TestCase):
             invoke_test=True,
             selected=["unit"],
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["test_pass"])
@@ -309,7 +320,7 @@ class P7Rev2Tests(unittest.TestCase):
         submit = result.extras["submit_handoff"]
         current = observe_candidate(self.host)
         self.assertEqual(submit["candidate_digest"], current.digest)
-        self.assertNotEqual(
+        self.assertEqual(
             develop_to_test["candidate_digest"],
             submit["candidate_digest"],
         )
@@ -323,9 +334,9 @@ class P7Rev2Tests(unittest.TestCase):
         self.assertIsNotNone(report)
         bound = (report.get("candidate") or {}).get("candidate_digest")
         self.assertEqual(bound, develop_to_test["candidate_digest"])
-        self.assertNotEqual(bound, current.digest)
-        self.assertFalse(report_usable_for(report, current))
-        self.assertFalse(result.extras["test_report_usable_for_current"])
+        self.assertEqual(bound, current.digest)
+        self.assertTrue(report_usable_for(report, current))
+        self.assertTrue(result.extras["test_report_usable_for_current"])
 
     def _task_path(self) -> Path:
         return self.host / ".scaffold/tasks" / f"{TASK_A}.yaml"

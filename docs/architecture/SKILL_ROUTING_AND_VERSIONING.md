@@ -2,9 +2,16 @@
 
 This document visualizes the P4 Skill Contract. Rules live in [../contracts/SKILL_CONTRACT.md](../contracts/SKILL_CONTRACT.md). Product rules: [../contracts/CONSTITUTION.md](../contracts/CONSTITUTION.md). Host lock path: [../contracts/PROJECT_CONTRACT.md](../contracts/PROJECT_CONTRACT.md).
 
-It does **not** implement Skills, a resolver, client plugins, or live `skills/` / `.scaffold/skills.lock`.
+It does **not** implement Skills, a resolver, client plugins, or a live host
+`.scaffold/skills.lock`.
 
-This distribution repository does **not** contain Skill packages or a host lock.
+This repository currently contains four canonical Skill packages under
+`skills/` — Understand, Develop, Test, and Submit. It does not currently
+contain a host `skills.lock`. Those packages are the current Distribution
+Skill identities; this document visualizes routing and versioning against
+This document visualizes routing and versioning against
+that relationship. It does not claim P10 closed, DIVE started, or v2.0
+released.
 
 ---
 
@@ -67,7 +74,19 @@ One user sentence → **one** top-level Skill. Nested Skills are invocations, no
 
  “Repair this failed change.”
         → Develop / repair
+
+ “Continue this project.”
+ “Understand the current state and tell me what needs doing.”
+        → Understand / refresh action=resume
+          (project-local reconstruction; chat is not authority)
 ```
+
+Refresh `action=resume` and `action=understand` are Refresh actions, not a
+fifth Understand mode and not a fifth Skill. Physical observation decides
+refresh **scope**; Understand-produced supporting completion receipts are
+required before a current-head may become CURRENT. Malformed canonical Task
+or Session authority fail-closes resume to `human`. See
+[../implementation/P10_INCREMENTAL_MULTIAGENT.md](../implementation/P10_INCREMENTAL_MULTIAGENT.md).
 
 ---
 

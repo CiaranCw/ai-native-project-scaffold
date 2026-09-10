@@ -4,7 +4,15 @@ from pathlib import Path
 from typing import Any
 
 from scaffold_p5 import yaml_lite
-from scaffold_p5.discovery import discover
+from scaffold_p5.discovery import discover, facts_as_dicts, module_paths, observed_testing_surface
+from scaffold_p5.agents import (
+    AGENTS_ROUTER_REGION,
+    human_forbids_agents_integration,
+    integrated_agents_text,
+    parse_managed_regions,
+    registered_region_ids,
+    registry_marker_issues,
+)
 from scaffold_p5.full import (
     ARCHITECTURE_POINTER,
     DEVELOPMENT_ENTRY,
@@ -15,6 +23,8 @@ from scaffold_p5.full import (
     MODULE_MISSING_ENTRY,
     TESTING_ENTRY,
     TESTING_UNKNOWN_ENTRY,
+    _commands_data,
+    _tests_data,
 )
 from scaffold_p5.host_state import (
     AGENTS_MD,
@@ -31,7 +41,8 @@ from scaffold_p5.host_state import (
 )
 from scaffold_p5.io_util import read_text, read_yaml, write_text_atomic, write_yaml_atomic
 from scaffold_p5.models import DiscoveryFact
-from scaffold_p5.schemas import whole_file_mutation_allowed
+from scaffold_p5.ownership import source_area_ownership
+from scaffold_p5.schemas import plan_owned_text_mutation, whole_file_mutation_allowed
 
 
 BUSINESS_HINTS = ("src/", "lib/", "app/", "pkg/")
@@ -93,6 +104,11 @@ def refresh_host(root: Path) -> dict[str, Any]:
         (snap.project or {}).get("refresh_conflicts") or []
     )
     facts = discover(root)
+    observed_source_facts = [fact.value for fact in facts if fact.name == "source_tree"]
+    observed_source_areas = (
+        list(observed_source_facts[0] or []) if observed_source_facts else []
+    )
+    ownership = source_area_ownership(ownership, observed_source_areas)
     previous_facts = {
         row.get("name"): row
         for row in (snap.project or {}).get("facts") or []
@@ -105,23 +121,65 @@ def refresh_host(root: Path) -> dict[str, Any]:
 
     agents_fact = _fact(facts, "agents_scaffold_bridge")
     agents_mode = ownership.get(AGENTS_MD)
-    _queue_text(
-        root,
-        ownership,
-        AGENTS_MD,
-        GENERATED_AGENTS,
-        stale=bool(
-            agents_mode == "HUMAN_OWNED"
-            and (
-                not agents_fact
-                or agents_fact.confidence != "VERIFIED"
-                or agents_fact.value is not True
+    agents_path = root / AGENTS_MD
+    agents_text = read_text(agents_path) if agents_path.is_file() else ""
+    if agents_mode == "MANAGED":
+        registered = registered_region_ids(snap.project or {}, AGENTS_MD)
+        spans, parse_issues = parse_managed_regions(agents_text)
+        agreement = list(parse_issues) + registry_marker_issues(spans, registered)
+        if AGENTS_ROUTER_REGION not in registered:
+            agreement.append("MANAGED AGENTS.md has no registered agents-router region")
+        if not parse_issues and human_forbids_agents_integration(agents_text):
+            agreement.append(
+                "human AGENTS.md text conflicts with Scaffold integration"
             )
-        ),
-        conflict="AGENTS.md HUMAN_OWNED router is missing or incoherent",
-        writes=text_writes,
-        conflicts=conflicts,
-    )
+        if agreement:
+            conflicts.extend(agreement)
+        else:
+            integrated = integrated_agents_text(
+                agents_text,
+                insert_if_absent=False,
+                region_id=AGENTS_ROUTER_REGION,
+            )
+            if integrated is None:
+                conflicts.append(
+                    "AGENTS.md MANAGED region cannot be repaired without guessing"
+                )
+            else:
+                _queue_text(
+                    root,
+                    ownership,
+                    AGENTS_MD,
+                    integrated,
+                    stale=bool(
+                        not agents_fact
+                        or agents_fact.confidence != "VERIFIED"
+                        or agents_fact.value is not True
+                        or integrated != agents_text
+                    ),
+                    conflict="AGENTS.md MANAGED router region is missing or incoherent",
+                    writes=text_writes,
+                    conflicts=conflicts,
+                    bounded_region=True,
+                )
+    else:
+        _queue_text(
+            root,
+            ownership,
+            AGENTS_MD,
+            GENERATED_AGENTS,
+            stale=bool(
+                agents_mode == "HUMAN_OWNED"
+                and (
+                    not agents_fact
+                    or agents_fact.confidence != "VERIFIED"
+                    or agents_fact.value is not True
+                )
+            ),
+            conflict="AGENTS.md HUMAN_OWNED router is missing or incoherent",
+            writes=text_writes,
+            conflicts=conflicts,
+        )
     overview_path = root / OVERVIEW_MD
     overview_mode = ownership.get(OVERVIEW_MD)
     overview_human_stale = bool(
@@ -153,12 +211,11 @@ def refresh_host(root: Path) -> dict[str, Any]:
         else {"schema_version": "1", "modules": []}
     )
     indexed = {m.get("path"): m for m in modules.get("modules") or []}
-    observed_dirs = [f.value for f in facts if f.name == "source_tree"]
-    observed = list(observed_dirs[0] or []) if observed_dirs else []
+    observed = module_paths(facts)
     for path in observed:
         if path not in indexed:
             entry = {
-                "id": path,
+                "id": str(path).replace("/", "-"),
                 "path": path,
                 "knowledge_entry": f"{MODULE_DOCS}/{path}.md",
                 "kind": "source",
@@ -210,16 +267,8 @@ def refresh_host(root: Path) -> dict[str, Any]:
         )
 
     build = _fact(facts, "declared_build_surface")
-    commands = {"schema_version": "1", "commands": []}
+    commands = _commands_data(facts_as_dicts(facts))
     if build and build.value:
-        commands["commands"].append(
-            {
-                "id": "declared-build-surface",
-                "surface": build.value,
-                "availability": "declared",
-                "confidence": build.confidence,
-            }
-        )
         surfaces = ", ".join(f"`{value}`" for value in build.value)
         _queue_text(
             root,
@@ -256,20 +305,27 @@ def refresh_host(root: Path) -> dict[str, Any]:
         )
 
     tests_fact = _fact(facts, "test_tree")
-    profiles: list[dict[str, Any]] = []
-    applicable: bool | None = None
-    confidence = tests_fact.confidence if tests_fact else "UNKNOWN"
-    if tests_fact and tests_fact.value:
-        profiles.append(
-            {"id": "observed-tests", "paths": tests_fact.value, "policy": "observed"}
-        )
-        applicable = True
-        paths = ", ".join(f"`{value}`" for value in tests_fact.value)
+    prior_tests_status, prior_tests, _prior_tests_issues = _inspect_machine_index(
+        root / TESTS_YAML,
+        "profiles",
+    )
+    tests_data = _tests_data(facts_as_dicts(facts))
+    if observed_testing_surface(facts):
+        paths = list(tests_fact.value or []) if tests_fact and tests_fact.value else []
+        if not paths:
+            commands_fact = _fact(facts, "declared_commands")
+            paths = [
+                str(row.get("invocation"))
+                for row in (commands_fact.value or [])
+                if isinstance(row, dict) and row.get("kind") == "test" and row.get("invocation")
+            ]
         _queue_text(
             root,
             ownership,
             TESTING_MD,
-            TESTING_ENTRY.format(paths=paths),
+            TESTING_ENTRY.format(
+                paths=", ".join(f"`{value}`" for value in paths) or "`declared test surface`"
+            ),
             stale=_fact_changed(previous_facts, tests_fact)
             or _was_unresolved(previous_conflicts, "testing knowledge"),
             conflict="testing knowledge entry is HUMAN_OWNED and stale",
@@ -277,7 +333,7 @@ def refresh_host(root: Path) -> dict[str, Any]:
             conflicts=conflicts,
         )
     elif tests_fact and tests_fact.confidence == "VERIFIED":
-        applicable = False
+        pass
     elif (root / TESTING_MD).exists():
         _queue_text(
             root,
@@ -290,15 +346,29 @@ def refresh_host(root: Path) -> dict[str, Any]:
             writes=text_writes,
             conflicts=conflicts,
         )
-    tests_data = {
-        "schema_version": "1",
-        "applicable": applicable,
-        "applicability": "UNKNOWN"
-        if applicable is None
-        else ("APPLICABLE" if applicable else "NOT_APPLICABLE"),
-        "confidence": confidence,
-        "profiles": profiles,
-    }
+    if prior_tests_status == "VALID" and isinstance(prior_tests, dict):
+        if "rule_refs" in prior_tests:
+            tests_data["rule_refs"] = prior_tests["rule_refs"]
+        prior_profiles = {
+            str(row.get("id") or ""): row
+            for row in prior_tests.get("profiles") or []
+            if isinstance(row, dict) and row.get("id")
+        }
+        for profile in tests_data["profiles"]:
+            prior = prior_profiles.get(str(profile.get("id") or ""))
+            if isinstance(prior, dict) and "rule_refs" in prior:
+                profile["rule_refs"] = prior["rule_refs"]
+        current_ids = {
+            str(profile.get("id") or "")
+            for profile in tests_data["profiles"]
+            if isinstance(profile, dict)
+        }
+        for profile_id, prior in sorted(prior_profiles.items()):
+            if profile_id not in current_ids and "rule_refs" in prior:
+                tests_data["profiles"].append(dict(prior))
+        tests_data["profiles"] = sorted(
+            tests_data["profiles"], key=lambda row: str(row.get("id") or "")
+        )
     if _yaml_changed(root / TESTS_YAML, tests_data):
         _queue_yaml(
             root,
@@ -368,6 +438,13 @@ def refresh_host(root: Path) -> dict[str, Any]:
             or post_agents.value is not True
         ):
             conflicts.append("GENERATED AGENTS.md router did not converge")
+    elif ownership.get(AGENTS_MD) == "MANAGED":
+        if (
+            not post_agents
+            or post_agents.confidence != "VERIFIED"
+            or post_agents.value is not True
+        ):
+            conflicts.append("AGENTS.md MANAGED router region did not converge")
     elif ownership.get(AGENTS_MD) == "HUMAN_OWNED" and (
         not post_agents
         or post_agents.confidence != "VERIFIED"
@@ -391,6 +468,7 @@ def refresh_host(root: Path) -> dict[str, Any]:
     project = dict(snap.project or {})
     project["facts"] = _merge_facts(project.get("facts") or [], facts)
     project["ownership"] = ownership
+    project["source_areas"] = observed_source_areas
     knowledge = dict(project.get("knowledge") or {})
     knowledge["overview"] = (
         "conflicting"
@@ -550,6 +628,68 @@ def _knowledge_state(
     return "not_applicable" if fact.confidence == "VERIFIED" else "unknown"
 
 
+def register_generated_ownership(root: Path, paths: list[str]) -> dict[str, Any]:
+    """Register exact GENERATED ownership for absent UNKNOWN paths. Refresh authority."""
+    unique = []
+    seen: set[str] = set()
+    for item in paths:
+        rel = str(item or "").replace("\\", "/")
+        if not rel or rel in seen:
+            continue
+        seen.add(rel)
+        unique.append(rel)
+    if not unique:
+        return {"ok": True, "registered": [], "mutations": False, "blockers": []}
+    project_path = root / PROJECT_YAML
+    if not project_path.is_file():
+        return {
+            "ok": False,
+            "needs_human": True,
+            "registered": [],
+            "mutations": False,
+            "blockers": ["project.yaml is missing; ownership cannot be registered"],
+        }
+    try:
+        project = read_yaml(project_path)
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return {
+            "ok": False,
+            "needs_human": True,
+            "registered": [],
+            "mutations": False,
+            "blockers": ["project.yaml is malformed or unreadable"],
+        }
+    if not isinstance(project, dict):
+        return {
+            "ok": False,
+            "needs_human": True,
+            "registered": [],
+            "mutations": False,
+            "blockers": ["project.yaml is not a mapping"],
+        }
+    ownership = dict(project.get("ownership") or {})
+    allowed, reason = whole_file_mutation_allowed(ownership, PROJECT_YAML)
+    if not allowed:
+        return {
+            "ok": False,
+            "needs_human": True,
+            "registered": [],
+            "mutations": False,
+            "blockers": [reason],
+        }
+    for rel in unique:
+        ownership[rel] = "GENERATED"
+    project["ownership"] = ownership
+    write_yaml_atomic(project_path, project)
+    return {
+        "ok": True,
+        "registered": unique,
+        "mutations": True,
+        "blockers": [],
+        "ownership": ownership,
+    }
+
+
 def _queue_text(
     root: Path,
     ownership: dict[str, str],
@@ -560,33 +700,49 @@ def _queue_text(
     conflict: str,
     writes: dict[str, str],
     conflicts: list[str],
+    bounded_region: bool = False,
 ) -> None:
     path = root / target
-    mode = ownership.get(target)
-    allowed, reason = whole_file_mutation_allowed(ownership, target)
-    if path.exists():
-        if not path.is_file():
-            conflicts.append(
-                f"{target} exists but is not a regular file"
-            )
-            return
-        if allowed:
-            writes[target] = text
-            return
-        if mode == "HUMAN_OWNED":
-            if stale:
-                conflicts.append(conflict)
-            return
-        if mode == "MANAGED":
-            conflicts.append(reason)
-            return
-        conflicts.append(f"{target} exists without truthful ownership")
+    exists = path.exists()
+    plan = plan_owned_text_mutation(
+        ownership,
+        target,
+        exists=exists,
+        is_file=path.is_file() if exists else True,
+        bounded_region=bounded_region,
+    )
+    if exists and not path.is_file():
+        conflicts.append(f"{target} exists but is not a regular file")
         return
-    if mode in {None, "GENERATED"}:
-        ownership[target] = "GENERATED"
+    if plan.get("write"):
+        if plan.get("register_generated"):
+            ownership[target] = "GENERATED"
         writes[target] = text
         return
-    conflicts.append(f"{target} is absent but ownership is {mode}")
+    if plan.get("status") == "CONFLICTING":
+        conflicts.extend(plan.get("blockers") or [plan.get("reason") or "ownership is CONFLICTING"])
+        return
+    if plan.get("preserve") and plan.get("mode") == "HUMAN_OWNED":
+        if stale:
+            conflicts.append(conflict)
+        return
+    if plan.get("mode") == "MANAGED":
+        conflicts.append(
+            plan.get("reason")
+            or f"{target} is MANAGED but no bounded managed region is defined"
+        )
+        return
+    if exists and plan.get("status") == "UNKNOWN":
+        conflicts.append(f"{target} exists without truthful ownership")
+        return
+    if not exists:
+        conflicts.append(
+            f"{target} is absent but ownership is {plan.get('mode')}"
+        )
+        return
+    conflicts.extend(
+        plan.get("blockers") or [f"{target} exists without truthful ownership"]
+    )
 
 
 def _queue_yaml(

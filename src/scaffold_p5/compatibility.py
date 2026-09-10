@@ -5,7 +5,13 @@ from typing import Any
 from scaffold_p5.distribution import Distribution
 from scaffold_p5.host_state import SKILLS_LOCK, HostSnapshot
 from scaffold_p5.models import COMPAT_RESULTS, CORE_SKILLS, LoadedPackage, PackageRef
-from scaffold_p5.packages import exact_match, is_digest, is_format_version, is_semver
+from scaffold_p5.packages import (
+    capability_owner,
+    exact_match,
+    is_digest,
+    is_format_version,
+    is_semver,
+)
 from scaffold_p5.schemas import whole_file_mutation_allowed
 
 
@@ -126,6 +132,102 @@ def evaluate_package(
     return _valid_result("UNKNOWN", expected, actual, reasons, evidence=evidence)
 
 
+def _pending_core_requirement_owners(
+    package: LoadedPackage,
+    *,
+    self_id: str,
+    applicable_packages: dict[str, LoadedPackage],
+    closed_owners: set[str],
+) -> set[str]:
+    pending: set[str] = set()
+    known = set(applicable_packages) | set(closed_owners)
+    for requirement in package.manifest.get("requires") or []:
+        owner = capability_owner(str(requirement))
+        if owner in CORE_SKILLS and owner != self_id and owner not in known:
+            pending.add(owner)
+    return pending
+
+
+def resolve_established_host_actual(
+    expected: PackageRef,
+    *,
+    distribution: Distribution,
+    project: dict[str, Any] | None,
+    applicable_packages: dict[str, LoadedPackage],
+    closed_owners: set[str] | None = None,
+) -> tuple[LoadedPackage | None, str, list[str]]:
+    """Resolve lock expected identity against available Distribution packages.
+
+    Exact identity has priority. A unique explicit COMPATIBLE substitute may
+    be selected only when the exact package is absent. Multiple eligible
+    substitutes are UNKNOWN. INVALID packages never become COMPATIBLE.
+    A uniquely resolved intrinsically VALID package that is not COMPATIBLE
+    remains VALID and is returned for compatibility evaluation. Absence of
+    any same-skill package remains a resolution blocker. Core capability
+    owners that are not yet bound are deferred rather than treated as a
+    final environment miss.
+    """
+    exact = distribution.index.resolve_exact(expected)
+    if exact is not None:
+        return exact, "exact", []
+    closed = set(closed_owners or ())
+    compatible: list[LoadedPackage] = []
+    valid: list[LoadedPackage] = []
+    invalid: list[LoadedPackage] = []
+    deferred = False
+    for package in distribution.index.find(expected.skill_id):
+        if package.validity != "VALID":
+            invalid.append(package)
+            continue
+        valid.append(package)
+        pending = _pending_core_requirement_owners(
+            package,
+            self_id=expected.skill_id,
+            applicable_packages=applicable_packages,
+            closed_owners=closed,
+        )
+        if pending:
+            deferred = True
+            continue
+        provision = dict(applicable_packages)
+        provision[expected.skill_id] = package
+        row = evaluate_package(
+            expected,
+            package,
+            project=project,
+            distribution=distribution,
+            applicable_packages=provision,
+        )
+        if row.get("validity") == "VALID" and row.get("result") == "COMPATIBLE":
+            compatible.append(package)
+    if len(compatible) == 1 and not deferred:
+        return compatible[0], "compatible", []
+    if len(compatible) > 1:
+        return None, "ambiguous", [
+            f"{expected.skill_id} has multiple compatible substitutions; MUST NOT guess"
+        ]
+    if deferred:
+        return None, "deferred", [
+            f"{expected.skill_id} waits for unresolved core capability owners"
+        ]
+    if len(compatible) == 1:
+        return compatible[0], "compatible", []
+    if len(valid) == 1:
+        return valid[0], "valid", []
+    if len(valid) > 1:
+        return None, "ambiguous", [
+            f"{expected.skill_id} has multiple valid non-exact packages; MUST NOT guess"
+        ]
+    if invalid:
+        reasons = list(invalid[0].validity_reasons) or [
+            f"{expected.skill_id} substitution package is INVALID"
+        ]
+        return invalid[0], "invalid", reasons
+    return None, "missing", [
+        f"{expected.skill_id} exact lock package/input cannot be resolved"
+    ]
+
+
 def evaluate_host(snapshot: HostSnapshot, distribution: Distribution) -> dict[str, Any]:
     if not snapshot.project_view.valid:
         return {
@@ -160,18 +262,81 @@ def evaluate_host(snapshot: HostSnapshot, distribution: Distribution) -> dict[st
         )
         expected_refs[skill_id] = expected
         if skill_id == "understand":
-            actual = distribution.actual_understand
-        else:
-            actual = distribution.index.resolve_exact(expected)
-            if actual is None:
-                blockers.append(f"{skill_id} exact lock package/input cannot be resolved")
+            actual_packages[skill_id] = distribution.actual_understand
+            continue
+        exact = distribution.index.resolve_exact(expected)
+        if exact is not None:
+            actual_packages[skill_id] = exact
+    closed_owners = set(actual_packages)
+    unresolved = [skill_id for skill_id in CORE_SKILLS if skill_id not in actual_packages]
+    while unresolved:
+        still: list[str] = []
+        progress = False
+        for skill_id in unresolved:
+            expected = expected_refs[skill_id]
+            resolved, status, resolve_reasons = resolve_established_host_actual(
+                expected,
+                distribution=distribution,
+                project=snapshot.project,
+                applicable_packages=actual_packages,
+                closed_owners=closed_owners,
+            )
+            if status == "deferred":
+                still.append(skill_id)
+                continue
+            progress = True
+            closed_owners.add(skill_id)
+            if status == "ambiguous":
+                blockers.extend(resolve_reasons)
+                results[skill_id] = {
+                    "validity": "VALID",
+                    "result": "UNKNOWN",
+                    "reasons": list(resolve_reasons),
+                    "skill_id": skill_id,
+                    "expected_version": expected.skill_version,
+                    "actual_version": None,
+                }
+                continue
+            if resolved is None:
+                blockers.extend(resolve_reasons)
                 results[skill_id] = {
                     "validity": "INVALID",
                     "result": None,
-                    "reasons": [f"{skill_id} exact lock identity is unavailable"],
+                    "reasons": list(resolve_reasons),
+                    "skill_id": skill_id,
+                    "expected_version": expected.skill_version,
                 }
                 continue
-        actual_packages[skill_id] = actual
+            if status == "invalid":
+                blockers.append(f"{skill_id} package INVALID")
+                results[skill_id] = {
+                    "validity": "INVALID",
+                    "result": None,
+                    "reasons": list(resolve_reasons) or list(resolved.validity_reasons),
+                    "skill_id": skill_id,
+                    "expected_version": expected.skill_version,
+                    "actual_version": resolved.ref.skill_version,
+                }
+                continue
+            actual_packages[skill_id] = resolved
+        if not progress:
+            for skill_id in still:
+                reason = (
+                    f"{skill_id} cannot be resolved until core dependency owners "
+                    "are available; MUST NOT guess"
+                )
+                blockers.append(reason)
+                expected = expected_refs[skill_id]
+                results[skill_id] = {
+                    "validity": "VALID",
+                    "result": "UNKNOWN",
+                    "reasons": [reason],
+                    "skill_id": skill_id,
+                    "expected_version": expected.skill_version,
+                    "actual_version": None,
+                }
+            break
+        unresolved = still
     graph_issues = (
         distribution.graph_issues(actual_packages)
         if len(actual_packages) == len(CORE_SKILLS)
@@ -524,3 +689,61 @@ def _aggregate_results(results: list[str]) -> str | None:
         if value in results:
             return value
     return None
+
+
+def migration_need(evaluation: dict[str, Any]) -> dict[str, Any]:
+    """Validity-first migration inspector. INVALID is never MIGRATION_REQUIRED."""
+    rows = evaluation.get("results") or {}
+    invalid = any(
+        isinstance(row, dict) and row.get("validity") == "INVALID"
+        for row in rows.values()
+    )
+    blockers = list(evaluation.get("blockers") or [])
+    if invalid or evaluation.get("overall") is None and not evaluation.get("ok"):
+        reasons = list(blockers)
+        for row in rows.values():
+            if isinstance(row, dict) and row.get("validity") == "INVALID":
+                reasons.extend(str(item) for item in (row.get("reasons") or []) if item)
+        return {
+            "needed": False,
+            "validity": "INVALID",
+            "compatibility": None,
+            "reasons": reasons,
+            "migration_causes": [],
+        }
+    overall = evaluation.get("overall")
+    causes: list[dict[str, Any]] = []
+    reasons: list[str] = []
+    for skill_id, row in rows.items() if isinstance(rows, dict) else []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("result") == "MIGRATION_REQUIRED":
+            reasons.extend(str(item) for item in (row.get("reasons") or []) if item)
+            for cause in row.get("migration_causes") or []:
+                if isinstance(cause, dict):
+                    annotated = dict(cause)
+                    annotated.setdefault("skill_id", skill_id)
+                    causes.append(annotated)
+    if overall in {"EXACT", "COMPATIBLE"}:
+        return {
+            "needed": False,
+            "validity": "VALID",
+            "compatibility": overall,
+            "reasons": [],
+            "migration_causes": [],
+        }
+    if overall == "MIGRATION_REQUIRED":
+        return {
+            "needed": True,
+            "validity": "VALID",
+            "compatibility": "MIGRATION_REQUIRED",
+            "reasons": reasons or blockers,
+            "migration_causes": causes,
+        }
+    return {
+        "needed": False,
+        "validity": "VALID",
+        "compatibility": overall,
+        "reasons": reasons or blockers,
+        "migration_causes": causes,
+    }

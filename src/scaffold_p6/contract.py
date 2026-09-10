@@ -96,6 +96,8 @@ def resolve_contract(
         return _malformed(raw, "tests.yaml applicability is unsupported")
     if "applicable" in raw and not isinstance(raw.get("applicable"), bool):
         return _malformed(raw, "tests.yaml applicable must be a boolean")
+    if "required_authority" in raw and raw.get("required_authority") not in FACT_CLASSES:
+        return _malformed(raw, "tests.yaml required_authority is not a legal fact class")
     applicable = raw.get("applicable") if isinstance(raw.get("applicable"), bool) else None
     applicable_conflict = _applicable_conflict(applicable, applicability)
     if applicable_conflict:
@@ -209,10 +211,12 @@ def resolve_contract(
             raw=raw,
         )
 
-    set_authoritative = (
-        confidence == "VERIFIED"
-        and applicability in {"APPLICABLE", "NOT_APPLICABLE"}
-        and not authority_issues
+    set_authoritative = _required_set_is_authoritative(
+        raw,
+        required=required,
+        confidence=confidence,
+        applicability=applicability,
+        authority_issues=authority_issues,
     )
     verified_none = (
         set_authoritative
@@ -496,7 +500,29 @@ def _profile_issues(row: dict[str, Any]) -> list[str]:
         issues.append(f"profile {profile_id!r} applicability is unsupported")
     if "confidence" in row and row.get("confidence") not in FACT_CLASSES:
         issues.append(f"profile {profile_id!r} confidence is unsupported")
+    if "required_authority" in row and row.get("required_authority") not in FACT_CLASSES:
+        issues.append(f"profile {profile_id!r} required_authority is not a legal fact class")
     return issues
+
+
+def _required_set_is_authoritative(
+    raw: dict[str, Any],
+    *,
+    required: list[Profile],
+    confidence: str,
+    applicability: str,
+    authority_issues: list[str],
+) -> bool:
+    if authority_issues:
+        return False
+    if confidence != "VERIFIED" or applicability not in {"APPLICABLE", "NOT_APPLICABLE"}:
+        return False
+    declared = raw.get("required_authority")
+    if not required:
+        return declared == "VERIFIED"
+    if declared is not None:
+        return declared == "VERIFIED"
+    return True
 
 
 def _required_policy_issues(profiles: list[Profile], contract_confidence: str) -> list[str]:

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import REPO, REPO_UNDERSTAND, adopt, distribution, engine, files_under, write
+from support import FIXTURE_DIST, REPO, REPO_UNDERSTAND, adopt, apply_fresh_migration, distribution, engine, files_under, write
 from scaffold_p5.compatibility import evaluate_package
 from scaffold_p5.discovery import discover
 from scaffold_p5.host_state import snapshot_host
@@ -66,9 +66,12 @@ class P5UnderstandTests(unittest.TestCase):
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.skill_version, "2.0.0")
         lock = read_yaml(self.host / ".scaffold/skills.lock")
-        actual = load_package(REPO_UNDERSTAND)
+        released = load_package(FIXTURE_DIST / "packages/understand-2.0.0")
         self.assertEqual(lock["skills"]["understand"]["skill_version"], "2.0.0")
-        self.assertEqual(lock["skills"]["understand"]["package_digest"], actual.ref.package_digest)
+        self.assertEqual(
+            lock["skills"]["understand"]["package_digest"],
+            released.ref.package_digest,
+        )
         self.assertEqual(set(lock["skills"]), {"understand", "develop", "test", "submit"})
 
     def test_F_release_u1_actual_u2_blocks_before_bootstrap(self):
@@ -174,11 +177,22 @@ class P5UnderstandTests(unittest.TestCase):
         self.assertEqual(lock["skills"]["understand"]["skill_version"], "2.0.0")
 
     def test_N_five_result_taxonomy_is_exact(self):
-        pinned = load_package(REPO_UNDERSTAND).ref
+        released = load_package(REPO / "tests/fixtures/distribution/packages/understand-2.0.0")
+        pinned = released.ref
         dist = distribution()
-        exact = evaluate_package(pinned, load_package(REPO_UNDERSTAND), project={"project_contract_generation": "1"}, distribution=dist)
+        exact = evaluate_package(pinned, released, project={"project_contract_generation": "1"}, distribution=dist)
         self.assertEqual(exact["validity"], "VALID")
         self.assertEqual(exact["result"], "EXACT")
+        live = load_package(REPO_UNDERSTAND)
+        live_exact = evaluate_package(
+            live.ref,
+            live,
+            project={"project_contract_generation": "1"},
+            distribution=dist,
+        )
+        self.assertEqual(live.validity, "VALID")
+        self.assertEqual(live.ref.skill_version, "2.1.0")
+        self.assertEqual(live_exact["result"], "EXACT")
         compatible = evaluate_package(
             pinned,
             load_package(REPO / "tests/fixtures/distribution/packages/understand-2.0.1"),
@@ -244,15 +258,12 @@ class P5UnderstandTests(unittest.TestCase):
         adopt(self.host)
         planned = engine(self.host, "2.1.0").run("compatibility", action="migrate")
         self.assertEqual(planned.outcome, "NEEDS_HUMAN")
+        self.assertEqual(planned.mutations, "none")
+        self.assertIn("develop", planned.next_route)
         self.assertIn("migration_plan", planned.extras)
-        done = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval={
-                "approved": True,
-                "plan_id": planned.extras["migration_plan"]["plan_id"],
-                "plan_digest": planned.extras["migration_plan"]["digest"],
-            },
+        done = apply_fresh_migration(
+            self.host,
+            planned.extras["migration_plan"],
         )
         self.assertEqual(done.outcome, "COMPLETED")
         self.assertEqual(done.extras["migration"]["status"], "COMPLETED")
@@ -264,14 +275,9 @@ class P5UnderstandTests(unittest.TestCase):
     def test_Q_interrupted_migration_recovery_required(self):
         adopt(self.host)
         planned = engine(self.host, "2.1.0").run("compatibility", action="migrate")
-        interrupted = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval={
-                "approved": True,
-                "plan_id": planned.extras["migration_plan"]["plan_id"],
-                "plan_digest": planned.extras["migration_plan"]["digest"],
-            },
+        interrupted = apply_fresh_migration(
+            self.host,
+            planned.extras["migration_plan"],
             interrupt_after="first_mutation",
         )
         self.assertEqual(interrupted.outcome, "BLOCKED")
@@ -281,27 +287,17 @@ class P5UnderstandTests(unittest.TestCase):
     def test_R_aborted_restrictions(self):
         adopt(self.host)
         planned = engine(self.host, "2.1.0").run("compatibility", action="migrate")
-        aborted = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval={
-                "approved": True,
-                "plan_id": planned.extras["migration_plan"]["plan_id"],
-                "plan_digest": planned.extras["migration_plan"]["digest"],
-            },
+        aborted = apply_fresh_migration(
+            self.host,
+            planned.extras["migration_plan"],
             abort_before_mutation=True,
         )
         self.assertEqual(aborted.extras["migration"]["status"], "ABORTED")
         adopt_host = self.host
         planned2 = engine(adopt_host, "2.1.0").run("compatibility", action="migrate")
-        engine(adopt_host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval={
-                "approved": True,
-                "plan_id": planned2.extras["migration_plan"]["plan_id"],
-                "plan_digest": planned2.extras["migration_plan"]["digest"],
-            },
+        apply_fresh_migration(
+            adopt_host,
+            planned2.extras["migration_plan"],
             interrupt_after="first_mutation",
         )
         refuse = engine(adopt_host, "2.1.0").run("compatibility", action="migrate", abort=True)
@@ -395,7 +391,7 @@ class P5SupportTests(unittest.TestCase):
         pkg = load_package(REPO_UNDERSTAND)
         self.assertEqual(pkg.validity, "VALID")
         self.assertEqual(pkg.ref.skill_id, "understand")
-        self.assertEqual(pkg.ref.skill_version, "2.0.0")
+        self.assertEqual(pkg.ref.skill_version, "2.1.0")
 
     def test_yaml_roundtrip_facts(self):
         from scaffold_p5 import yaml_lite

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from typing import get_args
 
-from support import FIXTURE_DIST, REPO, REPO_UNDERSTAND, adopt, engine, write
+from support import FIXTURE_DIST, REPO, REPO_UNDERSTAND, adopt, apply_fresh_migration, engine, write
 from scaffold_p5.adoption import validate_plan_content
 from scaffold_p5.host_state import durable_inventory, snapshot_host
 from scaffold_p5.io_util import read_text, read_yaml, write_yaml_atomic
@@ -175,10 +175,9 @@ class P5Rev5Tests(unittest.TestCase):
         adopt(self.host)
         preview = engine(self.host, "2.1.0").run("compatibility", action="migrate")
         plan = preview.extras["migration_plan"]
-        interrupted = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._migration_approval(plan),
+        interrupted = apply_fresh_migration(
+            self.host,
+            plan,
             interrupt_after="first_mutation",
         )
         self.assertEqual(interrupted.outcome, "BLOCKED")
@@ -437,11 +436,7 @@ class P5Rev5Tests(unittest.TestCase):
         adopt(self.host)
         preview = engine(self.host, "2.1.0").run("compatibility", action="migrate")
         plan = preview.extras["migration_plan"]
-        migrated = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._migration_approval(plan),
-        )
+        migrated = apply_fresh_migration(self.host, plan)
         self.assertEqual(migrated.outcome, "COMPLETED")
         self.assertEqual(
             engine(self.host, "2.1.0").run("compatibility").compatibility,

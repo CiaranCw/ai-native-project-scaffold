@@ -5,7 +5,9 @@ import sys
 from pathlib import Path
 
 from support import REPO, write
+from scaffold_p5.full import GENERATED_AGENTS
 from scaffold_p5.io_util import write_yaml_atomic
+from scaffold_p5.ownership import P6_DURABLE_EVIDENCE_AREA
 from scaffold_p5.packages import load_package
 from scaffold_p6.engine import TestEngine
 
@@ -18,6 +20,8 @@ CORE_OWNERSHIP = {
     ".scaffold/commands.yaml": "GENERATED",
     ".scaffold/tests.yaml": "GENERATED",
     ".scaffold/skills.lock": "GENERATED",
+    ".scaffold/ext/submit/": "GENERATED",
+    P6_DURABLE_EVIDENCE_AREA: "GENERATED",
 }
 
 
@@ -93,8 +97,10 @@ def write_project(host: Path, **overrides) -> None:
         "ownership": dict(CORE_OWNERSHIP),
         "facts": [],
         "clients": [],
+        "source_areas": [],
     }
     data.update(overrides)
+    write(host, "AGENTS.md", GENERATED_AGENTS)
     write_yaml_atomic(host / ".scaffold/project.yaml", data)
     write_yaml_atomic(host / ".scaffold/modules.yaml", {"schema_version": "1", "modules": []})
     write_lock(host)
@@ -121,6 +127,7 @@ def write_tests(
     applicable=True,
     applicability: str = "APPLICABLE",
     confidence: str = "VERIFIED",
+    required_authority: str | None = None,
     generated_outputs: list[str] | None = None,
 ) -> None:
     data = {
@@ -131,6 +138,8 @@ def write_tests(
     }
     if applicable is not None:
         data["applicable"] = applicable
+    if required_authority is not None:
+        data["required_authority"] = required_authority
     if generated_outputs is not None:
         data["generated_outputs"] = generated_outputs
     write_yaml_atomic(host / ".scaffold/tests.yaml", data)

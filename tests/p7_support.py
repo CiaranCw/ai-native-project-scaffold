@@ -94,9 +94,12 @@ def repair_handoff(
     task_id: str = TASK_A,
     candidate_digest: str,
     report: dict | None = None,
+    kind: str = "test_to_develop",
+    target_stage_ids: list[str] | None = None,
+    **overrides,
 ) -> dict:
     payload = {
-        "kind": "test_to_develop",
+        "kind": kind,
         "task_id": task_id,
         "test_pass": False,
         "test_complete": False,
@@ -104,10 +107,77 @@ def repair_handoff(
         "candidate_digest": candidate_digest,
         "blockers": ["required verification failed"],
         "evidence_refs": [],
+        "submit_authorized": False,
+        "capabilities": {
+            "commit": False,
+            "push": False,
+            "submit_authorized": False,
+        },
     }
     if report is not None:
         payload["report"] = report
+    if target_stage_ids is not None:
+        payload["target_stage_ids"] = list(target_stage_ids)
+    payload.update(overrides)
     return payload
+
+
+def submit_repair_handoff(
+    *,
+    task_id: str = TASK_A,
+    candidate_digest: str,
+    target_stage_ids: list[str],
+    **overrides,
+) -> dict:
+    return repair_handoff(
+        task_id=task_id,
+        candidate_digest=candidate_digest,
+        kind="submit_to_develop",
+        target_stage_ids=target_stage_ids,
+        **overrides,
+    )
+
+
+def satisfied_decision(**overrides) -> dict:
+    payload = {
+        "outcome": "SATISFIED",
+        "rationale": (
+            "Current reconstructable Task Book and repository facts "
+            "satisfy the declared acceptance criterion."
+        ),
+        "basis": [
+            {
+                "kind": "repository_observation",
+                "summary": (
+                    "Declared acceptance is observable from current "
+                    "repository and Task Book facts."
+                ),
+            }
+        ],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def ready_lifecycle_opts() -> dict:
+    return {
+        "stage_completion_decision": satisfied_decision(stage_id="stage-1"),
+        "task_completion_decision": satisfied_decision(
+            rationale=(
+                "Current Stage Completion Decisions and Task-level acceptance "
+                "are reconstructable and SATISFIED for this candidate."
+            ),
+            basis=[
+                {
+                    "kind": "task_fact",
+                    "summary": (
+                        "Required Stages are COMPLETE with current SATISFIED "
+                        "decisions and Task-level acceptance is satisfied."
+                    ),
+                }
+            ],
+        ),
+    }
 
 
 def write_invalid_develop_package(dest: Path) -> Path:

@@ -27,7 +27,7 @@ from scaffold_p5.models import COMPAT_RESULTS, CORE_SKILLS
 from scaffold_p6.analysis import analyze
 from scaffold_p6.candidate import observe_candidate
 from scaffold_p6.engine import TestEngine
-from scaffold_p6.models import ScenarioResult
+from scaffold_p6.models import SKILL_VERSION, ScenarioResult
 from scaffold_p6.schemas import validate_report
 from scaffold_p6.storage import (
     is_completed_pass_report,
@@ -108,7 +108,7 @@ class P6Rev1Tests(unittest.TestCase):
             skill_version="2.1.0",
             extra_manifest={
                 "may_substitute_for": [
-                    {"skill_id": "test", "skill_version": "2.0.0"}
+                    {"skill_id": "test", "skill_version": SKILL_VERSION}
                 ]
             },
         )
@@ -119,7 +119,7 @@ class P6Rev1Tests(unittest.TestCase):
         self.assertEqual(result.skill_version, "2.1.0")
         self.assertEqual(result.compatibility, "COMPATIBLE")
         self.assertNotEqual(result.compatibility, "EXACT")
-        self.assertEqual(result.extras["expected_package"]["skill_version"], "2.0.0")
+        self.assertEqual(result.extras["expected_package"]["skill_version"], SKILL_VERSION)
         self.assertEqual(result.extras["actual_package"]["skill_version"], "2.1.0")
         self.assertEqual(file_digest(self.host / ".scaffold/skills.lock"), lock_before)
 
@@ -153,13 +153,20 @@ class P6Rev1Tests(unittest.TestCase):
         write_host(self.host, [passing_profile("ok"), failing_profile("bad")])
         c = test_engine(self.host).run().extras["completeness"]
         self.assertFalse(c["test_pass"])
-        self.assertTrue(c["test_complete"])
+        self.assertTrue(c["coverage_complete"])
+        self.assertFalse(c["test_complete"])
 
     def test_U09_verified_zero_required_tests(self):
         write(self.host, "README.md", "# none\n")
         write_project(self.host)
         write_commands(self.host, [])
-        write_tests(self.host, [], applicable=False, applicability="NOT_APPLICABLE")
+        write_tests(
+            self.host,
+            [],
+            applicable=False,
+            applicability="NOT_APPLICABLE",
+            required_authority="VERIFIED",
+        )
         c = test_engine(self.host).run().extras["completeness"]
         self.assertFalse(c["test_pass"])
         self.assertTrue(c["test_complete"])
@@ -554,9 +561,9 @@ class P6Rev1Tests(unittest.TestCase):
     def test_U37_generic_result_reports_actual_version(self):
         write_host(self.host, [passing_profile()])
         result = test_engine(self.host).run()
-        self.assertEqual(result.skill_version, "2.0.0")
-        self.assertEqual(result.extras["actual_package"]["skill_version"], "2.0.0")
-        self.assertEqual(result.extras["package"]["skill_version"], "2.0.0")
+        self.assertEqual(result.skill_version, SKILL_VERSION)
+        self.assertEqual(result.extras["actual_package"]["skill_version"], SKILL_VERSION)
+        self.assertEqual(result.extras["package"]["skill_version"], SKILL_VERSION)
 
     def test_U38_compatible_path_does_not_update_lock(self):
         write_host(self.host, [passing_profile()])
@@ -566,13 +573,13 @@ class P6Rev1Tests(unittest.TestCase):
             skill_version="2.1.0",
             extra_manifest={
                 "may_substitute_for": [
-                    {"skill_id": "test", "skill_version": "2.0.0"}
+                    {"skill_id": "test", "skill_version": SKILL_VERSION}
                 ]
             },
         )
         result = TestEngine(self.host, pkg).run()
         self.assertEqual(result.compatibility, "COMPATIBLE")
-        self.assertEqual(result.extras["expected_package"]["skill_version"], "2.0.0")
+        self.assertEqual(result.extras["expected_package"]["skill_version"], SKILL_VERSION)
         self.assertEqual(result.extras["actual_package"]["skill_version"], "2.1.0")
         self.assertEqual(read_yaml(self.host / ".scaffold/skills.lock"), lock_before)
 
@@ -592,7 +599,7 @@ class P6Rev1Tests(unittest.TestCase):
         pkg = write_skill_package(
             Path(self._tmp.name) / "incompat-test",
             skill_version="2.1.0",
-            extra_manifest={"incompatible_with": ["2.0.0"]},
+            extra_manifest={"incompatible_with": [SKILL_VERSION]},
         )
         engine = TestEngine(self.host, pkg)
         result = engine.run()
@@ -685,7 +692,8 @@ class P6Rev1Tests(unittest.TestCase):
         write_host(self.host, [failing_profile()])
         c = test_engine(self.host).run().extras["completeness"]
         self.assertFalse(c["test_pass"])
-        self.assertTrue(c["test_complete"])
+        self.assertTrue(c["coverage_complete"])
+        self.assertFalse(c["test_complete"])
         self.assertEqual(c["required_fail"], 1)
         self.assertEqual(c["required_terminal_usable"], 1)
 

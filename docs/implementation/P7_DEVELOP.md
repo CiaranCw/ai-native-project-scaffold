@@ -2,7 +2,7 @@
 
 This document records P7-owned concrete schemas and runtime boundaries. It is not a Foundation Contract and does not outrank P0–P6.
 
-P7 status: **ACTIVE / IMPLEMENTATION**. Not COMPLETE, BASELINED, or PASS. P5 and P6 remain **CLOSED / BASELINED / REMOTELY PUBLISHED**. P8 is not started.
+P7 status: **CLOSED / BASELINED / REMOTELY PUBLISHED.** Implementation phase closed; later FA-2 corrections were applied in the current unreleased candidate. FA-2 is independently PASS / CLOSED. P9 Repair/Migration is ready for human review; see [P9_REPAIR_MIGRATION.md](P9_REPAIR_MIGRATION.md). This note does not claim P9 closed or v2.0 released.
 
 ## Role and boundaries
 
@@ -16,23 +16,62 @@ Develop is the task-driven implementation Skill. It:
 6. optionally invokes published P6 Test through a bounded handoff;
 7. persists `IN_PROGRESS` → `READY_FOR_REVIEW` only when every P3 §11 gate holds and the transition is requested explicitly, then emits a bounded Develop→Submit route.
 
-Develop does **not** invent tasks from caller prose, treat `TEST_PASS` as `TASK_COMPLETE` or `READY_FOR_REVIEW`, manufacture `SUBMIT_AUTHORIZED`, finalize Change Records, Commit, Push, Refresh, or Migrate. Repair is a Develop mode, not a fifth Skill.
+An already READY Task whose SATISFIED decisions are stale only because they bind an old candidate may use `refresh_ready_authority` plus a current published P6 `report_id` to publish new current decisions without source writes or a Session. `task_contract_digest` must remain unchanged.
 
-Isolated Git worktrees are P9, not a P7 Rev0 requirement.
+Develop does **not** invent tasks from caller prose, treat `TEST_PASS` as `TASK_COMPLETE` or `READY_FOR_REVIEW`, manufacture `SUBMIT_AUTHORIZED`, finalize Change Records, Commit, Push, or Refresh. Repair is a Develop mode, not a fifth Skill. Develop does not invent Migration Plans or rewrite `skills.lock`. Fresh persistent Migration application MUST be initiated as Task-bound Develop work when the human approval binds that exact P5 Plan to the current Task identity, Task revision, and candidate digest **before** Session creation or Task publication; that is not Adoption. Understand may plan and recover; it does not start a fresh apply from Plan-only approval. Unrelated Tasks cannot carry another Task's approval. A no-approval preview is non-mutating. Post-apply `MIGRATION_REQUIRED` / `UNKNOWN` / `INCOMPATIBLE` is not successful Migration completion. Successful completion reports current post compatibility truthfully. Interrupted apply leaves P5-canonical `RECOVERY_REQUIRED` recovery state for Understand resume.
+
+Isolated Git worktrees remain out of P9's compressed scope.
 
 ## Skill package identity
 
 | Field | Value |
 | --- | --- |
 | `skill_id` | `develop` |
-| `skill_version` | `2.0.0` |
+| `skill_version` | `2.1.0` |
 | modes | `normal_task`, `repair` |
-| `provides` | `develop.implement`, `develop.repair` |
+| `provides` | `develop.implement`, `develop.repair`, `develop.task_intake` |
 | `requires` | `[]` |
 | `entry` | `SKILL.md` |
 | `package_format_version` | `1` |
 
 `requires` remains empty in the live package. Test is invoked through the published `TestEngine` boundary, not as a lock-granted permission. The P4 illustrative `test.execution` requirement is example data, not release data.
+
+`develop.task_intake` is an additive prelude of `normal_task`, not a third
+mode. The two modes remain `normal_task` and `repair`; both retain their existing
+Task-state rules. Task Intake Skill results report `mode: normal_task` and
+`extras.operation: task_intake`. That selected mode does not mean
+implementation, Session creation, Test, Submit, Commit, or Push occurred.
+
+## Task Intake prelude
+
+`DevelopEngine.intake()` accepts Agent-interpreted structured intent and a
+bounded proposal. It never derives workflow authority from raw keywords and
+never persists caller prose. Proposal identity is a digest of normalized
+canonical Task semantics, including optional FND3 `execution_binding` on
+planned Stage/final tests, and is compared with existing Tasks without adding a
+Task Book field. Task Intake does not attach Evidence or execute Test.
+Malformed explicit bindings fail closed; `requirement_id`-only tests remain
+valid without inventing a profile association. Unbound requirement identities
+are not looked up in `tests.yaml`. Only an explicit `execution_binding.profile_id`
+must exist among current Test profiles.
+
+Direct `IN_PROGRESS` publication requires an explicit implementation intent,
+grounding for every material field, project/Rule/ownership/currentness
+authority, and no uncertainty or inferred governance/product decision. A
+grounded planning proposal may publish as `DRAFT`; ambiguity produces
+`NEEDS_HUMAN` without a Task. Intake creates no Develop Session and performs no
+source, Test, Submit, Commit, or Push operation.
+
+Initial revision 1 is published atomically only if its identity is absent.
+Matching Tasks are status-aware: `IN_PROGRESS` is reused; `DRAFT` activation
+uses expected-revision publication; `READY_FOR_REVIEW` is surfaced without
+reopening; `CANCELED` is surfaced without resurrection; multiple matches are a
+conflict.
+
+Version `2.1.0` is a MINOR additive capability. The existing generic
+`may_substitute_for` declaration supports reproducible `COMPATIBLE` execution
+against a `2.0.0` lock while surfacing actual `2.1.0` and leaving the lock
+unchanged. No version-number-only compatibility rule is used.
 
 ## Flow
 
@@ -43,14 +82,17 @@ intake (DevelopEngine.run)
 → host lifecycle / maintenance gate
 → Develop package / lock Host Compatibility
 → resolve Task Book (identity + fail-closed schema + mode compatibility)
+→ D1 resolve SCM truth and configured-upstream currentness
 → repair binding (task + current candidate + failure/blocker)
 → authorize writes (schema-validated scope + ownership + core artifacts)
 → bind or create Develop Session
 → first expected-revision Task publication (session link + optional first-stage progress)
 → apply ownership-scoped source mutations only after that publication succeeds
-→ optional bounded Develop→Test via TestEngine.run
+→ optional Test authority via TestEngine.run **or** independently loaded published `report_id` (mutually exclusive; caller dicts are not authority)
+→ persist portable P6 Evidence locators onto planned Task test refs
+→ P7 may publish Stage IN_PROGRESS→COMPLETE when FA2-FND-002 holds
 → TEST_PASS does not complete the Task or mark READY_FOR_REVIEW
-→ explicit P3 §11 request may publish READY_FOR_REVIEW as a second expected-revision publication
+→ explicit Records §11 request may publish READY_FOR_REVIEW as a later expected-revision publication
 → after successful READY publication, re-observe the current candidate and emit submit route
 → SEALED on success; ABORTED if a started Session later blocks
 ```
@@ -88,15 +130,17 @@ TASK_COMPLETE = all required Task stages are COMPLETE
 
 `TASK_COMPLETE` is derived and is not a fifth stored status.
 
-P7 accepts Develop execution only for `IN_PROGRESS`. It does not silently accept a `DRAFT` as the active plan and does not silently reopen `READY_FOR_REVIEW` or `CANCELED`.
+P7 accepts ordinary Develop execution for `IN_PROGRESS`. It does not silently accept a `DRAFT` as the active plan and does not silently reopen `READY_FOR_REVIEW` or `CANCELED`. A current Stage-targeted `submit_to_develop` handoff is the only READY reopen path.
 
 Caller prose cannot replace or invent a Task Book.
 
 Consumed inner fields fail closed as real lists/mappings before use: `scope.paths` / `scope.modules` / `scope.exclude`, `develop_session_ids`, `stages[*].required_tests`, and `final_tests`. A mapping such as `scope.paths: {src/app.py: false}` is malformed authority, not a path list.
 
-Every canonical Task Book publication uses the P3 §31 rule: expected revision N plus per-record serialized conditional publication, producing exactly N+1. Session-link and first-stage progress are one in-memory mutation and one publication. `IN_PROGRESS` → `READY_FOR_REVIEW` is a second publication that must use the revision current after the first successful write. A revision conflict does not overwrite the newer Task, does not merge writers, and does not retry the stale in-memory mutation. A first-publication conflict occurs before source writes and aborts the started Session. A late READY conflict does not persist `READY_FOR_REVIEW` and does not emit a Develop→Submit route; already-applied source work is not rolled back.
+Every canonical Task Book publication uses the P3 §31 rule: expected revision N plus per-record serialized conditional publication, producing exactly N+1. A matching expected revision does not authorize `READY_FOR_REVIEW`; `publish_task` still requires the current `evaluate_ready_for_review` / Records §11 evaluator before those bytes can become canonical. READY publication also fails closed when the proposed Task's P6 substantive authority projection differs from the current canonical Task (Records §8.7 / FND3-E04). That mixed mutation must be published as non-READY, then revalidated for the new candidate; old current-candidate decisions are not evaluated against a candidate-changing READY write. Session-link and first-stage progress are one in-memory mutation and one publication. `IN_PROGRESS` → `READY_FOR_REVIEW` is a second publication that must use the revision current after the first successful write. A revision conflict does not overwrite the newer Task, does not merge writers, and does not retry the stale in-memory mutation. A first-publication conflict occurs before source writes and aborts the started Session. A late READY conflict does not persist `READY_FOR_REVIEW` and does not emit a Develop→Submit route; already-applied source work is not rolled back.
 
-Develop persists `IN_PROGRESS` → `READY_FOR_REVIEW` only when P3 §11 holds (all required stages `COMPLETE`, planned final tests accepted, declared Task-level acceptance present) and the caller requests that transition. `TEST_PASS` alone never persists it. After a successful READY publication, Develop re-observes the current candidate, binds that digest on the Develop→Submit route and SkillResult, and stops. Pre-READY Test evidence keeps its original candidate binding and is not relabeled. P8 is not implemented.
+Develop persists Stage `IN_PROGRESS` → `COMPLETE` only when the current Stage Completion Decision is `SATISFIED` for the actual candidate, required Stage tests satisfy defined acceptance through P6 Evidence locators, and no required-test blocker remains. `TEST_PASS`, `TEST_COMPLETE`, and successful writes are each insufficient. P7 then publishes `IN_PROGRESS` → `READY_FOR_REVIEW` only when Records §11 holds (all required Stages `COMPLETE`, every relied-upon Stage decision `SATISFIED` and current, final required tests accepted, Task Completion Decision `SATISFIED` and current, no required blocker) and the caller requests that transition. `TASK_COMPLETE` remains the derived aggregation of Stage statuses and is not a fifth Task status. After a successful READY publication, Develop re-observes the current candidate, binds that digest on the Develop→Submit route and SkillResult, and stops. Pre-READY Test evidence keeps its original candidate binding and is not relabeled.
+
+A `READY_FOR_REVIEW` Task is not generic Develop permission. `normal_task` still cannot reopen it. Repair may reopen it only after a current `submit_to_develop` handoff with nonempty `target_stage_ids` is validated, then P7 publishes READY→IN_PROGRESS and target COMPLETE→IN_PROGRESS with UNKNOWN repair-reopen Stage/Task decisions through expected-revision CAS. P8 does not write the Task.
 
 ## Develop Session
 
@@ -114,7 +158,20 @@ P3 does not define an elaborate Develop Session recovery lifecycle. Loading an e
 
 Ownership modes remain `GENERATED` | `MANAGED` | `HUMAN_OWNED`.
 
-P7 reuses P5 `whole_file_mutation_allowed()`. HUMAN_OWNED whole-file overwrite is blocked. MANAGED whole-file overwrite without a bounded region is blocked. Missing ownership is UNKNOWN and blocked. Core machine artifacts are CONFLICTING and blocked for ordinary Develop.
+P7 uses the shared P5 ownership resolver. P5-registered source areas such as
+`src/` resolve ordinary business files as `HUMAN_OWNED`; a current
+`IN_PROGRESS` Task whose authoritative scope contains the requested path is
+the explicit current instruction permitting that business-source write.
+HUMAN_OWNED routers/knowledge/client files remain protected. MANAGED
+whole-file overwrite without a bounded region is blocked. Missing ownership is
+UNKNOWN and blocked. Core machine artifacts are CONFLICTING and blocked.
+
+Applicable global/module/path/test Project Rules are resolved before mutation.
+Test-specific Rules use the union of caller-selected test ids and the
+authoritative Task's `final_tests` / stage `required_tests` identifiers; the
+caller need not restate Task-declared tests. A hard prohibition or
+conflicting applicable Rule blocks before any source write. Rules constrain
+existing authority; they cannot grant mutation or submission permissions.
 
 There is no “Develop can write any project file” escape hatch.
 
@@ -124,13 +181,24 @@ Develop→Test carries only: test requirement, task identity, session identity, 
 
 Test is invoked through `scaffold_p6.engine.TestEngine.run`. P7 does not import P6 preflight, evidence, or adapter internals.
 
-Test→Develop may enter `repair` only when the handoff is bound to the current Task and the current candidate and is a genuine failure/blocker. Missing or stale candidate binding cannot authorize Repair. After a material Repair edit, previous candidate-bound Test evidence is stale.
+Test→Develop may enter `repair` only when the handoff is bound to the current Task and the current candidate and is a genuine failure/blocker. Missing or stale candidate binding cannot authorize Repair. After a material Repair edit, previous candidate-bound Test evidence is stale. READY repair requires nonempty `target_stage_ids`. Automated Test-failure Stage mapping exists only through `execution_binding.kind: test_profile`. Unresolved mapping routes to human clarification. Fresh-agent Repair recovery uses Task Book plus `.scaffold/runtime/repair-state/<task-id>.yaml` supporting state, not chat history.
 
-Develop→Submit is a route payload only after a legitimate `READY_FOR_REVIEW` publication. Its `candidate_digest` is the post-READY observation, not a pre-persist snapshot. P8 is not implemented. A Skill result never reports `mutations: none` if source or the canonical Task Book actually changed.
+Develop→Submit is a route payload only after a legitimate `READY_FOR_REVIEW` publication. Its `candidate_digest` is the post-READY observation, not a pre-persist snapshot. Submit repair handoffs may carry `target_stage_ids`; P8 does not write the Task. A Skill result never reports `mutations: none` if source or the canonical Task Book actually changed.
+
+## D1 repository currentness
+
+Before any Session or source/Task mutation, Develop uses the shared read-only
+SCM observation and local tracking refs. Git states `CURRENT`, local `AHEAD`,
+and `NOT_CONFIGURED` (legitimate local-only repository) may continue.
+Configured-upstream `STALE`, `DIVERGED`, or unresolved/`UNKNOWN` currentness
+blocks before mutation and surfaces the observed basis. Develop performs no
+implicit fetch, pull, merge, rebase, reset, checkout, or other synchronization.
+Nested projects use their parent Git worktree currentness while candidate paths
+remain projected to the project root.
 
 ## Candidate binding
 
-P7 observes candidate identity through the published P6 boundary: `observe_candidate` / `report_usable_for`. Task Book files are candidate-visible, so a successful READY publication can change current candidate identity. The Skill re-observes after that publication. A publication conflict also re-observes before the blocked Skill result so the returned Task and candidate describe the same current project state. A competing writer's Task mutation is not attributed to this invocation. A material source mutation also changes candidate identity. Pre-READY Test evidence remains bound to the candidate it actually tested and is not rewritten as evidence for the post-READY candidate. A Session digest cannot override workspace/SCM truth.
+P7 observes candidate identity through the published P6 boundary: `observe_candidate` / `report_usable_for`. P6 hashes a semantic Task projection (FA2-FND-003): bounded control-plane/result fields, including READY status and Completion Decisions, do not change `candidate_digest`. The Skill still re-observes after publication so the returned candidate matches current P6 observation. A publication conflict also re-observes before the blocked Skill result so the returned Task and candidate describe the same current project state. A competing writer's substantive Task mutation is not attributed to this invocation and does change candidate identity. A material source mutation also changes candidate identity. Test evidence remains bound to the candidate it actually tested; control-plane READY does not by itself stale that Evidence. A Session digest cannot override workspace/SCM truth.
 
 ## Safety
 

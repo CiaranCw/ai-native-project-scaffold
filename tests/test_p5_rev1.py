@@ -10,6 +10,7 @@ from support import (
     REPO,
     REPO_UNDERSTAND,
     adopt,
+    apply_fresh_migration,
     distribution,
     engine,
     write,
@@ -143,14 +144,30 @@ class P5Rev1Tests(unittest.TestCase):
 
     def test_Z7_malformed_semantic_version_is_invalid(self):
         changed = self._copy_package(REPO_UNDERSTAND, "bad-semver")
-        manifest = changed / "skill.yaml"
+        current = load_package(changed).ref.skill_version
+        self.assertTrue(current)
         write_text_atomic(
-            manifest,
-            read_text(manifest).replace("skill_version: 2.0.0", "skill_version: 2.x.0"),
+            changed / "skill.yaml",
+            read_text(changed / "skill.yaml").replace(
+                f"skill_version: {current}",
+                "skill_version: 2.x.0",
+                1,
+            ),
+        )
+        write_text_atomic(
+            changed / "SKILL.md",
+            read_text(changed / "SKILL.md").replace(
+                f"- `skill_version`: `{current}`",
+                "- `skill_version`: `2.x.0`",
+                1,
+            ),
         )
         package = load_package(changed)
         self.assertEqual(package.validity, "INVALID")
         self.assertTrue(any("MAJOR.MINOR.PATCH" in value for value in package.validity_reasons))
+        self.assertFalse(
+            any("contradiction" in value for value in package.validity_reasons)
+        )
 
     def test_Z8_missing_or_malformed_package_format_is_invalid(self):
         missing = self._copy_package(REPO_UNDERSTAND, "missing-format")
@@ -343,10 +360,9 @@ class P5Rev1Tests(unittest.TestCase):
             "plan_id": plan["plan_id"],
             "plan_digest": plan["digest"],
         }
-        interrupted = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=approval,
+        interrupted = apply_fresh_migration(
+            self.host,
+            plan,
             interrupt_after="first_mutation",
         )
         self.assertEqual(interrupted.outcome, "BLOCKED")
@@ -369,10 +385,9 @@ class P5Rev1Tests(unittest.TestCase):
             "plan_id": plan["plan_id"],
             "plan_digest": plan["digest"],
         }
-        engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=approval,
+        apply_fresh_migration(
+            self.host,
+            plan,
             interrupt_after="first_mutation",
         )
         resumed = engine(self.host, "2.1.0").run(
@@ -385,15 +400,7 @@ class P5Rev1Tests(unittest.TestCase):
 
     def test_Z23_successful_migration_converges_to_compatible(self):
         plan = self._migration_preview()
-        done = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval={
-                "approved": True,
-                "plan_id": plan["plan_id"],
-                "plan_digest": plan["digest"],
-            },
-        )
+        done = apply_fresh_migration(self.host, plan)
         self.assertEqual(done.outcome, "COMPLETED")
         result = engine(self.host, "2.1.0").run("compatibility")
         self.assertEqual(result.compatibility, "COMPATIBLE")
@@ -407,11 +414,7 @@ class P5Rev1Tests(unittest.TestCase):
             "plan_id": plan["plan_id"],
             "plan_digest": plan["digest"],
         }
-        engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=approval,
-        )
+        apply_fresh_migration(self.host, plan)
         package = load_package(
             REPO / "tests/fixtures/distribution/packages/understand-2.1.0"
         )

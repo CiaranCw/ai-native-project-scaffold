@@ -5,6 +5,13 @@ from typing import Any
 
 from scaffold_p5 import yaml_lite
 from scaffold_p5.adoption import default_ownership, lock_data, write_lock, write_text
+from scaffold_p5.agents import (
+    AGENTS_ROUTER_REGION,
+    GENERATED_AGENTS,
+    integrated_agents_text,
+    managed_regions_from_actions,
+)
+from scaffold_p5.discovery import discover, project_display_name
 from scaffold_p5.host_state import (
     AGENTS_MD,
     ARCHITECTURE_MD,
@@ -21,18 +28,8 @@ from scaffold_p5.host_state import (
 )
 from scaffold_p5.io_util import sha256_text, write_yaml_atomic
 from scaffold_p5.models import AdoptionPlan, DiscoveryFact
+from scaffold_p5.ownership import source_area_ownership
 
-
-GENERATED_AGENTS = """# Project router
-
-This host is managed by AI-Native Project Scaffold.
-
-- Project metadata: `.scaffold/project.yaml`
-- Knowledge start: `docs/project/overview.md`
-- Expected Skills: `.scaffold/skills.lock`
-
-Do not treat client-specific copies as authority.
-"""
 
 GENERATED_OVERVIEW = """# Overview
 
@@ -78,7 +75,8 @@ TESTING_ENTRY = """# Testing
 
 Observed test paths: {paths}
 
-This entry records observed test structure. P6 Test execution is not implemented.
+This entry records observed test availability. It is not an authoritative
+REQUIRED test policy. Understand did not execute tests.
 """
 
 TESTING_UNKNOWN_ENTRY = """# Testing
@@ -105,6 +103,30 @@ MODULE_MISSING_ENTRY = """# Module: {module}
 
 Resolve through Understand Refresh or human project-knowledge correction.
 """
+
+
+def _planned_agents_text(
+    root: Path,
+    plan: AdoptionPlan,
+    existing_agents_human: bool,
+) -> str | None:
+    if AGENTS_MD not in plan.mutation_envelope:
+        return None
+    action = next((row for row in plan.actions if row.target == AGENTS_MD), None)
+    if action and action.action_class == "MANAGED_UPDATE":
+        if action.managed_region != AGENTS_ROUTER_REGION:
+            return None
+        current = ""
+        if (root / AGENTS_MD).is_file():
+            current = (root / AGENTS_MD).read_text(encoding="utf-8")
+        return integrated_agents_text(
+            current,
+            insert_if_absent=True,
+            region_id=action.managed_region or AGENTS_ROUTER_REGION,
+        )
+    if existing_agents_human:
+        return None
+    return GENERATED_AGENTS
 
 
 def expected_normalization_mutations(
@@ -145,8 +167,9 @@ def expected_normalization_mutations(
             lock_data(plan.intended_lock, plan.release_id, authoritative=False)
         ),
     }
-    if not existing_agents_human and AGENTS_MD in plan.mutation_envelope:
-        rendered[AGENTS_MD] = GENERATED_AGENTS
+    planned_agents = _planned_agents_text(root, plan, existing_agents_human)
+    if planned_agents is not None:
+        rendered[AGENTS_MD] = planned_agents
     if OVERVIEW_MD in plan.mutation_envelope:
         rendered[OVERVIEW_MD] = GENERATED_OVERVIEW
     architecture = _fact(facts, "architecture")
@@ -164,16 +187,19 @@ def expected_normalization_mutations(
         surfaces = ", ".join(f"`{value}`" for value in build["value"])
         rendered[DEVELOPMENT_MD] = DEVELOPMENT_ENTRY.format(surfaces=surfaces)
     tests = _fact(facts, "test_tree")
-    if (
-        TESTING_MD in plan.mutation_envelope
-        and tests
-        and tests["confidence"] == "VERIFIED"
-        and tests["value"]
-    ):
-        paths = ", ".join(f"`{value}`" for value in tests["value"])
-        rendered[TESTING_MD] = TESTING_ENTRY.format(paths=paths)
-    source = _fact(facts, "source_tree")
-    for module in (source["value"] if source and source["value"] else []):
+    if TESTING_MD in plan.mutation_envelope:
+        paths = list(tests["value"] or []) if tests and tests.get("value") else []
+        if not paths:
+            commands = _fact(facts, "declared_commands")
+            paths = [
+                str(row.get("invocation"))
+                for row in (commands.get("value") or [])
+                if isinstance(row, dict) and row.get("kind") == "test" and row.get("invocation")
+            ]
+        rendered[TESTING_MD] = TESTING_ENTRY.format(
+            paths=", ".join(f"`{value}`" for value in paths) or "`declared test surface`"
+        )
+    for module in _module_names(facts):
         target = f"{MODULE_DOCS}/{module}.md"
         if target in plan.mutation_envelope:
             rendered[target] = MODULE_ENTRY.format(module=module)
@@ -233,8 +259,9 @@ def normalize(
         _write_tests(root, facts)
         created.append(TESTS_YAML)
 
-    if not existing_agents_human and AGENTS_MD in plan.mutation_envelope:
-        write_text(root, AGENTS_MD, GENERATED_AGENTS)
+    planned_agents = _planned_agents_text(root, plan, existing_agents_human)
+    if planned_agents is not None and AGENTS_MD in plan.mutation_envelope:
+        write_text(root, AGENTS_MD, planned_agents)
         created.append(AGENTS_MD)
     if OVERVIEW_MD in plan.mutation_envelope and not (root / OVERVIEW_MD).exists():
         write_text(root, OVERVIEW_MD, GENERATED_OVERVIEW)
@@ -258,17 +285,24 @@ def normalize(
         write_text(root, DEVELOPMENT_MD, DEVELOPMENT_ENTRY.format(surfaces=surfaces))
         created.append(DEVELOPMENT_MD)
     tests = _fact(facts, "test_tree")
-    if (
-        TESTING_MD in plan.mutation_envelope
-        and tests
-        and tests["confidence"] == "VERIFIED"
-        and tests["value"]
-    ):
-        paths = ", ".join(f"`{value}`" for value in tests["value"])
-        write_text(root, TESTING_MD, TESTING_ENTRY.format(paths=paths))
+    if TESTING_MD in plan.mutation_envelope:
+        paths = list(tests["value"] or []) if tests and tests.get("value") else []
+        if not paths:
+            commands = _fact(facts, "declared_commands")
+            paths = [
+                str(row.get("invocation"))
+                for row in (commands.get("value") or [])
+                if isinstance(row, dict) and row.get("kind") == "test" and row.get("invocation")
+            ]
+        write_text(
+            root,
+            TESTING_MD,
+            TESTING_ENTRY.format(
+                paths=", ".join(f"`{value}`" for value in paths) or "`declared test surface`"
+            ),
+        )
         created.append(TESTING_MD)
-    source = _fact(facts, "source_tree")
-    for module in (source["value"] if source and source["value"] else []):
+    for module in _module_names(facts):
         target = f"{MODULE_DOCS}/{module}.md"
         if target in plan.mutation_envelope:
             write_text(root, target, MODULE_ENTRY.format(module=module))
@@ -331,7 +365,7 @@ def active_project_data(
         plan,
         lifecycle="ACTIVE",
         ownership=ownership,
-        facts=_fact_maps(plan.facts + extra_facts),
+        facts=_fact_maps(discover(root, extra_facts)),
         maintenance=[],
     )
 
@@ -388,12 +422,13 @@ def _project_data(
     maintenance: list[str],
 ) -> dict[str, Any]:
     source = next((f["value"] for f in facts if f["name"] == "source_tree"), [])
+    ownership = source_area_ownership(ownership, list(source or []))
     tests = next((f for f in facts if f["name"] == "test_tree"), None)
     arch = next((f for f in facts if f["name"] == "architecture"), None)
-    return {
+    data = {
         "schema_version": "1",
         "project_contract_generation": plan.target_contract_generation,
-        "name": root.name,
+        "name": project_display_name(facts),
         "lifecycle": lifecycle,
         "maintenance": maintenance,
         "baseline": scm_baseline(root),
@@ -413,6 +448,10 @@ def _project_data(
         "source_areas": source or [],
         "clients": _client_index(plan),
     }
+    regions = managed_regions_from_actions(plan.actions)
+    if regions:
+        data["managed_regions"] = regions
+    return data
 
 
 def _write_modules(root: Path, facts: list[dict[str, Any]]) -> None:
@@ -420,12 +459,15 @@ def _write_modules(root: Path, facts: list[dict[str, Any]]) -> None:
 
 
 def _modules_data(facts: list[dict[str, Any]]) -> dict[str, Any]:
-    areas = next((f["value"] for f in facts if f["name"] == "source_tree"), []) or []
+    modules_fact = next((f for f in facts if f["name"] == "modules"), None)
+    areas = list(modules_fact["value"] or []) if modules_fact and modules_fact.get("value") else []
+    if not areas:
+        areas = next((f["value"] for f in facts if f["name"] == "source_tree"), []) or []
     modules = []
     for area in areas:
         modules.append(
             {
-                "id": area,
+                "id": str(area).replace("/", "-"),
                 "path": area,
                 "knowledge_entry": f"{MODULE_DOCS}/{area}.md",
                 "kind": "source",
@@ -440,17 +482,24 @@ def _write_commands(root: Path, facts: list[dict[str, Any]]) -> None:
 
 
 def _commands_data(facts: list[dict[str, Any]]) -> dict[str, Any]:
-    declared = next((f for f in facts if f["name"] == "declared_build_surface"), None)
+    declared = next((f for f in facts if f["name"] == "declared_commands"), None)
     commands = []
-    if declared and declared["value"]:
-        commands.append(
-            {
-                "id": "declared-build-surface",
-                "surface": declared["value"],
-                "availability": "declared",
-                "confidence": "INFERRED",
-            }
-        )
+    rows = declared.get("value") if declared and isinstance(declared.get("value"), list) else []
+    for row in rows:
+        if isinstance(row, dict) and row.get("id"):
+            commands.append(dict(row))
+    if not commands:
+        surface = next((f for f in facts if f["name"] == "declared_build_surface"), None)
+        if surface and surface.get("value"):
+            commands.append(
+                {
+                    "id": "declared-build-surface",
+                    "surface": surface["value"],
+                    "availability": "declared",
+                    "execution": "not_validated",
+                    "confidence": "INFERRED",
+                }
+            )
     return {"schema_version": "1", "commands": commands}
 
 
@@ -463,10 +512,19 @@ def _tests_data(facts: list[dict[str, Any]]) -> dict[str, Any]:
     profiles = []
     confidence = tests["confidence"] if tests else "UNKNOWN"
     applicability: bool | None = None
+    required_authority = "UNKNOWN"
     if tests and tests["value"]:
-        profiles.append({"id": "observed-tests", "paths": tests["value"], "policy": "observed"})
+        profiles.append(
+            {
+                "id": "observed-tests",
+                "paths": tests["value"],
+                "policy": "observed",
+                "required_authority": "UNKNOWN",
+            }
+        )
         confidence = tests["confidence"]
         applicability = True
+        required_authority = "UNKNOWN"
     elif tests and tests["confidence"] == "VERIFIED":
         applicability = False
     return {
@@ -476,6 +534,7 @@ def _tests_data(facts: list[dict[str, Any]]) -> dict[str, Any]:
         if applicability is None
         else ("APPLICABLE" if applicability else "NOT_APPLICABLE"),
         "confidence": confidence,
+        "required_authority": required_authority,
         "profiles": profiles,
     }
 
@@ -510,6 +569,14 @@ def _knowledge_state(fact: dict[str, Any] | None) -> str:
     if fact.get("value"):
         return "referenced" if fact.get("name") == "architecture" else "present"
     return "not_applicable" if fact.get("confidence") == "VERIFIED" else "unknown"
+
+
+def _module_names(facts: list[dict[str, Any]]) -> list[str]:
+    modules = next((row for row in facts if row.get("name") == "modules"), None)
+    if modules and isinstance(modules.get("value"), list) and modules["value"]:
+        return [str(item) for item in modules["value"] if item]
+    source = next((row for row in facts if row.get("name") == "source_tree"), None)
+    return list(source["value"] or []) if source and source.get("value") else []
 
 
 def _fact(facts: list[dict[str, Any]], name: str) -> dict[str, Any] | None:

@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from scaffold_p5 import yaml_lite
+from scaffold_p5.inventory import (
+    CLASS_EXCLUDED,
+    EXCLUDED_DIR_NAMES,
+    InventoryBudget,
+    bounded_metadata_walk,
+    hashed_inventory,
+    observe_inventory,
+    project_relative_path,
+)
 from scaffold_p5.io_util import file_digest, list_files, read_text, read_yaml, sha256_text
 from scaffold_p5.models import CORE_SKILLS
 from scaffold_p5.packages import is_digest, is_format_version, is_semver
+from scaffold_p5.scm import observe_scm
 from scaffold_p5.schemas import (
     validate_adoption_plan_data,
     validate_adoption_session_data,
@@ -784,22 +793,39 @@ def workspace_fingerprint(root: Path, paths: list[str]) -> str:
     return sha256_text(*parts)
 
 
-def durable_inventory(root: Path) -> dict[str, dict[str, str]]:
-    """Portable file/type/digest evidence, excluding SCM and ephemeral runtime."""
-    inventory: dict[str, dict[str, str]] = {}
-    if not root.exists():
-        return inventory
-    for rel in list_files(root):
-        if rel.startswith(".git/") or rel == ".git":
-            continue
-        if rel.startswith(".scaffold/runtime/"):
-            continue
-        if "/__pycache__/" in f"/{rel}" or rel.endswith(".pyc"):
-            continue
-        path = root / rel
-        if path.is_file():
-            inventory[rel] = {"type": "file", "digest": file_digest(path)}
-    return inventory
+def durable_inventory(
+    root: Path,
+    *,
+    exact_observe: list[str] | None = None,
+    budget: Any = None,
+    coverage_out: dict[str, Any] | None = None,
+    counter: Any = None,
+    on_directory: Any = None,
+    dir_cache: Any = None,
+) -> dict[str, dict[str, str]]:
+    """In-scope digest evidence. Excluded heavy roots are not recursively hashed."""
+    observation = observe_inventory(
+        root,
+        exact_observe=exact_observe,
+        budget=budget,
+        counter=counter,
+        on_directory=on_directory,
+        dir_cache=dir_cache,
+    )
+    if coverage_out is not None:
+        coverage_out.clear()
+        coverage_out.update(observation.coverage_dict())
+    return hashed_inventory(observation)
+
+
+def _inventory_sig(row: Any) -> tuple[str, str]:
+    if not isinstance(row, dict):
+        return ("", "")
+    return (str(row.get("type") or ""), str(row.get("digest") or ""))
+
+
+def _norm_inventory_path(path: str) -> str:
+    return str(path or "").replace("\\", "/").strip("/")
 
 
 def compare_adoption_state(
@@ -811,29 +837,73 @@ def compare_adoption_state(
     expected = baseline.get("inventory")
     if not isinstance(expected, dict):
         return ["Adoption Baseline lacks durable inventory evidence"]
-    current = durable_inventory(root)
-    allowed = set(mutation_envelope)
+    envelope = [str(item) for item in mutation_envelope if str(item or "").strip()]
+    observe_keys = sorted(
+        {
+            _norm_inventory_path(path)
+            for path in list(expected) + envelope
+            if _norm_inventory_path(path)
+        }
+    )
+    current_coverage: dict[str, Any] = {}
+    current = durable_inventory(
+        root, exact_observe=observe_keys, coverage_out=current_coverage
+    )
+    allowed = set(envelope)
+    allowed_norm = {_norm_inventory_path(item) for item in envelope}
     issues: list[str] = []
+    coverage = baseline.get("inventory_coverage")
+    exact_observed = {
+        _norm_inventory_path(item)
+        for item in ((coverage or {}).get("exact_observed") or [])
+        if isinstance(coverage, dict)
+    }
+    expected_norm = {_norm_inventory_path(path) for path in expected}
+    for target in envelope:
+        if str(target).endswith("/"):
+            continue
+        normalized = _norm_inventory_path(target)
+        safe, _reason = project_relative_path(root, target)
+        if safe is None:
+            issues.append(f"mutation envelope target is unobserved: {target}")
+            continue
+        if normalized not in exact_observed and normalized not in expected_norm:
+            issues.append(f"mutation envelope target is unobserved: {target}")
+    if isinstance(coverage, dict) and coverage.get("verified_complete") is True:
+        if coverage.get("status") != "FULLY_OBSERVED":
+            issues.append("inventory claimed VERIFIED completeness without full observation")
+    if isinstance(coverage, dict):
+        issues.extend(
+            _excluded_presence_issues(
+                coverage, current_coverage, allowed_norm
+            )
+        )
     for path, before in expected.items():
         after = current.get(path)
         if after is None:
+            if isinstance(before, dict) and before.get("type") == "absent":
+                if not (root / path).exists():
+                    continue
             if path not in allowed or before is not None:
                 issues.append(f"pre-existing durable path removed outside envelope: {path}")
-        elif after != before:
+        elif _inventory_sig(after) != _inventory_sig(before):
             if path not in allowed:
                 issues.append(f"pre-existing durable path changed outside envelope: {path}")
             elif not _adoption_progress_proven(path, after, session, root):
                 issues.append(
                     f"in-envelope path changed without current Session provenance: {path}"
                 )
-    for path in current:
-        if path not in expected:
-            if path not in allowed:
-                issues.append(f"unexpected durable path outside envelope: {path}")
-            elif not _adoption_progress_proven(path, current[path], session, root):
-                issues.append(
-                    f"in-envelope path appeared without current Session provenance: {path}"
-                )
+    for path, row in current.items():
+        if path in expected:
+            continue
+        if isinstance(row, dict) and row.get("type") in {"absent", "directory"}:
+            continue
+        if path not in allowed and _norm_inventory_path(path) not in allowed_norm:
+            issues.append(f"unexpected durable path outside envelope: {path}")
+        elif not _adoption_progress_proven(path, current[path], session, root):
+            issues.append(
+                f"in-envelope path appeared without current Session provenance: {path}"
+            )
     if session:
         for mutation in session.get("applied_mutation_summary") or []:
             target = mutation.get("target") if isinstance(mutation, dict) else None
@@ -865,6 +935,42 @@ def compare_adoption_state(
                         f"actual checkpoint digest differs from Session observation: {target}"
                     )
     return sorted(set(issues))
+
+
+def _excluded_presence_issues(
+    baseline_coverage: dict[str, Any],
+    current_coverage: dict[str, Any],
+    allowed_norm: set[str],
+) -> list[str]:
+    issues: list[str] = []
+    before_roots = {
+        _norm_inventory_path(str(row.get("path") or "")): row
+        for row in (baseline_coverage.get("roots") or [])
+        if isinstance(row, dict) and row.get("classification") == CLASS_EXCLUDED
+    }
+    after_roots = {
+        _norm_inventory_path(str(row.get("path") or "")): row
+        for row in (current_coverage.get("roots") or [])
+        if isinstance(row, dict) and row.get("classification") == CLASS_EXCLUDED
+    }
+    for path, before in before_roots.items():
+        if not path or _path_allowed(path, allowed_norm):
+            continue
+        after = after_roots.get(path)
+        if before.get("present") is True and (after is None or after.get("present") is not True):
+            issues.append(f"excluded root presence changed outside envelope: {path}")
+    return issues
+
+
+def _path_allowed(path: str, allowed_norm: set[str]) -> bool:
+    normalized = _norm_inventory_path(path)
+    if normalized in allowed_norm:
+        return True
+    return any(
+        normalized == allowed or normalized.startswith(allowed.rstrip("/") + "/")
+        for allowed in allowed_norm
+        if allowed
+    )
 
 
 def _adoption_progress_proven(
@@ -913,35 +1019,38 @@ def _adoption_progress_proven(
     )
 
 
-def scm_baseline(root: Path) -> dict[str, Any]:
-    filesystem = _filesystem_baseline(root)
-    nested = _nested_workspaces(root)
-    inside, top = _run_git(root, "rev-parse", "--show-toplevel")
-    git_marker = (root / ".git").exists()
-    if not inside:
-        if git_marker:
-            return {
-                "kind": "git",
-                "value": None,
-                "confidence": "UNKNOWN",
-                "project_root": ".",
-                "scm_root": ".",
-                "revision": None,
-                "branch": None,
-                "head_state": "unavailable",
-                "working_tree": "unknown",
-                "tracked_changes": "unknown",
-                "untracked_changes": "unknown",
-                "nested_workspace": (
-                    "observed" if nested else "absent"
-                ),
-                "nested_workspaces": nested,
-                "filesystem": filesystem,
-            }
+def scm_baseline(
+    root: Path,
+    *,
+    budget: InventoryBudget | None = None,
+    state: Any = None,
+    on_directory: Any = None,
+    dir_cache: Any = None,
+) -> dict[str, Any]:
+    filesystem = _filesystem_baseline(
+        root,
+        budget=budget,
+        counter=state,
+        on_directory=on_directory,
+        dir_cache=dir_cache,
+    )
+    nested = _nested_workspaces(
+        root,
+        budget=budget,
+        state=state,
+        on_directory=on_directory,
+        dir_cache=dir_cache,
+    )
+    nested_status = nested["status"]
+    nested_rows = nested["workspaces"]
+    observed = observe_scm(root)
+    if observed.kind == "none":
         return {
             "kind": "none",
             "value": None,
             "confidence": "VERIFIED",
+            "observation_state": observed.observation_state,
+            "observation_ok": True,
             "project_root": ".",
             "scm_root": None,
             "revision": None,
@@ -950,104 +1059,73 @@ def scm_baseline(root: Path) -> dict[str, Any]:
             "working_tree": "unknown",
             "tracked_changes": "unknown",
             "untracked_changes": "unknown",
-            "nested_workspace": "observed" if nested else "absent",
-            "nested_workspaces": nested,
+            "nested_workspace": nested_status,
+            "nested_workspaces": nested_rows,
             "filesystem": filesystem,
         }
-
-    revision_ok, revision_text = _run_git(
-        root,
-        "rev-parse",
-        "--verify",
-        "HEAD",
-    )
-    branch_ok, branch_text = _run_git(
-        root,
-        "symbolic-ref",
-        "--quiet",
-        "--short",
-        "HEAD",
-    )
-    status_ok, status_text = _run_git(
-        root,
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=all",
-    )
-    status_lines = (
-        [line for line in status_text.splitlines() if line]
-        if status_ok
-        else []
-    )
-    tracked = any(not line.startswith("??") for line in status_lines)
-    untracked = any(line.startswith("??") for line in status_lines)
-    top_path = Path(top).resolve() if top else root.resolve()
-    try:
-        scm_root = (
-            "."
-            if top_path == root.resolve()
-            else str(top_path.relative_to(root.resolve())).replace("\\", "/")
-        )
-    except ValueError:
-        scm_root = "parent"
-    revision = revision_text.strip() if revision_ok else None
-    branch = branch_text.strip() if branch_ok else None
-    head_state = (
-        ("attached" if branch else "detached")
-        if revision
-        else "unborn"
-    )
+    if not observed.ok:
+        return {
+            "kind": "git",
+            "value": None,
+            "confidence": "UNKNOWN",
+            "observation_state": observed.observation_state,
+            "observation_ok": False,
+            "project_root": ".",
+            "scm_root": observed.scm_root_label,
+            "revision": None,
+            "branch": None,
+            "head_state": "unavailable",
+            "working_tree": "unknown",
+            "tracked_changes": "unknown",
+            "untracked_changes": "unknown",
+            "nested_workspace": nested_status,
+            "nested_workspaces": nested_rows,
+            "filesystem": filesystem,
+            "blockers": list(observed.blockers),
+        }
+    status_entries = list(observed.entries)
+    tracked = any(not row.get("untracked") for row in status_entries)
+    untracked = any(row.get("untracked") for row in status_entries)
     return {
         "kind": "git",
-        "value": revision,
-        "confidence": "VERIFIED" if status_ok else "UNKNOWN",
+        "value": observed.revision,
+        "confidence": "VERIFIED",
+        "observation_state": observed.observation_state,
+        "observation_ok": True,
         "project_root": ".",
-        "scm_root": scm_root,
-        "revision": revision,
-        "branch": branch,
-        "head_state": head_state,
-        "working_tree": (
-            "dirty" if status_ok and status_lines else (
-                "clean" if status_ok else "unknown"
-            )
-        ),
-        "tracked_changes": (
-            "present" if status_ok and tracked else (
-                "absent" if status_ok else "unknown"
-            )
-        ),
-        "untracked_changes": (
-            "present" if status_ok and untracked else (
-                "absent" if status_ok else "unknown"
-            )
-        ),
-        "nested_workspace": "observed" if nested else "absent",
-        "nested_workspaces": nested,
+        "scm_root": observed.scm_root_label,
+        "revision": observed.revision,
+        "branch": observed.branch,
+        "head_state": observed.head_state,
+        "working_tree": "dirty" if status_entries else "clean",
+        "tracked_changes": "present" if tracked else "absent",
+        "untracked_changes": "present" if untracked else "absent",
+        "nested_workspace": nested_status,
+        "nested_workspaces": nested_rows,
         "filesystem": filesystem,
     }
 
 
-def _run_git(root: Path, *args: str) -> tuple[bool, str]:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(root), *args],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False, ""
-    return completed.returncode == 0, completed.stdout.strip()
-
-
-def _filesystem_baseline(root: Path) -> dict[str, Any]:
+def _filesystem_baseline(
+    root: Path,
+    *,
+    budget: Any = None,
+    counter: Any = None,
+    on_directory: Any = None,
+    dir_cache: Any = None,
+) -> dict[str, Any]:
     inventory = {
         path: value
-        for path, value in durable_inventory(root).items()
+        for path, value in durable_inventory(
+            root,
+            budget=budget,
+            counter=counter,
+            on_directory=on_directory,
+            dir_cache=dir_cache,
+        ).items()
         if path != PROJECT_YAML
+        and isinstance(value, dict)
+        and value.get("type") == "file"
     }
     parts = [
         f"{path}\n{value.get('type')}\n{value.get('digest')}"
@@ -1060,28 +1138,59 @@ def _filesystem_baseline(root: Path) -> dict[str, Any]:
     }
 
 
-def _nested_workspaces(root: Path) -> list[dict[str, str]]:
+def _nested_workspaces(
+    root: Path,
+    *,
+    budget: InventoryBudget | None = None,
+    state: Any = None,
+    on_directory: Any = None,
+    dir_cache: Any = None,
+) -> dict[str, Any]:
     nested: list[dict[str, str]] = []
     if not root.exists():
-        return nested
-    for dirpath, dirnames, filenames in os.walk(root):
-        current = Path(dirpath)
-        if current == root:
-            if ".git" in dirnames:
-                dirnames.remove(".git")
+        return {
+            "status": "absent",
+            "workspaces": nested,
+            "truncated": False,
+            "unknown": False,
+        }
+    skip_nested = {name for name in EXCLUDED_DIR_NAMES if name != ".git"}
+    walked = bounded_metadata_walk(
+        root,
+        budget=budget or InventoryBudget(),
+        skip_dir_names=skip_nested,
+        stop_dir_names={".git"},
+        state=state,
+        on_directory=on_directory,
+        dir_cache=dir_cache,
+    )
+    seen: set[str] = set()
+    for rel in list(walked.directories) + list(walked.files):
+        if Path(rel).name != ".git":
             continue
-        if ".git" in dirnames or ".git" in filenames:
-            rel = str(current.relative_to(root)).replace("\\", "/")
-            nested.append(
-                {
-                    "path": rel,
-                    "kind": "git",
-                    "confidence": "VERIFIED",
-                }
-            )
-            if ".git" in dirnames:
-                dirnames.remove(".git")
-    return sorted(nested, key=lambda row: row["path"])
+        parent = str(Path(rel).parent).replace("\\", "/")
+        if parent in {".", ""}:
+            continue
+        if parent in seen:
+            continue
+        seen.add(parent)
+        nested.append({"path": parent, "kind": "git", "confidence": "VERIFIED"})
+    if walked.unknown:
+        status = "unknown"
+    elif walked.truncated:
+        status = "truncated"
+    elif nested:
+        status = "observed"
+    else:
+        status = "absent"
+    nested.sort(key=lambda row: row["path"])
+    return {
+        "status": status,
+        "workspaces": nested,
+        "truncated": walked.truncated,
+        "unknown": walked.unknown,
+        "entries_enumerated": walked.entries_enumerated,
+    }
 
 
 def _safe_yaml(path: Path) -> dict[str, Any]:

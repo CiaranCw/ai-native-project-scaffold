@@ -57,8 +57,10 @@ Task Book                     ← “what we intend to do”
    │ D2 Implement│                │ advanced   │
    │ D3 Validate│                 └────────────┘
    └─────┬──────┘
-         │ stages complete + acceptance met
+         │ stages complete + candidate-bound Stage
+         │ completion decisions SATISFIED/current
          │ + final required tests satisfy acceptance
+         │ + Task Completion Decision SATISFIED/current
          ▼
  READY_FOR_REVIEW              ← Develop MUST stop here
          │                     ← TEST_PASS MUST NOT auto-start Submit
@@ -77,7 +79,7 @@ Task Book                     ← “what we intend to do”
          ├─ S6 Human Approval         ← SUBMIT_AUTHORIZED for S10; Push separate
          ├─ S7 Repository Sync
          ├─ S8 if candidate changed → S3/S4/S5 → S6 (Candidate B)
-         ├─ S9 Finalize Records       ← Change Record for this candidate
+         ├─ S9 Finalize Bundle        ← Change Record + permitted support
          ├─ S10 Commit / Durable Finalization
          │                            ← SUBMIT_AUTHORIZED; SCM Commit or no-SCM
          │                               atomic/conflict-detectable publication
@@ -166,6 +168,11 @@ create / accept Task Book
         │      MUST NOT destroy dirty work; Refresh if sync
         │      materially changes project facts
         │  stage TEST_PASS ≠ task done
+        │  Stage Completion Decision:
+        │      SATISFIED | UNSATISFIED | UNKNOWN
+        │      bound to the actual candidate
+        │  Entering COMPLETE requires current SATISFIED;
+        │  later stale COMPLETE records historical progress only
         ▼
    Final Tests (Test Skill, scope = Task Final Test)
         │
@@ -173,8 +180,9 @@ create / accept Task Book
         │     → remain in Develop ↔ Test
         │
         └─ stages complete
-           + stage acceptance satisfied
+           + every Stage completion decision SATISFIED/current
            + final required tests satisfy defined acceptance
+           + Task Completion Decision SATISFIED/current
                 │
                 ▼
            READY_FOR_REVIEW
@@ -185,6 +193,89 @@ create / accept Task Book
 ```
 
 MUST NOT mark READY_FOR_REVIEW merely because final tests ran.
+
+A READY repair is not an implicit status reversal. Submit may route repair
+only with a current `submit_to_develop` handoff carrying deterministically
+mapped `target_stage_ids`. P7, not P8, uses Task CAS to atomically reopen the
+Task and those exact Stages. After C1 → C2 repair, stale target and non-target
+Stage decisions cannot restore READY; every decision relied upon for READY
+and the Task Completion Decision must be `SATISFIED` and current for C2. A
+stale `COMPLETE` Stage may remain structurally complete during revalidation,
+but cannot support READY until its decision is current. No first/last/all-Stage
+fallback and no new Stage state is introduced.
+
+### One candidate authority without Task self-reference
+
+```text
+                         P6 SINGLE CANDIDATE PROJECTION
+ source/business/project/config bytes ───────────────┐
+                                                     ├─► candidate_digest C
+ Task substantive authority projection ─────────────┘
+   goal / acceptance / scope / baseline
+   Stage plan / requirement IDs / execution bindings
+
+ Task control plane (current Task lifecycle/result bytes)
+   revision / updated_at / statuses / Session links
+   result locators/outcomes / Stage+Task decisions
+                  └─ candidate-neutral when substantive projection is unchanged
+                     because of their content class, not writer provenance
+                     still visible in the complete physical Diff
+                     candidate-equivalent != publication-authorized
+```
+
+P6 owns this single semantic projection for Git and no-SCM. It is
+content-deterministic from currently observed authoritative content, not a
+publication-provenance oracle. It is not an exclusion of `.scaffold/tasks/**`:
+Task creation/removal and substantive Task authority changes alter C. All
+non-Task content retains ordinary candidate effect. Malformed or
+lifecycle-illegal Task content fails closed under Task schema and lifecycle
+authority. The complete Task file change remains in Git/no-SCM physical
+observation and Submit-S2/S3 review. Authorized Scaffold Task mutation still
+requires P3 expected-revision CAS. candidate-equivalent !=
+publication-authorized.
+
+Consequently:
+
+```text
+Test Evidence(C)
+  → Task Book stores Evidence locator + Decision(C) + COMPLETE/READY
+  → observe_candidate == C                # no self-staleness
+                                      # remaining on C does not prove CAS
+
+source/project/substantive Task mutation
+  → observe_candidate == C2
+  → Evidence(C), Decision(C), review(C), authorization(C) are stale
+```
+
+This control-plane rule is separate from FA2-FND-001 C/F: C/F permits only
+the deterministic S9 Finalization Bundle after review; it does not define
+Task lifecycle currentness and receives no broader exception.
+
+### Explicit requirement-to-profile execution binding
+
+```text
+Task Book (durable planned authority)
+  requirement_id: task-required/check-save
+  execution_binding:
+    kind: test_profile
+    profile_id: unit-save-check
+         │
+         ▼
+Develop→Test carries exact R→P + selects P
+         │
+         ▼
+P6 executes P and returns locator L
+P6 resolver(L) preserves producing profile_id P
+         │
+         ▼
+P7 may attach L only to requirement R bound to P
+```
+
+`requirement_id` is not `profile_id`; equal spelling proves nothing. Missing
+or mismatched binding remains unresolved and is never guessed from position or
+a sole result. Project-required profile obligations remain separate. HUMAN,
+CI, and EXTERNAL P6 Evidence may directly satisfy a Task requirement through
+an explicit locator without an automated profile binding.
 
 Task Book is the **plan**. It is not proof of the final durably finalized result. Submit may discover undeclared files; those still count.
 
@@ -236,8 +327,10 @@ S3 Structural Review
     │
     ▼
 S4 Knowledge Consistency
-    do AGENTS / architecture / module docs / metadata /
-    Test Matrix still match the tree?
+    current-head Understand Knowledge Assessment
+    for knowledge-relevant S3 impacts; lexical
+    token presence is not SATISFIED; superseded
+    locators and mutated bytes are not SATISFIED;
     stale docs are a defect
     │
     ▼
@@ -266,9 +359,9 @@ S7 Repository Sync
             → S6 for Candidate B
     │
     ▼
-S9 Finalize Change Record     ← candidate record; included in S10
+S9 Finalize Bundle            ← Change Record + permitted referenced support
 S10 Commit / Durable Finalization
-    SCM: Commit
+    SCM: exact bundle in Commit
     no SCM: P8 atomic/conflict-detectable durable publication
 S11 Optional Push / N/A       ← separate authorization when capability exists
 S12 Cleanup                   ← Develop Session after successful S10
@@ -289,15 +382,18 @@ final reviewed candidate
 + final knowledge-update status
         │
         ▼
-S9 finalize Change Record     ← describes this candidate; not yet as-built
+S9 finalize bundle            ← Change Record + deterministic referenced support
+        │                        all candidate-only before S10
         │
         ▼
 S10 Commit / Durable Finalization
         │
-        ├─ failure/interruption → MUST NOT treat record as submitted history
+        ├─ failure/interruption → MUST NOT treat record/support as durable history
+        │                        candidate support requires cleanup/recovery
         │                        MUST NOT clean Sessions as submitted
-        └─ success → that Change Record becomes long-term as-built
-                     using the same S9-finalized logical content
+        └─ success → Change Record becomes long-term as-built
+                     referenced support becomes durable/resolvable
+                     using the same S9-finalized logical bundle
                      → S11 Optional Push / N/A
                      → S12 Cleanup
         │
@@ -307,7 +403,12 @@ S10 Commit / Durable Finalization
 
 P3 defines draft / final state mechanics.
 
-On an SCM host, S10 success is the Commit containing the S9-finalized Change Record representation. On a no-SCM host, P8 defines a recoverable atomic or conflict-detectable durable finalization/publication whose success is distinguishable after restart. A no-SCM path MUST NOT pretend a Commit occurred. Neither path rewrites the logical Change Record content after S10.
+On an SCM host, S10 success is the Commit containing the exact S9 Finalization
+Bundle. On a no-SCM host, P8 defines a recoverable atomic or
+conflict-detectable durable finalization/publication for the same logical
+bundle whose success is distinguishable after restart. A no-SCM path MUST NOT
+pretend a Commit occurred. Neither path rewrites the finalized bundle after
+S10.
 
 | After successful S10 durable finalization | Fate |
 | --- | --- |

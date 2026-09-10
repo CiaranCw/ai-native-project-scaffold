@@ -6,6 +6,25 @@ from typing import Any, Literal
 
 CORE_SKILLS = ("understand", "develop", "test", "submit")
 UNDERSTAND_MODES = ("bootstrap", "full", "refresh", "compatibility")
+UNDERSTANDING_CURRENTNESS = (
+    "CURRENT",
+    "PARTIAL_REFRESH_REQUIRED",
+    "FULL_REFRESH_REQUIRED",
+    "UNKNOWN",
+)
+RESUME_NEXT_ROUTES = (
+    "understand.bootstrap",
+    "understand.refresh",
+    "understand.compatibility",
+    "develop.continue",
+    "develop.repair",
+    "test",
+    "submit",
+    "migration.recovery",
+    "human",
+    "none",
+)
+DEVELOP_MODES = ("normal_task", "repair")
 ACTION_CLASSES = ("CREATE", "MANAGED_UPDATE", "PRESERVE", "LOCAL_ONLY", "DEFER")
 CLIENT_STRATEGIES = ("PRESERVE", "MANAGED_UPDATE", "THIN_BRIDGE", "DEFER")
 OWNERSHIP_MODES = ("GENERATED", "MANAGED", "HUMAN_OWNED")
@@ -71,6 +90,7 @@ class PlanAction:
     rationale: str
     expected: str
     client_strategy: str | None = None
+    managed_region: str | None = None
 
 
 @dataclass

@@ -9,7 +9,7 @@ from unittest import mock
 
 from p6_support import git
 from p7_support import TASK_A
-from p8_support import init_submit_git, submit_engine, write_ready_task, write_submit_host
+from p8_support import init_submit_git, run_submit, submit_engine, write_ready_task, write_submit_host
 from support import write
 from scaffold_p5.io_util import file_digest, write_yaml_atomic
 from scaffold_p6.candidate import observe_candidate
@@ -42,7 +42,7 @@ class P8Rev1Tests(unittest.TestCase):
             return_value=(False, b"", "simulated Git observation failure"),
         ):
             observed = observe_real_diff(self.host)
-            result = submit_engine(self.host).run(task_id=TASK_A)
+            result = run_submit(self.host, task_id=TASK_A)
         self.assertFalse(observed["ok"])
         self.assertEqual(observed["paths"], [])
         self.assertEqual(result.outcome, "BLOCKED")
@@ -273,6 +273,11 @@ class P8Rev1Tests(unittest.TestCase):
         self.assertFalse(is_durable(self.host, record_id))
 
     def test_T27_noscms_same_retry_is_idempotent(self):
+        from scaffold_p8.noscms import initialize_noscms_baseline
+
+        write(self.host, "src/app.py", "fixture\n")
+        initialized = initialize_noscms_baseline(self.host)
+        self.assertTrue(initialized.get("ok"), initialized)
         record_id, rel = self._persist_record()
         expected = observe_candidate(self.host).digest
         first = finalize_s10(
@@ -296,6 +301,11 @@ class P8Rev1Tests(unittest.TestCase):
         self.assertTrue(second["retried"])
 
     def test_T28_noscms_conflicting_writer_cannot_publish(self):
+        from scaffold_p8.noscms import initialize_noscms_baseline
+
+        write(self.host, "src/app.py", "fixture\n")
+        initialized = initialize_noscms_baseline(self.host)
+        self.assertTrue(initialized.get("ok"), initialized)
         record_id, rel = self._persist_record()
         expected = observe_candidate(self.host).digest
         first = finalize_s10(
@@ -322,7 +332,7 @@ class P8Rev1Tests(unittest.TestCase):
         record_id, rel = self._persist_record()
         write(
             self.host,
-            f"{FINALIZATIONS_DIR}/{record_id}.yaml",
+            f".scaffold/ext/submit/noscms/publications/{record_id}/COMPLETE.yaml",
             "not: [valid\n",
         )
         result = finalize_s10(
@@ -375,12 +385,12 @@ class P8Rev1Tests(unittest.TestCase):
                 if stale
                 else None
             )
-            result = submit_engine(host).run(
+            result = run_submit(
+                host,
                 task_id=TASK_A,
                 invoke_test=True,
                 selected=["unit"],
                 finalize=True,
-                submit_authorized={"granted": True, "candidate_digest": digest},
                 push_authorized=push_auth,
             )
             self.assertEqual(result.outcome, "COMPLETED")
@@ -434,15 +444,13 @@ class P8Rev1Tests(unittest.TestCase):
         init_submit_git(self.host)
 
     def _finalize_engine(self, *, push: bool = False, fail_push: bool = False):
-        digest = observe_candidate(self.host).digest
-        authorization = {"granted": True, "candidate_digest": digest}
-        return submit_engine(self.host).run(
+        return run_submit(
+            self.host,
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized=authorization,
-            push_authorized=authorization if push else None,
+            push=push,
             fail_push=fail_push,
         )
 
@@ -493,6 +501,7 @@ class P8Rev1Tests(unittest.TestCase):
             "task_book_ids": [TASK_A],
             "provenance": {
                 "relevant_develop_session_count": 0,
+                "relevant_develop_session_ids": [],
                 "classes": {
                     name: {"path_count": 1 if name == "UNATTRIBUTED" else 0}
                     for name in PROVENANCE_CLASSES

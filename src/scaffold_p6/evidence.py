@@ -245,6 +245,64 @@ def scenario_from_observation(
     return "FAIL"
 
 
+def compile_supplied_sav_item(
+    *,
+    run_id: str,
+    profile_id: str,
+    candidate: CandidateIdentity,
+    supplied: dict[str, Any],
+    index: int,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str]]:
+    """Compile caller SAV assertions through supplied-evidence provenance rules."""
+    if not isinstance(supplied, dict):
+        return None, [], ["SAV supplied evidence is not a mapping"]
+    provenance = supplied.get("provenance")
+    if provenance == "LOCAL_EXECUTION":
+        return None, [], ["supplied evidence cannot claim LOCAL_EXECUTION"]
+    if provenance not in SUPPLIED_PROVENANCE:
+        return None, [], [
+            "SAV supplied evidence provenance is missing or unsupported"
+        ]
+    compiled, refs, blockers, _claimed = _compile_one_supplied(
+        run_id=run_id,
+        profile_id=profile_id,
+        candidate=candidate,
+        supplied=supplied,
+        declared_provenance=str(provenance),
+        index=index,
+    )
+    if compiled is None:
+        return None, refs, blockers
+    for key in (
+        "po_id",
+        "pass",
+        "covers",
+        "role",
+        "retention_class",
+        "retention_justification",
+        "escalation_justification",
+        "visual_justification",
+        "assertions",
+        "negative_control",
+        "scenario_id",
+        "requirement_ids",
+        "obligation_ids",
+    ):
+        if key in supplied:
+            compiled[key] = supplied[key]
+    assertion = compiled.get("assertion")
+    if isinstance(assertion, dict):
+        assertion = dict(assertion)
+        if "pass" in supplied and "pass" not in assertion:
+            assertion["pass"] = supplied.get("pass")
+        if supplied.get("po_id") and not assertion.get("po_id"):
+            assertion["po_id"] = supplied.get("po_id")
+        compiled["assertion"] = assertion
+    if not compiled.get("summary"):
+        compiled["summary"] = str(supplied.get("po_id") or supplied.get("summary") or "structured assertion")
+    return compiled, refs, blockers
+
+
 def local_execution_permitted(declared_provenance: str) -> bool:
     return (declared_provenance or "LOCAL_EXECUTION") in LOCAL_PERMITTED or (
         declared_provenance == "LOCAL_EXECUTION"
@@ -327,6 +385,20 @@ def _compile_one_supplied(
         "local_verified": False,
         "usable": True,
     }
+    for key in (
+        "role",
+        "retention_class",
+        "retention_justification",
+        "escalation_justification",
+        "visual_justification",
+        "covers",
+        "po_id",
+        "pass",
+        "assertions",
+        "negative_control",
+    ):
+        if supplied.get(key) not in (None, ""):
+            item[key] = supplied.get(key)
     usable, reason = evidence_item_usable(item)
     item["usable"] = usable
     blockers = [] if usable else [reason]

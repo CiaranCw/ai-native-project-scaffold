@@ -330,6 +330,15 @@ The human MUST be able to see: creates, modifications, preservations, client-ent
 
 Approval is **plan-candidate-bound**.
 
+A general instruction such as “Adopt this project” or “Run Day-1 Bootstrap”
+authorizes the Agent to **enter** the Bootstrap workflow and produce a preview.
+It is **not** approval of an exact Adoption Plan that did not yet exist when
+that instruction was given. Preview MUST stop and surface the exact `plan_id`,
+`plan_digest`, mutation envelope, ownership changes, managed regions, and
+preserved surfaces. Apply MUST wait for explicit human approval of that exact
+Plan. An Agent MUST NOT convert a generated `plan_id` / digest into “human
+approved” merely because the user previously requested adoption.
+
 If the Plan **materially** changes before B8, previous approval is **invalid**. The human MUST approve the new candidate before any mutation that is outside the old envelope.
 
 If the host **materially** changes after B4 and before B8 in a way that invalidates Plan assumptions or the real candidate, approval is **invalid**. Adoption MUST re-discover, re-plan, and re-approve.

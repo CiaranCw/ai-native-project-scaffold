@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 SKILL_ID = "submit"
-SKILL_VERSION = "2.0.0"
+SKILL_VERSION = "2.1.0"
 SUBMIT_MODES: tuple[str, ...] = ()
 PROVIDES = ("submit.review",)
 REQUIRES = (
@@ -43,5 +43,8 @@ TASKS_DIR = ".scaffold/tasks"
 SESSIONS_DIR = ".scaffold/runtime/develop-sessions"
 CHANGES_DIR = ".scaffold/changes"
 FINALIZATIONS_DIR = ".scaffold/finalizations"
+FORBIDDEN_FINALIZATIONS_DIR = FINALIZATIONS_DIR
+NOSCMS_PUBLICATIONS_DIR = ".scaffold/ext/submit/noscms/publications"
+SUBMIT_EXT_PREFIX = ".scaffold/ext/submit/"
 PROJECT_YAML = ".scaffold/project.yaml"
 TESTS_YAML = ".scaffold/tests.yaml"

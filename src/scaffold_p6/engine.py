@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from scaffold_p5.packages import load_package
+from scaffold_p5.io_util import read_yaml
+from scaffold_p5.ownership import normalize_project_path
 from scaffold_p5.result import skill_result
+from scaffold_p5.rules import resolve_project_rules
 
 from scaffold_p6.adapter import resolve_adapter
 from scaffold_p6.analysis import analyze, failure_summary, route
@@ -24,6 +27,7 @@ from scaffold_p6.contract import (
 from scaffold_p6.evidence import (
     compile_local_evidence,
     compile_supplied_bundle,
+    compile_supplied_sav_item,
     local_execution_permitted,
     observation_dict,
     preserve_verification_truth,
@@ -43,12 +47,24 @@ from scaffold_p6.models import (
     ScenarioResult,
 )
 from scaffold_p6.preflight import TestPreflight, evaluate_test_preflight
+from scaffold_p6.sav import (
+    evaluate_sav_coverage,
+    reconstruct_sav_plan,
+)
 from scaffold_p6.schemas import yaml_safe
+from scaffold_p6.sufficiency import sav_blocks_test_complete
 from scaffold_p6.storage import (
+    abort_materialization,
+    build_published_evidence_refs,
+    cleanup_test_run_result,
+    list_prepared_materializations,
     load_completed_report,
+    materialize_published_evidence,
     new_run_id,
     prepare_run,
     publish_completed_report,
+    release_materialization,
+    resolve_published_evidence,
     write_evidence_blobs,
 )
 
@@ -61,12 +77,14 @@ class TestEngine:
         self.package_validity = "UNRESOLVED"
         self.adapter_invocations = 0
         self.preflight: TestPreflight | None = None
+        self.project_rules: dict[str, Any] | None = None
         if self.package_root:
             loaded = load_package(self.package_root)
             self.skill_version = loaded.ref.skill_version
             self.package_validity = loaded.validity
 
     def run(self, mode: str = "scoped_verification", **opts: Any):
+        self.project_rules = None
         if mode not in TEST_MODES:
             return skill_result(
                 skill_id=SKILL_ID,
@@ -122,6 +140,23 @@ class TestEngine:
                 route_to=self.preflight.route or "understand.compatibility",
                 selected_ids=[],
             )
+        if not pre.usable:
+            return self._blocked(
+                mode,
+                run_id,
+                dest,
+                pre,
+                pre,
+                [],
+                contract,
+                list(pre.data.get("blockers") or [
+                    "candidate SCM observation is unresolved"
+                ]),
+                project,
+                opts,
+                route_to="stop",
+                selected_ids=[],
+            )
         if project_blockers:
             return self._blocked(
                 mode,
@@ -175,9 +210,48 @@ class TestEngine:
                 p.profile_id for p in contract.optional if p.data.get("auto") is True
             )
 
+        self.project_rules = resolve_project_rules(
+            self.root,
+            project=project,
+            skill_id="test",
+            paths=list(opts.get("scope_paths") or []),
+            modules=list(opts.get("scope_modules") or []),
+            test_ids=selected_ids,
+            operation="test_execute",
+        )
+        if not self.project_rules.get("ok"):
+            return self._blocked(
+                mode,
+                run_id,
+                dest,
+                pre,
+                observe_candidate(self.root),
+                [],
+                contract,
+                list(self.project_rules.get("blockers") or []),
+                project,
+                opts,
+                route_to=self.project_rules.get("route") or "understand.refresh",
+                selected_ids=selected_ids,
+            )
+
         results, evidence, refs, artifacts, human_required, authority_route = (
             self._execute_profiles(run_id, pre, contract, selected_ids, supplied)
         )
+        default_profile = (selected_ids or [""])[0]
+        for index, item in enumerate(opts.get("sav_evidence") or []):
+            if not isinstance(item, dict):
+                continue
+            compiled, item_refs, _blockers = compile_supplied_sav_item(
+                run_id=run_id,
+                profile_id=str(item.get("profile_id") or default_profile),
+                candidate=pre,
+                supplied=item,
+                index=index,
+            )
+            refs.extend(item_refs)
+            if compiled is not None:
+                evidence.append(compiled)
         post = observe_candidate(self.root)
         match = candidates_match(pre, post)
         if not match:
@@ -199,6 +273,26 @@ class TestEngine:
             selected_ids=selected_ids,
             required_set_authoritative=contract.required_set_authoritative,
         )
+        sav = self._evaluate_sav(
+            opts, evidence, results, completeness, candidate_digest=pre.digest
+        )
+        if sav.get("applied"):
+            completeness = dict(completeness)
+            completeness["test_pass"] = bool(completeness.get("test_pass")) and bool(
+                sav.get("requirement_pass")
+            )
+            completeness["requirement_pass"] = sav.get("requirement_pass")
+            completeness["sav"] = sav
+            adequacy = sav.get("adequacy") if isinstance(sav.get("adequacy"), dict) else {}
+            if adequacy:
+                completeness["adequacy"] = {
+                    "status": adequacy.get("status"),
+                    "derived": True,
+                    "authority": "engine",
+                    "reasons": list(adequacy.get("reasons") or []),
+                }
+            if sav_blocks_test_complete(sav) or not sav.get("current"):
+                completeness["test_complete"] = False
         report = self._build_report(
             run_id=run_id,
             mode=mode,
@@ -231,7 +325,9 @@ class TestEngine:
                 compatibility=self.preflight.compatibility if self.preflight else None,
                 extras=self._extras(run_id, completeness, None, opts),
             )
-        verification_failed = completeness["required_fail"] > 0
+        verification_failed = completeness["required_fail"] > 0 or bool(
+            sav.get("failed")
+        )
         next_route = authority_route or route(
             completeness=completeness,
             contract_route=contract.route,
@@ -240,12 +336,20 @@ class TestEngine:
             verification_failed=verification_failed,
         )
         outcome = "COMPLETED"
-        if completeness["required_blocked"] or not match:
+        if sav.get("insufficient_observability"):
             outcome = "BLOCKED"
+            next_route = "develop_or_human"
+        elif completeness["required_blocked"] or not match or sav.get("blockers"):
+            outcome = "BLOCKED"
+            if sav.get("blockers") and next_route == (authority_route or "caller"):
+                next_route = "develop_or_human" if sav.get("insufficient_observability") else next_route
         elif human_required:
             outcome = "NEEDS_HUMAN"
         elif contract.blockers:
             outcome = "BLOCKED"
+        extras = self._extras(run_id, completeness, report, opts)
+        if sav:
+            extras["sav"] = sav
         return skill_result(
             skill_id=SKILL_ID,
             skill_version=self.skill_version,
@@ -256,18 +360,154 @@ class TestEngine:
             artifacts=[_artifact_ref(dest)],
             evidence=[item["evidence_id"] for item in evidence],
             blockers=_collect_blockers(
-                results, [] if match else ["candidate changed during verification"]
+                results,
+                ([] if match else ["candidate changed during verification"])
+                + list(sav.get("blockers") or []),
             ),
             next_route=next_route,
             compatibility=self.preflight.compatibility if self.preflight else None,
-            extras=self._extras(run_id, completeness, report, opts),
+            extras=extras,
         )
 
     def load_report(self, run_id: str) -> dict[str, Any] | None:
         return load_completed_report(self.root, run_id)
 
+    def consume_published_report(
+        self,
+        report_id: str,
+        *,
+        task: dict[str, Any] | None = None,
+        requirement_id: str = "",
+    ) -> dict[str, Any]:
+        from scaffold_p6.published import consume_published_report
+
+        return consume_published_report(
+            self.root,
+            report_id,
+            task=task,
+            skill_version=self.skill_version,
+            requirement_id=requirement_id,
+        )
+
+    def reconstruct_scenario_plan(self, task_id: str, requirement_id: str) -> dict[str, Any]:
+        return reconstruct_sav_plan(
+            self.root, task_id=task_id, requirement_id=requirement_id
+        )
+
+    def _evaluate_sav(
+        self,
+        opts: dict[str, Any],
+        evidence: list[dict[str, Any]],
+        results: list[ScenarioResult],
+        completeness: dict[str, Any],
+        *,
+        candidate_digest: str = "",
+    ) -> dict[str, Any]:
+        task_id = str(opts.get("task_id") or "").strip()
+        requirement_id = str(opts.get("requirement_id") or "").strip()
+        if not task_id or not requirement_id:
+            return {}
+        reconstructed = reconstruct_sav_plan(
+            self.root, task_id=task_id, requirement_id=requirement_id
+        )
+        if not reconstructed.get("current"):
+            return {
+                "applied": True,
+                "required": True,
+                "ok": False,
+                "current": False,
+                "requirement_pass": False,
+                "failed": True,
+                "adequacy": {
+                    "status": "UNKNOWN",
+                    "derived": True,
+                    "authority": "engine",
+                    "reasons": ["SAV plan is not current applicable Test authority"],
+                },
+                "blockers": list(
+                    reconstructed.get("blockers")
+                    or ["SAV plan is not current applicable Test authority"]
+                ),
+                "reconstruction": reconstructed,
+            }
+        profile_results = {row.profile_id: row.result for row in results}
+        coverage = evaluate_sav_coverage(
+            reconstructed.get("plan") or {},
+            evidence=evidence,
+            profile_results=profile_results,
+            candidate_digest=candidate_digest,
+            caller_adequacy=opts.get("adequacy"),
+        )
+        return {
+            "applied": True,
+            "required": True,
+            "ok": True,
+            "current": True,
+            "requirement_pass": bool(coverage.get("requirement_pass")),
+            "profile_pass": bool(coverage.get("profile_pass"))
+            or bool(completeness.get("test_pass")),
+            "failed": bool(coverage.get("failed")),
+            "insufficient_observability": bool(coverage.get("insufficient_observability")),
+            "unknown": bool(coverage.get("unknown")),
+            "adequacy": coverage.get("adequacy") or {},
+            "blockers": []
+            if coverage.get("requirement_pass")
+            else [
+                str(row.get("reason") or "")
+                for row in coverage.get("proof_obligations") or []
+                if row.get("required")
+                and row.get("status") != "SATISFIED"
+                and row.get("reason")
+            ],
+            "proof_obligations": coverage.get("proof_obligations") or [],
+            "handoff": coverage.get("handoff"),
+            "reconstruction": {
+                "scenario": reconstructed.get("scenario"),
+                "proof_obligations": reconstructed.get("proof_obligations"),
+                "profile_id": reconstructed.get("profile_id"),
+                "locator": reconstructed.get("locator"),
+                "current": True,
+                "task_id": reconstructed.get("task_id") or task_id,
+                "requirement_id": reconstructed.get("requirement_id") or requirement_id,
+            },
+            "task_id": reconstructed.get("task_id") or task_id,
+            "requirement_id": reconstructed.get("requirement_id") or requirement_id,
+        }
+
     def report_usable_for_current(self, report: dict[str, Any]) -> bool:
         return report_usable_for(report, observe_candidate(self.root))
+
+    def build_evidence_refs(self, run_id: str) -> list[dict[str, str]]:
+        return build_published_evidence_refs(self.root, run_id)
+
+    def resolve_evidence(
+        self, locator: Any
+    ) -> tuple[dict[str, Any] | None, list[str]]:
+        return resolve_published_evidence(self.root, locator)
+
+    def materialize_evidence(
+        self,
+        locators: list[Any],
+        *,
+        coordination_id: str,
+    ) -> tuple[dict[str, Any] | None, list[str]]:
+        return materialize_published_evidence(
+            self.root,
+            locators,
+            coordination_id=coordination_id,
+        )
+
+    def prepared_materializations(self) -> list[dict[str, Any]]:
+        return list_prepared_materializations(self.root)
+
+    def release_materialization(self, coordination_id: str) -> dict[str, Any]:
+        return release_materialization(self.root, coordination_id)
+
+    def abort_materialization(self, coordination_id: str) -> dict[str, Any]:
+        return abort_materialization(self.root, coordination_id)
+
+    def cleanup_run(self, run_id: str) -> dict[str, Any]:
+        return cleanup_test_run_result(self.root, run_id)
 
     def _extras(
         self,
@@ -279,6 +519,7 @@ class TestEngine:
         extras: dict[str, Any] = {
             "test_pass": completeness["test_pass"],
             "test_complete": completeness["test_complete"],
+            "coverage_complete": completeness.get("coverage_complete"),
             "completeness": completeness,
             "report_id": run_id,
             "package": {
@@ -297,6 +538,8 @@ class TestEngine:
             extras["report"] = report
         if self.preflight is not None:
             extras.update(self.preflight.extras())
+        if self.project_rules is not None:
+            extras["project_rules"] = self.project_rules
         return extras
 
     def _execute_profiles(
@@ -337,6 +580,7 @@ class TestEngine:
                         adapter=profile.adapter,
                         command_ref=profile.command_ref,
                         evidence_complete=not profile.required,
+                        not_run_reason="not_selected",
                     )
                 )
                 continue
@@ -356,6 +600,7 @@ class TestEngine:
                         adapter=profile.adapter,
                         command_ref=profile.command_ref,
                         evidence_complete=not profile.required,
+                        not_run_reason="not_applicable",
                     )
                 )
                 continue
@@ -675,21 +920,23 @@ class TestEngine:
             blockers.extend(row.blockers)
         profiles = []
         for row in results:
-            profiles.append(
-                {
-                    "id": row.profile_id,
-                    "required": row.required,
-                    "result": row.result,
-                    "provenance": row.provenance,
-                    "adapter": row.adapter,
-                    "command_ref": row.command_ref,
-                    "timing": row.observation,
-                    "evidence_ids": row.evidence_ids,
-                    "evidence_complete": row.evidence_complete,
-                    "blockers": row.blockers,
-                }
-            )
+            entry = {
+                "id": row.profile_id,
+                "required": row.required,
+                "result": row.result,
+                "provenance": row.provenance,
+                "adapter": row.adapter,
+                "command_ref": row.command_ref,
+                "timing": row.observation,
+                "evidence_ids": row.evidence_ids,
+                "evidence_complete": row.evidence_complete,
+                "blockers": row.blockers,
+            }
+            if row.result == "NOT_RUN":
+                entry["not_run_reason"] = row.not_run_reason or "outside_scope"
+            profiles.append(entry)
         preflight = self.preflight
+        area_scope = _report_area_scope(opts, self.project_rules)
         report = {
             "schema_version": REPORT_SCHEMA_VERSION,
             "kind": SUPPORT_KIND,
@@ -717,6 +964,22 @@ class TestEngine:
             "selected": completeness.get("selected") or [],
             "required": completeness.get("required") or [],
             "optional": completeness.get("optional") or [],
+            "scope": {
+                "candidate_digest": pre.digest,
+                "paths": area_scope["paths"],
+                "modules": area_scope["modules"],
+                "selected": completeness.get("selected") or [],
+                "required": completeness.get("required") or [],
+                "optional": completeness.get("optional") or [],
+                "not_selected": completeness.get("not_selected") or [],
+                "required_policy": completeness.get("required_policy"),
+                "required_set_authoritative": completeness.get(
+                    "required_set_authoritative"
+                ),
+                "verified_no_required_tests": completeness.get(
+                    "verified_no_required_tests", False
+                ),
+            },
             "profiles": profiles,
             "execution_provenance": sorted({
                 row.provenance for row in results if row.provenance
@@ -748,16 +1011,23 @@ def _effective_blocked_results(
 ) -> list[ScenarioResult]:
     if results:
         return list(results)
+    if contract.status not in {"RESOLVED", "VERIFIED_NONE"}:
+        accounting = "BLOCKED"
+        reason = ""
+    else:
+        accounting = "NOT_RUN"
+        reason = "prerequisite_blocked"
     return [
         ScenarioResult(
             profile_id=p.profile_id,
             required=p.required,
-            result="NOT_RUN",
+            result=accounting,
             provenance="",
             adapter=p.adapter,
             command_ref=p.command_ref,
             blockers=list(blockers),
             evidence_complete=False,
+            not_run_reason=reason,
         )
         for p in contract.profiles
     ]
@@ -791,19 +1061,54 @@ def _collect_blockers(results: list[ScenarioResult], extra: list[str]) -> list[s
     return sorted(set(out))
 
 
+def _report_area_scope(
+    opts: dict[str, Any],
+    project_rules: dict[str, Any] | None,
+) -> dict[str, list[str]]:
+    resolved = (
+        project_rules.get("scope")
+        if isinstance(project_rules, dict)
+        and isinstance(project_rules.get("scope"), dict)
+        else {}
+    )
+    raw_paths = resolved.get("paths", opts.get("scope_paths") or [])
+    raw_modules = resolved.get("modules", opts.get("scope_modules") or [])
+    return {
+        "paths": _portable_scope_values(raw_paths),
+        "modules": _portable_scope_values(raw_modules),
+    }
+
+
+def _portable_scope_values(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return sorted({
+        normalized
+        for value in values
+        if (normalized := normalize_project_path(value, area=False))
+    })
+
+
 def _human_summary(report: dict[str, Any]) -> str:
     completeness = report.get("completeness") or {}
+    scope = report.get("scope") or {}
     lines = [
         "# Test Report",
         "",
         f"report_id: {report.get('report_id')}",
         f"TEST_PASS: {completeness.get('test_pass')}",
         f"test_complete: {completeness.get('test_complete')}",
+        f"coverage_complete: {completeness.get('coverage_complete')}",
+        f"required_policy: {completeness.get('required_policy')}",
         f"candidate_match: {completeness.get('candidate_match')}",
+        f"selected: {', '.join(scope.get('selected') or completeness.get('selected') or []) or '(none)'}",
         "",
         "This markdown is a rendering. The YAML report is authoritative.",
         "",
     ]
     for row in report.get("profiles") or []:
-        lines.append(f"- {row.get('id')}: {row.get('result')}")
+        extra = ""
+        if row.get("result") == "NOT_RUN" and row.get("not_run_reason"):
+            extra = f" ({row.get('not_run_reason')})"
+        lines.append(f"- {row.get('id')}: {row.get('result')}{extra}")
     return "\n".join(lines) + "\n"

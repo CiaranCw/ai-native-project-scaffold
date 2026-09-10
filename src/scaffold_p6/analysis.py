@@ -59,7 +59,7 @@ def analyze(
         and batch_evidence_complete
         and not contract_blockers
     )
-    test_complete = (
+    required_coverage_complete = (
         required_set_authoritative
         and candidate_match
         and coverage_evidence_complete
@@ -68,22 +68,48 @@ def analyze(
         and required_not_run == 0
         and required_terminal == len(required_ids)
     )
+    selected = list(selected_ids) if selected_ids is not None else [
+        row.profile_id for row in batch
+    ]
+    optional_set = set(optional_ids)
+    selected_optional_ids = _unique(
+        profile_id for profile_id in selected if profile_id in optional_set
+    )
+    selected_optional_coverage_complete = True
+    for profile_id in selected_optional_ids:
+        row = _worst([row for row in results if row.profile_id == profile_id])
+        if (
+            row is None
+            or row.result not in TERMINAL_USABLE
+            or not row.evidence_complete
+        ):
+            selected_optional_coverage_complete = False
     if (
         required_set_authoritative
         and not required_ids
         and not contract_blockers
         and candidate_match
     ):
-        test_complete = True
+        required_coverage_complete = True
         if verified_no_required or not batch:
             test_pass = False
         coverage_evidence_complete = True
     if not required_set_authoritative and not required_ids:
+        required_coverage_complete = False
+
+    coverage_complete = (
+        required_coverage_complete and selected_optional_coverage_complete
+    )
+    test_complete = required_coverage_complete and required_fail == 0
+    if not required_set_authoritative:
         test_complete = False
 
     executed = [row.profile_id for row in results if row.result != "NOT_RUN"]
     terminal = [row.profile_id for row in results if row.result in TERMINAL_USABLE]
-    selected = list(selected_ids) if selected_ids is not None else executed
+    not_selected = _unique(
+        row.profile_id for row in results if row.profile_id not in selected
+    )
+    required_policy = "VERIFIED" if required_set_authoritative else "UNKNOWN"
     return {
         "required_total": len(required_ids),
         "required_terminal_usable": required_terminal,
@@ -95,6 +121,7 @@ def analyze(
         "candidate_match": candidate_match,
         "evidence_complete": coverage_evidence_complete,
         "batch_evidence_complete": batch_evidence_complete,
+        "coverage_complete": coverage_complete,
         "test_complete": test_complete,
         "test_pass": test_pass,
         "selected": selected,
@@ -104,8 +131,10 @@ def analyze(
         "missing_required": missing_required,
         "blocked_required": blocked_required,
         "optional": list(optional_ids),
+        "not_selected": not_selected,
         "verified_no_required_tests": verified_no_required,
         "required_set_authoritative": required_set_authoritative,
+        "required_policy": required_policy,
     }
 
 
@@ -144,3 +173,14 @@ def _worst(rows: list[ScenarioResult]) -> ScenarioResult | None:
         return None
     order = {"BLOCKED": 0, "FAIL": 1, "NOT_RUN": 2, "PASS": 3}
     return min(rows, key=lambda row: order.get(row.result, 0))
+
+
+def _unique(values) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out

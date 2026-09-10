@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import FIXTURE_DIST, REPO, REPO_UNDERSTAND, adopt, engine, write
+from support import FIXTURE_DIST, REPO, REPO_UNDERSTAND, adopt, apply_fresh_migration, engine, write
 from scaffold_p5.compatibility import evaluate_package
 from scaffold_p5.distribution import Distribution
 from scaffold_p5.engine import UnderstandEngine
@@ -46,10 +46,9 @@ class P5Rev3Tests(unittest.TestCase):
     def _interrupt_migration(self):
         adopt(self.host)
         plan = self._migration_plan()
-        result = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._approval(plan),
+        result = apply_fresh_migration(
+            self.host,
+            plan,
             interrupt_after="validating",
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -254,11 +253,15 @@ class P5Rev3Tests(unittest.TestCase):
             ".scaffold/runtime/bookkeeping.yaml",
             "ephemeral: true\n",
         )
-        result = engine(self.host, "2.1.0").run(
+        preview = engine(self.host, "2.1.0").run(
             "compatibility",
             action="migrate",
             approval=self._approval(plan),
         )
+        self.assertEqual(preview.outcome, "NEEDS_HUMAN")
+        self.assertEqual(preview.extras["migration_plan"]["plan_id"], plan["plan_id"])
+        self.assertEqual(preview.extras["migration_plan"]["digest"], plan["digest"])
+        result = apply_fresh_migration(self.host, plan)
         self.assertEqual(result.outcome, "COMPLETED")
 
     def test_AB9_unproven_agents_inside_envelope_blocks_resume(self):
@@ -564,11 +567,7 @@ class P5Rev3Tests(unittest.TestCase):
     def test_AB28_complete_migration_pipeline_still_converges(self):
         adopt(self.host)
         plan = self._migration_plan()
-        migrated = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._approval(plan),
-        )
+        migrated = apply_fresh_migration(self.host, plan)
         self.assertEqual(migrated.outcome, "COMPLETED")
         self.assertEqual(
             engine(self.host, "2.1.0").run("compatibility").compatibility,

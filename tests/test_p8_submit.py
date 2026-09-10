@@ -14,9 +14,13 @@ from p6_support import (
 )
 from p7_support import TASK_A, write_task
 from p8_support import (
+    OPERATION_S10,
+    authorized_submit_engine,
+    run_submit,
     REPO_SUBMIT,
     bind_submit_lock,
     init_submit_git,
+    rebind_noscms_baseline,
     submit_engine,
     write_ready_task,
     write_submit_host,
@@ -28,6 +32,7 @@ from scaffold_p5.packages import load_package
 from scaffold_p6.candidate import observe_candidate
 from scaffold_p6.engine import TestEngine
 from scaffold_p7.models import SESSIONS_DIR
+from scaffold_p8.handoff import UNRESOLVED_REPAIR_REASON
 from scaffold_p8.models import CHANGES_DIR, FINALIZATIONS_DIR, PROVIDES, REQUIRES, SKILL_ID
 from scaffold_p8.schemas import validate_change_record
 
@@ -43,7 +48,11 @@ class P8SubmitTests(unittest.TestCase):
 
     def test_S01_ready_for_review_task_accepted(self):
         write_submit_host(self.host)
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, 
+            task_id=TASK_A,
+            invoke_test=True,
+            selected=["unit"],
+        )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.extras["task"]["status"], "READY_FOR_REVIEW")
         self.assertEqual(result.extras["stages"], [f"S{i}" for i in range(1, 13)])
@@ -51,46 +60,54 @@ class P8SubmitTests(unittest.TestCase):
     def test_S02_in_progress_task_rejected(self):
         write_submit_host(self.host)
         write_task(self.host, TASK_A, status="IN_PROGRESS")
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertTrue(any("IN_PROGRESS" in item for item in result.blockers))
 
     def test_S03_missing_task_rejected(self):
         write_submit_host(self.host)
         (self.host / ".scaffold/tasks" / f"{TASK_A}.yaml").unlink()
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertTrue(any("missing" in item for item in result.blockers))
 
     def test_S04_malformed_task_rejected(self):
         write_submit_host(self.host)
         write_task(self.host, TASK_A, status="READY_FOR_REVIEW", scope={"paths": {"src/app.py": False}})
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertTrue(any("malformed" in item for item in result.blockers))
 
     def test_S05_invalid_host_blocked(self):
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertEqual(result.next_route, "understand.bootstrap")
 
     def test_S06_maintenance_compatibility_routed(self):
         write_submit_host(self.host, maintenance=["NEEDS_MIGRATION"])
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertEqual(result.next_route, "understand.compatibility")
 
     def test_S07_workspace_diff_wins_over_session_memory(self):
         write_submit_host(self.host)
         self._write_sealed_session(["src/remembered.py"])
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, 
+            task_id=TASK_A,
+            invoke_test=True,
+            selected=["unit"],
+        )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["delta"]["session_memory_overridden"])
         self.assertNotIn("src/remembered.py", result.extras["delta"]["paths"])
 
     def test_S08_incomplete_attribution_keeps_real_diff(self):
         write_submit_host(self.host)
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, 
+            task_id=TASK_A,
+            invoke_test=True,
+            selected=["unit"],
+        )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertIn("src/app.py", result.extras["delta"]["paths"])
         self.assertFalse(result.extras["delta"]["attribution_complete"])
@@ -103,7 +120,7 @@ class P8SubmitTests(unittest.TestCase):
         lock["authoritative"] = lock.get("authoritative", True)
         lock["schema_version"] = "1"
         write_yaml_atomic(self.host / ".scaffold/skills.lock", {**lock, "tampered": True})
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertEqual(result.extras["stage"], "S3")
         self.assertFalse(result.extras["structural"]["structural_review_pass"])
@@ -111,25 +128,28 @@ class P8SubmitTests(unittest.TestCase):
     def test_S10_repair_requirement_emits_develop_handoff(self):
         write_submit_host(self.host)
         (self.host / "src/app.py").unlink()
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
-        self.assertEqual(result.next_route, "develop.repair")
-        handoff = result.extras["repair_handoff"]
-        self.assertEqual(handoff["kind"], "submit_to_develop")
-        self.assertEqual(handoff["task_id"], TASK_A)
-        self.assertFalse(handoff["submit_authorized"])
-        self.assertFalse(handoff["capabilities"]["commit"])
+        self.assertEqual(result.next_route, "human")
+        self.assertIsNone(result.extras.get("repair_handoff"))
+        self.assertTrue(
+            any(UNRESOLVED_REPAIR_REASON in item for item in result.blockers)
+        )
 
     def test_S11_stale_knowledge_requires_understand(self):
         write_submit_host(self.host, maintenance=["NEEDS_REFRESH"])
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertEqual(result.next_route, "understand.refresh")
         self.assertEqual(result.extras["stage"], "S4")
 
     def test_S12_non_material_knowledge_check_continues(self):
         write_submit_host(self.host, maintenance=[])
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, 
+            task_id=TASK_A,
+            invoke_test=True,
+            selected=["unit"],
+        )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["knowledge"]["knowledge_consistent"])
 
@@ -139,7 +159,7 @@ class P8SubmitTests(unittest.TestCase):
         def mutate():
             write(self.host, "README.md", "# refreshed\n")
 
-        result = submit_engine(self.host).run(task_id=TASK_A, after_s4=mutate)
+        result = run_submit(self.host, task_id=TASK_A, after_s4=mutate)
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertEqual(result.extras["loop"], "S8→S3/S4/S5/S6")
         self.assertFalse(result.extras["submit_authorized"])
@@ -156,10 +176,12 @@ class P8SubmitTests(unittest.TestCase):
         bind_submit_lock(self.host)
         write(self.host, "src/app.py", "value = 1\n")
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        project["ownership"] = {**CORE_OWNERSHIP, "src/app.py": "GENERATED"}
+        project["ownership"] = {**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"}
+        project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
         write_ready_task(self.host)
-        result = submit_engine(self.host).run(
+        rebind_noscms_baseline(self.host)
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["extra"],
@@ -172,7 +194,7 @@ class P8SubmitTests(unittest.TestCase):
 
     def test_S15_complete_pass_required_coverage_accepted(self):
         write_submit_host(self.host)
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
@@ -181,35 +203,37 @@ class P8SubmitTests(unittest.TestCase):
         self.assertTrue(result.extras["test_pass"])
         self.assertTrue(result.extras["test_complete"])
 
-    def test_S16_required_fail_can_be_complete_but_blocks_s10(self):
+    def test_S16_required_fail_cannot_be_test_complete(self):
         profile, command = failing_profile("unit")
         write_host(self.host, [(profile, command)])
         bind_submit_lock(self.host)
         write(self.host, "src/app.py", "value = 1\n")
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        project["ownership"] = {**CORE_OWNERSHIP, "src/app.py": "GENERATED"}
+        project["ownership"] = {**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"}
+        project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
         write_ready_task(self.host)
+        rebind_noscms_baseline(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(result.extras["completeness"]["test_complete"])
+        self.assertFalse(result.extras["completeness"]["test_complete"])
+        self.assertTrue(result.extras["completeness"]["coverage_complete"])
         self.assertFalse(result.extras["completeness"]["test_pass"])
         self.assertFalse(result.extras["s10"]["durable"])
 
     def test_S17_missing_required_coverage_routes_test(self):
         write_submit_host(self.host)
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, task_id=TASK_A)
         self.assertIn(result.next_route, {"human", "test.scoped_verification", "caller"})
         if result.extras.get("test_complete"):
             self.skipTest("fixture already complete")
-        blocked = submit_engine(self.host).run(task_id=TASK_A, finalize=True)
+        blocked = run_submit(self.host, task_id=TASK_A, finalize=True)
         self.assertEqual(blocked.outcome, "BLOCKED")
         self.assertIn(
             blocked.next_route,
@@ -221,19 +245,25 @@ class P8SubmitTests(unittest.TestCase):
         test = TestEngine(self.host, REPO / "skills" / "test").run(
             "scoped_verification", selected=["unit"]
         )
-        report = test.extras["report"]
         write(self.host, "src/app.py", "value = 2\n")
-        result = submit_engine(self.host).run(task_id=TASK_A, report=report)
+        result = run_submit(self.host, 
+            task_id=TASK_A,
+            report_id=test.extras["report_id"],
+        )
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertTrue(result.extras["completeness"]["stale_report"])
 
     def test_S19_zero_required_uses_p6_semantics(self):
         extra, command = passing_profile("note", required=False)
         write_host(self.host, [(extra, command)])
+        tests = read_yaml(self.host / ".scaffold/tests.yaml")
+        tests["required_authority"] = "VERIFIED"
+        write_yaml_atomic(self.host / ".scaffold/tests.yaml", tests)
         bind_submit_lock(self.host)
         write(self.host, "src/app.py", "value = 1\n")
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        project["ownership"] = {**CORE_OWNERSHIP, "src/app.py": "GENERATED"}
+        project["ownership"] = {**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"}
+        project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
         write_ready_task(self.host, final_tests=[], stages=[{
             "stage_id": "stage-1",
@@ -242,7 +272,8 @@ class P8SubmitTests(unittest.TestCase):
             "status": "COMPLETE",
             "required_tests": [],
         }])
-        result = submit_engine(self.host).run(
+        rebind_noscms_baseline(self.host)
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["note"],
@@ -265,33 +296,35 @@ class P8SubmitTests(unittest.TestCase):
     def test_S21_authorization_bound_to_current_candidate_accepted(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["s10"]["ok"])
 
     def test_S22_candidate_change_invalidates_authorization(self):
         write_submit_host(self.host)
-        digest = observe_candidate(self.host).digest
+        engine, provider = authorized_submit_engine(self.host)
+        c1 = observe_candidate(self.host).digest
+        ref = provider.issue(operation=OPERATION_S10, candidate_digest=c1, attempt_id="A1")
         write(self.host, "README.md", "# changed after grant\n")
-        result = submit_engine(self.host).run(
+        result = engine.run(
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
+            submit_authorization_ref=ref,
+            submit_authorization_attempt_id="A1",
         )
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertTrue(any("C1 authorization is unusable for C2" in item for item in result.blockers))
 
     def test_S23_authorization_not_manufactured_from_test_pass(self):
         write_submit_host(self.host)
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
@@ -303,12 +336,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S24_no_material_sync_change_continues(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             before_s7=lambda: None,
         )
         self.assertEqual(result.outcome, "COMPLETED")
@@ -320,12 +352,11 @@ class P8SubmitTests(unittest.TestCase):
         def sync():
             write(self.host, "README.md", "# synced\n")
 
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             before_s7=sync,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -339,12 +370,11 @@ class P8SubmitTests(unittest.TestCase):
         def sync():
             write(self.host, "src/app.py", "value = 9\n")
 
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             before_s7=sync,
         )
         self.assertFalse(result.extras["submit_authorized"])
@@ -352,14 +382,17 @@ class P8SubmitTests(unittest.TestCase):
 
     def test_S27_c1_authorization_unusable_for_c2(self):
         write_submit_host(self.host)
+        engine, provider = authorized_submit_engine(self.host)
         c1 = observe_candidate(self.host).digest
+        ref = provider.issue(operation=OPERATION_S10, candidate_digest=c1, attempt_id="A1")
         write(self.host, "src/app.py", "value = 3\n")
-        result = submit_engine(self.host).run(
+        result = engine.run(
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": c1},
+            submit_authorization_ref=ref,
+            submit_authorization_attempt_id="A1",
         )
         self.assertEqual(result.outcome, "BLOCKED")
         self.assertTrue(any("C2" in item for item in result.blockers))
@@ -367,12 +400,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S28_change_record_uses_p3_schema(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         record = result.extras["change_record"]
         self.assertEqual(validate_change_record(record, expected_id=record["record_id"]), [])
@@ -394,12 +426,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S30_s9_does_not_claim_durable_s10(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             fail_s10=True,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -435,12 +466,11 @@ class P8SubmitTests(unittest.TestCase):
         write_submit_host(self.host)
         init_submit_git(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["s10"]["ok"])
@@ -453,12 +483,11 @@ class P8SubmitTests(unittest.TestCase):
         def mutate():
             write(self.host, "src/app.py", "value = 99\n")
 
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             before_s10=mutate,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -473,12 +502,11 @@ class P8SubmitTests(unittest.TestCase):
             write(self.host, "secrets.env", "token=1\n")
             git(self.host, "add", "secrets.env")
 
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             before_s10=sneak,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -493,12 +521,11 @@ class P8SubmitTests(unittest.TestCase):
         write_submit_host(self.host)
         parent = init_submit_git(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.extras["s10"]["commit"], git(self.host, "rev-parse", "HEAD"))
@@ -508,12 +535,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S36_commit_failure_leaves_change_record_non_durable(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             fail_s10=True,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -526,12 +552,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S37_noscms_authorized_finalization_succeeds(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.extras["s10"]["kind"], "none")
@@ -540,44 +565,90 @@ class P8SubmitTests(unittest.TestCase):
     def test_S38_noscms_publication_conflict_fails_closed(self):
         from scaffold_p5.io_util import file_digest
         from scaffold_p8.finalize import build_finalization_marker
+        from scaffold_p8.noscms import (
+            MANIFEST_NAME,
+            complete_path,
+            publication_dir,
+            publish_noscms_finalization,
+            verify_noscms_publication,
+        )
+        from scaffold_p8.records import finalization_binding
 
         write_submit_host(self.host)
-        digest = observe_candidate(self.host).digest
         change_id = "change-20260830T150000Z-ffff9999"
 
         def compete():
             record_path = self.host / CHANGES_DIR / f"{change_id}.yaml"
-            write_yaml_atomic(
-                self.host / FINALIZATIONS_DIR / f"{change_id}.yaml",
-                build_finalization_marker(
-                    record_id=change_id,
-                    candidate_digest="0" * 64,
-                    change_record_digest=file_digest(record_path),
-                ),
+            current_digest = observe_candidate(self.host).digest
+            record_digest = file_digest(record_path)
+            marker = build_finalization_marker(
+                record_id=change_id,
+                candidate_digest=current_digest,
+                change_record_digest=record_digest,
             )
+            published = publish_noscms_finalization(
+                self.host,
+                record_id=change_id,
+                candidate_digest=current_digest,
+                change_record_digest=record_digest,
+                support_artifacts=[],
+                marker=marker,
+            )
+            self.assertTrue(published.get("ok"), published.get("blockers"))
+            self.assertTrue(published.get("durable"))
+            verified = verify_noscms_publication(self.host, change_id)
+            self.assertTrue(verified.get("ok"), verified.get("blockers"))
+            self.assertTrue(verified.get("durable"))
 
-        result = submit_engine(self.host).run(
+            incompatible = "0" * 64
+            complete = complete_path(self.host, change_id)
+            payload = read_yaml(complete)
+            payload["candidate_digest"] = incompatible
+            payload["finalization_digest"] = finalization_binding(
+                change_id,
+                "none",
+                incompatible,
+                record_digest,
+                [],
+            )
+            write_yaml_atomic(complete, payload)
+            manifest_path = publication_dir(self.host, change_id) / MANIFEST_NAME
+            manifest = read_yaml(manifest_path)
+            manifest["candidate_digest"] = incompatible
+            write_yaml_atomic(manifest_path, manifest)
+            verified = verify_noscms_publication(self.host, change_id)
+            self.assertTrue(verified.get("ok"), verified.get("blockers"))
+            self.assertTrue(verified.get("durable"))
+
+        result = run_submit(
+            self.host,
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
             change_id=change_id,
-            submit_authorized={"granted": True, "candidate_digest": digest},
             before_s10=compete,
         )
         self.assertEqual(result.outcome, "BLOCKED")
+        self.assertTrue((result.extras.get("s10") or {}).get("conflict"))
         self.assertTrue(any("conflict" in item.lower() for item in result.blockers))
+        self.assertTrue(
+            any(
+                "incompatible finalization already won" in item
+                for item in result.blockers
+            ),
+            result.blockers,
+        )
 
     def test_S39_s10_without_push_authorization_is_valid(self):
         write_submit_host(self.host)
         init_submit_git(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["s10"]["ok"])
@@ -586,13 +657,12 @@ class P8SubmitTests(unittest.TestCase):
     def test_S40_push_authorization_is_separate(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
-            push_authorized={"granted": True, "candidate_digest": digest},
+            push=True,
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["submit_authorized"])
@@ -601,12 +671,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S41_no_push_without_explicit_authorization(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertFalse(result.extras["push"].get("performed"))
 
@@ -614,13 +683,12 @@ class P8SubmitTests(unittest.TestCase):
         write_submit_host(self.host)
         init_submit_git(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
-            push_authorized={"granted": True, "candidate_digest": digest},
+            push=True,
             fail_push=True,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -632,7 +700,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S43_no_session_cleanup_before_s10(self):
         write_submit_host(self.host)
         session_id = self._write_sealed_session(["src/app.py"])
-        result = submit_engine(self.host).run(task_id=TASK_A)
+        result = run_submit(self.host, 
+            task_id=TASK_A,
+            invoke_test=True,
+            selected=["unit"],
+        )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertFalse(result.extras["cleanup"]["performed"])
         self.assertTrue((self.host / SESSIONS_DIR / session_id).is_dir())
@@ -641,12 +713,11 @@ class P8SubmitTests(unittest.TestCase):
         write_submit_host(self.host)
         session_id = self._write_sealed_session(["src/app.py"])
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertIn(session_id, result.extras["cleanup"]["cleaned"])
@@ -656,12 +727,11 @@ class P8SubmitTests(unittest.TestCase):
         write_submit_host(self.host)
         other = self._write_sealed_session(["src/other.py"], session_id="dev-20260830T120000Z-eeeeeeee", task_id="task-20260830T120000Z-eeeeeeee")
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertIn(other, result.extras["cleanup"]["retained"])
@@ -670,12 +740,11 @@ class P8SubmitTests(unittest.TestCase):
     def test_S46_durable_artifacts_retained(self):
         write_submit_host(self.host)
         digest = observe_candidate(self.host).digest
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized={"granted": True, "candidate_digest": digest},
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue((self.host / ".scaffold/tasks" / f"{TASK_A}.yaml").is_file())
@@ -685,7 +754,7 @@ class P8SubmitTests(unittest.TestCase):
     def test_S47_submit_never_silently_edits_source(self):
         write_submit_host(self.host)
         before = (self.host / "src/app.py").read_text(encoding="utf-8")
-        result = submit_engine(self.host).run(
+        result = run_submit(self.host, 
             task_id=TASK_A,
             writes=[{"path": "src/app.py", "content": "hacked\n"}],
         )
@@ -695,13 +764,12 @@ class P8SubmitTests(unittest.TestCase):
     def test_S48_repair_handoff_does_not_escalate_permissions(self):
         write_submit_host(self.host)
         (self.host / "src/app.py").unlink()
-        result = submit_engine(self.host).run(task_id=TASK_A)
-        handoff = result.extras["repair_handoff"]
-        self.assertFalse(handoff["capabilities"]["commit"])
-        self.assertFalse(handoff["capabilities"]["push"])
-        self.assertFalse(handoff["capabilities"]["submit_authorized"])
-        self.assertNotIn("chat", handoff)
+        result = run_submit(self.host, task_id=TASK_A)
+        self.assertEqual(result.next_route, "human")
+        self.assertIsNone(result.extras.get("repair_handoff"))
         self.assertFalse(result.extras["capabilities"]["commit"])
+        self.assertFalse(result.extras["capabilities"]["push"])
+        self.assertFalse(result.extras["capabilities"]["submit_authorized"])
 
     def test_package_identity(self):
         pkg = load_package(REPO_SUBMIT)
@@ -773,6 +841,7 @@ class P8SubmitTests(unittest.TestCase):
             "task_book_ids": [],
             "provenance": {
                 "relevant_develop_session_count": 0,
+                "relevant_develop_session_ids": [],
                 "classes": {
                     name: {"path_count": 0}
                     for name in (

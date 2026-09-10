@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 import secrets
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from scaffold_p5.host_state import scm_baseline
 from scaffold_p5.io_util import file_digest, read_yaml, write_yaml_atomic
+from scaffold_p5.scm import observe_scm
 
 from scaffold_p7.models import DIGEST_PREFIX, SESSIONS_DIR
 from scaffold_p7.schemas import SESSION_ID_RE, validate_develop_session, validate_files_yaml
+
+
+def operational_project_name(
+    project: dict[str, Any] | None,
+    root: str | Path,
+) -> str:
+    """Stable Session identity. Does not resolve CONFLICTING product-name facts."""
+    declared = str((project or {}).get("name") or "").strip()
+    if declared:
+        return declared
+    return Path(root).name
 
 
 class SessionResolution:
@@ -135,11 +146,13 @@ def load_session(
             ok=False,
             blockers=["Develop Session mode does not match the requested Develop mode"],
         )
-    if data.get("project_name") != project_name:
-        return SessionResolution(
-            ok=False,
-            blockers=["Develop Session is bound to a different project"],
-        )
+    bound_name = data.get("project_name")
+    if bound_name != project_name:
+        if not (isinstance(bound_name, str) and bound_name == "" and project_name):
+            return SessionResolution(
+                ok=False,
+                blockers=["Develop Session is bound to a different project"],
+            )
     if data.get("status") != "OPEN":
         return SessionResolution(
             ok=False,
@@ -262,21 +275,14 @@ def path_kind(path: Path) -> str:
 def _workspace_overlay(root: Path, baseline: dict[str, Any]) -> dict[str, Any]:
     if baseline.get("kind") != "git":
         return {"coverage": "unavailable", "paths": []}
-    completed = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    if completed.returncode != 0:
+    observed = observe_scm(root)
+    if not observed.ok or observed.kind != "git":
         return {"coverage": "unavailable", "paths": []}
     paths: list[dict[str, Any]] = []
-    for raw in completed.stdout.splitlines():
-        if len(raw) < 4:
+    for entry in observed.entries:
+        rel = str(entry.get("path") or "")
+        if not rel:
             continue
-        rel = raw[3:].strip().replace("\\", "/")
-        if " -> " in rel:
-            rel = rel.split(" -> ", 1)[1]
         full = root / rel
         digest = file_sha256(full)
         paths.append(

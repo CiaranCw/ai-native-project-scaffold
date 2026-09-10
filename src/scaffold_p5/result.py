@@ -51,3 +51,61 @@ def result_dict(result: SkillResult) -> dict[str, Any]:
         "compatibility": result.compatibility,
         "extras": dict(result.extras),
     }
+
+
+def adoption_approval_human_gate(plan: Any) -> dict[str, str]:
+    """Presentation-only gate. Canonical blockers may still name B4 internally."""
+    extra = ""
+    actions = getattr(plan, "actions", None) or []
+    agents = next((action for action in actions if action.target == "AGENTS.md"), None)
+    if agents is not None and agents.action_class == "MANAGED_UPDATE":
+        extra = (
+            " Existing AGENTS.md human text stays; a bounded Scaffold router "
+            "region is proposed."
+        )
+    elif agents is not None and agents.client_strategy == "DEFER":
+        extra = (
+            " Existing AGENTS.md cannot be integrated automatically; the Agent "
+            "router must be resolved before this host can become Active."
+        )
+    actions = list(getattr(plan, "actions", None) or [])
+    envelope = [str(item) for item in (getattr(plan, "mutation_envelope", None) or [])]
+    ownership = []
+    managed = []
+    preserved = []
+    for action in actions:
+        target = str(getattr(action, "target", "") or "")
+        mode = str(getattr(action, "ownership", "") or "")
+        if target and mode:
+            ownership.append(f"{target}={mode}")
+        region = getattr(action, "managed_region", None)
+        if target and region:
+            managed.append(f"{target}:{region}")
+        if getattr(action, "action_class", "") == "PRESERVE" and target:
+            preserved.append(target)
+    return {
+        "observed": "An Adoption Plan is ready. No project files have been changed.",
+        "why_stopped": "Adoption waits for a human to approve this exact plan.",
+        "human_action_required": (
+            "Review and approve this Adoption Plan before any project files are "
+            "changed. A general instruction to adopt or bootstrap the project "
+            "authorizes preview only, not this exact Plan."
+            + extra
+        ),
+        "if_approved": (
+            "The approved plan is applied exactly. If the proposal changes, "
+            "a new plan must be reviewed."
+        ),
+        "remains_unchanged": (
+            "This projection grants no source write, Commit, Push, or other "
+            "permission beyond the approved Adoption Plan."
+        ),
+        "plan_id": str(getattr(plan, "plan_id", "") or ""),
+        "plan_digest": str(getattr(plan, "digest", "") or ""),
+        "mutation_envelope": ", ".join(envelope) if envelope else "none",
+        "ownership_changes": ", ".join(ownership) if ownership else "none",
+        "managed_regions": ", ".join(managed) if managed else "none",
+        "preserved_surfaces": ", ".join(preserved) if preserved else "none",
+        "generic_intent_is_not_approval": "true",
+        "preview_is_not_apply": "true",
+    }

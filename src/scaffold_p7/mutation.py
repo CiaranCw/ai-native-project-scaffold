@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from scaffold_p5.io_util import write_text_atomic
+from scaffold_p5.ownership import (
+    ordinary_business_source,
+    path_covered,
+    resolve_ownership,
+)
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS, whole_file_mutation_allowed
 
 from scaffold_p7.models import MODULES_YAML
@@ -23,10 +28,12 @@ class MutationPlan:
         ok: bool,
         writes: list[dict[str, Any]] | None = None,
         blockers: list[str] | None = None,
+        authority: list[dict[str, Any]] | None = None,
     ):
         self.ok = ok
         self.writes = writes or []
         self.blockers = blockers or []
+        self.authority = authority or []
 
 
 def authorize_writes(
@@ -49,6 +56,7 @@ def authorize_writes(
     scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
     module_paths = _module_paths(root, scope)
     authorized: list[dict[str, Any]] = []
+    authority: list[dict[str, Any]] = []
     for index, item in enumerate(writes):
         if not isinstance(item, dict):
             return MutationPlan(ok=False, blockers=[f"write {index} is not a mapping"])
@@ -71,18 +79,34 @@ def authorize_writes(
                     "core Scaffold machine artifact"
                 ],
             )
-        mode = ownership.get(rel)
-        if mode is None:
+        resolved = resolve_ownership(ownership, rel)
+        if resolved.status == "UNKNOWN":
             return MutationPlan(
                 ok=False,
                 blockers=[f"mutation authority for {rel} is UNKNOWN"],
             )
-        if mode not in OWNERSHIP_MODES:
+        if resolved.status != "RESOLVED" or resolved.mode not in OWNERSHIP_MODES:
             return MutationPlan(
-                ok=False,
-                blockers=[f"mutation authority for {rel} is CONFLICTING ({mode!r})"],
+                ok=False, blockers=[resolved.reason or f"mutation authority for {rel} is CONFLICTING"]
             )
-        allowed, reason = whole_file_mutation_allowed(ownership, rel)
+        mode = str(resolved.mode)
+        if mode == "HUMAN_OWNED":
+            allowed = bool(
+                task.get("status") == "IN_PROGRESS"
+                and ordinary_business_source(
+                    rel, list(project.get("source_areas") or [])
+                )
+            )
+            reason = (
+                "current Task-scoped instruction authorizes HUMAN_OWNED business source"
+                if allowed
+                else (
+                    f"HUMAN_OWNED {rel} requires explicit current business-source "
+                    "Task authority"
+                )
+            )
+        else:
+            allowed, reason = whole_file_mutation_allowed(ownership, rel)
         if not allowed:
             return MutationPlan(ok=False, blockers=[reason])
         if "content" not in item or not isinstance(item.get("content"), str):
@@ -91,7 +115,15 @@ def authorize_writes(
                 blockers=[f"write {rel} content must be a string"],
             )
         authorized.append({"path": rel, "content": item["content"]})
-    return MutationPlan(ok=True, writes=authorized)
+        authority.append(
+            {
+                "path": rel,
+                "ownership": mode,
+                "ownership_key": resolved.matched_key,
+                "task_scoped": True,
+            }
+        )
+    return MutationPlan(ok=True, writes=authorized, authority=authority)
 
 
 def apply_writes(
@@ -206,10 +238,7 @@ def _module_paths(root: Path, scope: dict[str, Any]) -> list[str]:
 
 
 def _covers(rel: str, declared: str) -> bool:
-    if rel == declared:
-        return True
-    prefix = declared.rstrip("/")
-    return rel.startswith(prefix + "/")
+    return path_covered(rel, declared)
 
 
 def _normalize(value: Any) -> str:

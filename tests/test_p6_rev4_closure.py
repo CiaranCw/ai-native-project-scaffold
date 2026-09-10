@@ -57,7 +57,8 @@ class P6Rev4ClosureTests(unittest.TestCase):
 
     def test_Y03_missing_required_set_authoritative_invalid(self):
         report, _run_id = self._fail_complete_report()
-        self.assertTrue(report["completeness"]["test_complete"])
+        self.assertTrue(report["completeness"]["coverage_complete"])
+        self.assertFalse(report["completeness"]["test_complete"])
         self.assertFalse(report["completeness"]["test_pass"])
         del report["completeness"]["required_set_authoritative"]
         self.assertNotEqual(self._validate(report), "VALID")
@@ -123,7 +124,8 @@ class P6Rev4ClosureTests(unittest.TestCase):
         loaded_fail = load_completed_report(fail_host, failed.extras["report_id"])
         self.assertIsNotNone(loaded_fail)
         self.assertFalse(loaded_fail["verification"]["test_pass"])
-        self.assertTrue(loaded_fail["verification"]["test_complete"])
+        self.assertTrue(loaded_fail["completeness"]["coverage_complete"])
+        self.assertFalse(loaded_fail["verification"]["test_complete"])
 
 
 if __name__ == "__main__":

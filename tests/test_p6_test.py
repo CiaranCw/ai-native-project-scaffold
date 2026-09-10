@@ -43,12 +43,12 @@ class P6TestSkillTests(unittest.TestCase):
         pkg = load_package(REPO_TEST)
         self.assertEqual(pkg.validity, "VALID", pkg.validity_reasons)
         self.assertEqual(pkg.ref.skill_id, "test")
-        self.assertEqual(pkg.ref.skill_version, "2.0.0")
+        self.assertEqual(pkg.ref.skill_version, "2.0.1")
         self.assertEqual(pkg.manifest["modes"], ["scoped_verification"])
         self.assertEqual(pkg.manifest["provides"], ["test.scoped_verification"])
         self.assertEqual(pkg.manifest["requires"], [])
         self.assertEqual(SKILL_ID, "test")
-        self.assertEqual(SKILL_VERSION, "2.0.0")
+        self.assertEqual(SKILL_VERSION, "2.0.1")
         self.assertEqual(TEST_MODES, ("scoped_verification",))
         self.assertEqual(PROVIDES, ("test.scoped_verification",))
         self.assertEqual(REQUIRES, ())
@@ -127,7 +127,8 @@ class P6TestSkillTests(unittest.TestCase):
         result = test_engine(self.host).run()
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertFalse(result.extras["test_pass"])
-        self.assertTrue(result.extras["test_complete"])
+        self.assertFalse(result.extras["test_complete"])
+        self.assertTrue(result.extras["coverage_complete"])
         self.assertEqual(result.extras["report"]["profiles"][0]["result"], "FAIL")
         self.assertTrue((self.host / ".scaffold/runtime/test-runs" / result.extras["report_id"] / "report.yaml").exists())
 
@@ -137,7 +138,8 @@ class P6TestSkillTests(unittest.TestCase):
         c = result.extras["completeness"]
         self.assertEqual(c["required_pass"], 1)
         self.assertEqual(c["required_fail"], 1)
-        self.assertTrue(c["test_complete"])
+        self.assertTrue(c["coverage_complete"])
+        self.assertFalse(c["test_complete"])
         self.assertFalse(c["test_pass"])
 
     def test_T11_required_not_run_incomplete(self):
@@ -167,6 +169,7 @@ class P6TestSkillTests(unittest.TestCase):
         self.assertNotIn("opt", c["selected"])
         opt = next(row for row in result.extras["report"]["profiles"] if row["id"] == "opt")
         self.assertEqual(opt["result"], "NOT_RUN")
+        self.assertEqual(opt["not_run_reason"], "not_selected")
         self.assertTrue(c["test_complete"])
         self.assertTrue(c["test_pass"])
 
@@ -174,7 +177,13 @@ class P6TestSkillTests(unittest.TestCase):
         write(self.host, "README.md", "# none\n")
         write_project(self.host)
         write_commands(self.host, [])
-        write_tests(self.host, [], applicable=False, applicability="NOT_APPLICABLE")
+        write_tests(
+            self.host,
+            [],
+            applicable=False,
+            applicability="NOT_APPLICABLE",
+            required_authority="VERIFIED",
+        )
         result = test_engine(self.host).run()
         c = result.extras["completeness"]
         self.assertEqual(c["required_total"], 0)
@@ -493,7 +502,8 @@ class P6TestSkillTests(unittest.TestCase):
         mixed = test_engine(self.host).run().extras["completeness"]
         write_host(self.host, [passing_profile("only")])
         only = test_engine(self.host).run(selected=[]).extras["completeness"]
-        self.assertTrue(mixed["test_complete"])
+        self.assertTrue(mixed["coverage_complete"])
+        self.assertFalse(mixed["test_complete"])
         self.assertFalse(mixed["test_pass"])
         self.assertFalse(only["test_complete"])
         self.assertFalse(only["test_pass"])
@@ -510,7 +520,8 @@ class P6TestSkillTests(unittest.TestCase):
         c = test_engine(self.host).run().extras["completeness"]
         self.assertEqual(c["required_terminal_usable"], 1)
         self.assertEqual(c["required_fail"], 1)
-        self.assertTrue(c["test_complete"])
+        self.assertTrue(c["coverage_complete"])
+        self.assertFalse(c["test_complete"])
 
     def test_T48_required_blocked_not_terminal_usable(self):
         profile, _command = passing_profile("gone")

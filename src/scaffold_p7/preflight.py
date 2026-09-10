@@ -54,8 +54,9 @@ def evaluate_host_execution_gate(
     *,
     project: dict[str, Any] | None,
     project_status: str,
+    allow_approved_migration: bool = False,
 ) -> tuple[bool, list[str], str, str | None, list[str]]:
-    """Observational ordinary-Develop host gate. Does not Refresh or Migrate."""
+    """Observational ordinary-Develop host gate. Does not Refresh or invent Migration."""
     if project_status == "ABSENT":
         return (
             False,
@@ -103,7 +104,7 @@ def evaluate_host_execution_gate(
             str(lifecycle) if lifecycle is not None else None,
             maintenance,
         )
-    if "NEEDS_MIGRATION" in maintenance:
+    if "NEEDS_MIGRATION" in maintenance and not allow_approved_migration:
         return (
             False,
             ["ACTIVE host has NEEDS_MIGRATION; ordinary Develop is blocked"],
@@ -131,6 +132,7 @@ def evaluate_develop_preflight(
     package_root: Path | None,
     project: dict[str, Any] | None,
     project_status: str,
+    allow_approved_migration: bool = False,
 ) -> DevelopPreflight:
     actual_pkg = load_package(package_root) if package_root else None
     actual_ref = actual_pkg.ref if actual_pkg else None
@@ -145,6 +147,7 @@ def evaluate_develop_preflight(
             root,
             project=project,
             project_status=project_status,
+            allow_approved_migration=allow_approved_migration,
         )
     )
     if not host_ok:

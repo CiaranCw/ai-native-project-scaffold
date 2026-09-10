@@ -202,7 +202,20 @@ Task
   └─ Final Tests
 ```
 
-A stage Test PASS proves **that stage’s required tests passed**. It MUST NOT be treated as: task complete; all tests complete; or submittable.
+A stage Test PASS proves **that stage’s required tests passed**. It MUST NOT be treated as: Stage acceptance satisfied; task complete; all tests complete; or submittable.
+
+The Task Book carries a P3-defined structured **Stage Completion Decision**
+about each human-readable Stage acceptance criterion. Develop owns that
+candidate-bound lifecycle decision; Test owns Test/Evidence truth. A Stage
+may enter `COMPLETE` only when its current decision is `SATISFIED`, required
+Stage Test obligations are satisfied, and no required blocker remains.
+`UNKNOWN` is not `UNSATISFIED`, and neither permits completion.
+
+The Task Book also carries a distinct P3-defined structured **Task Completion
+Decision** about its human-readable Task-level acceptance criterion. It uses
+the same `SATISFIED` / `UNSATISFIED` / `UNKNOWN` outcomes and candidate-bound,
+reconstructable authority principles. All Stage completion and final Test
+success does not automatically satisfy the Task criterion.
 
 ### Internal phases
 
@@ -210,7 +223,70 @@ A stage Test PASS proves **that stage’s required tests passed**. It MUST NOT b
 | --- | --- |
 | **D1 Prepare** | Read AGENTS; read relevant project knowledge; read Task Book; inspect real repository state; determine whether the local baseline is current vs the project’s configured upstream / source-of-truth SCM; read recent Change Records; decide whether Understand Refresh is required |
 | **D2 Implement** | Implement the current stage; sync necessary docs; local verification |
-| **D3 Validate** | Invoke Test Skill; update Task Book; if incomplete or acceptance unmet, continue Develop ↔ Test; do **not** mark READY_FOR_REVIEW merely because tests executed |
+| **D3 Validate** | Invoke Test Skill; publish the candidate-bound Stage Completion Decision and Task progress through P3 conditional publication; if incomplete, stale, unknown, or acceptance unmet, continue Develop ↔ Test; do **not** mark READY_FOR_REVIEW merely because tests executed |
+
+### Candidate currentness and the Task control plane
+
+P6 remains the **single owner** of candidate identity. Its candidate digest
+MUST represent the substantive project candidate, including source, business
+content, project/configuration authority, and the substantive authority
+projection of every Task Book. The digest MUST NOT be defined as an
+unqualified hash of every mutable workspace byte when doing so would make a
+Completion Decision stale solely because that decision was canonically
+published into its own Task Book.
+
+The Task authority projection is narrow. Goal, acceptance, scope, baseline,
+Stage identity/goal/acceptance, planned requirement identities, and explicit
+requirement-to-Test-profile execution bindings are candidate-significant.
+Creating/removing a Task Book or changing any of those facts changes candidate
+identity. Bounded lifecycle/control-plane facts of the **current** Task
+content — revision and update metadata, Task/Stage progress status, Session
+links, result summaries, P6 Evidence locators and observed outcomes, and
+Stage/Task Completion Decisions — MAY be candidate-neutral when the
+substantive Task authority projection of that current content is unchanged.
+
+P6 `candidate_digest` answers what substantive project/Task candidate exists
+now. It MUST be content-deterministic: identical currently observed substantive
+content yields the same digest. It MUST NOT depend on unverifiable historical
+facts such as which process wrote identical current Task bytes, and it MUST
+NOT prove Task mutation authorization.
+
+P3/P7 expected-revision conditional publication answers whether a Scaffold
+Task mutation was legally published. **candidate-equivalent !=
+publication-authorized.** A direct/manual/non-CAS write of identical
+control-plane bytes does not become an authorized P7 publication merely
+because those bytes are candidate-neutral.
+
+Candidate-neutral does not mean invisible, unreviewed, or freely writable.
+The real workspace/SCM Diff MUST retain the complete Task Book byte change.
+Malformed or lifecycle-illegal Task content MUST fail closed under Task
+schema and lifecycle authority. A source, business, project, configuration,
+Task acceptance/scope/baseline, or requirement-plan mutation still changes
+the P6 candidate and invalidates old candidate-bound Evidence, decisions,
+review, and authorization as otherwise required.
+
+Git and no-SCM hosts use the same P6-owned semantic projection. Git status and
+Diff remain physical truth; no-SCM inventory still observes every file.
+Projection affects candidate currentness only, not whether changed bytes exist.
+No P7 digest, caller digest, or second candidate identity is introduced.
+
+### Explicit Task requirement execution binding
+
+A Task planned requirement identity and a P6 Test profile identity are
+different concepts. Equality of their strings MUST NOT establish proof.
+When Develop expects a fresh executable Test profile to produce Evidence for a
+Task requirement, the Task reference MUST first carry an explicit durable
+binding from that `requirement_id` to the selected P6 `profile_id`. That
+binding is substantive Task authority and therefore candidate-significant.
+
+Develop derives the Develop→Test execution mapping from that Task authority.
+P6 executes and reports the selected profile and returns a public Evidence
+locator whose resolution preserves the producing profile identity. P7 may
+attach that locator only to the exact requirement whose explicit binding names
+that profile. Without the binding, matching names, selection order, or a sole
+result MUST NOT be used to guess. Existing legitimate HUMAN, CI, or EXTERNAL
+P6 Evidence may satisfy a requirement through its explicit opaque locator
+without an automated profile binding.
 
 ### D1 — upstream currentness
 
@@ -229,10 +305,26 @@ Develop’s terminal state is at most **READY_FOR_REVIEW**.
 The normal successful Develop path reaches READY_FOR_REVIEW only when:
 
 - all Task Book development stages are complete
-- stage acceptance is satisfied
+- every Stage Completion Decision is `SATISFIED` and current for the actual candidate
 - task-level final required tests satisfy their **defined acceptance conditions**
+- the Task Completion Decision is `SATISFIED` and current for the actual candidate
+- no required blocker remains
 
 If required tests fail, Develop ↔ Test continues. MUST NOT silently mark a failed task READY_FOR_REVIEW merely because those tests executed.
+
+If the Task Completion Decision is `UNKNOWN` or stale, READY_FOR_REVIEW is
+forbidden even when all Stage decisions and final Tests are satisfied.
+
+If Submit finds a repair blocker for a READY Task, Submit may return only a
+bounded `submit_to_develop` handoff whose target Stage identities are
+deterministically grounded in current Task authority. Submit MUST NOT guess a
+first, last, or all-Stage target and MUST NOT mutate the Task. Given a valid
+current handoff, Develop may use P3 atomic conditional publication to move the
+Task `READY_FOR_REVIEW` → `IN_PROGRESS`, move exactly the target Stages
+`COMPLETE` → `IN_PROGRESS`, and supersede their prior completion decisions.
+Before READY is restored for a repaired candidate, every target and non-target
+Stage decision relied upon for READY and the Task Completion Decision MUST be
+current and `SATISFIED` for that candidate.
 
 READY_FOR_REVIEW is **not** submit authorization and MUST NOT start S10 durable finalization or Push. Future WIP / checkpoint-submit exceptions are out of P0.
 
@@ -403,6 +495,10 @@ Submit MUST check whether current code / asset / config changes have stale proje
 
 **Knowledge freshness is testable.** Stale docs in an AI-first project can be more dangerous than missing docs. Freshness MUST NOT rely only on a developer “remembering to update.”
 
+S4 MUST NOT independently establish knowledge consistency from mapped documentation pathnames, unrelated current documentation edits, pre-existing path/module mentions, or current prose that merely contains an impacted path, basename, module id, impact class, or any combination of those tokens.
+
+For each knowledge-relevant determined S3 impact, S4 MAY treat the impact as knowledge-consistent only when a current validated Understand-owned **Knowledge Assessment** has `outcome = SATISFIED` for that exact current impact, is bound to the current P6 `candidate_digest` and the current S3 knowledge-relevant impact digest, and is the current-head Assessment for that exact binding whose published bytes still match the head integrity digest. Candidate + impact equality alone is not enough. A superseded locator MUST NOT be replayed. Missing assessment, missing/broken current head, integrity mismatch, candidate mismatch, impact-digest mismatch, partial coverage, `NEEDS_REFRESH`, `NEEDS_HUMAN`, and `UNKNOWN` MUST NOT become PASS. Boolean false MUST NOT represent UNKNOWN. A raw caller dictionary is not S4 authority. Knowledge Assessment is a supporting artifact, not a fourth canonical development record and not a fifth Skill. Change Record `knowledge_updates` is not S4 authority.
+
 ### S5 Test Completeness
 
 Submit MUST NOT ask only “did some tests PASS?” It MUST ask whether **TEST_COMPLETE** holds for the current real submission candidate: every required test has a terminal recorded result, required-test coverage is complete, and there is no unresolved required-test blocker.
@@ -452,13 +548,28 @@ S8 → S3 / S4 / S5 → S6
 
 Submit MUST NOT durably finalize a changed, un-reviewed, or un-reauthorized candidate. Authorization from an earlier Submit attempt is never reusable.
 
-### S9 Change Record
+The sole S9 exception is the deterministic **Finalization Bundle** defined by
+the Records Contract. Adding that exact bundle does not invalidate the
+authorization for the reviewed candidate because its content is a bounded
+finalization consequence of authority and Evidence already validated before
+S6, not new business/source intent. This exception does not apply to arbitrary
+generated files, arbitrary `.scaffold/ext/` content, or support content that is
+not deterministically derivable from the reviewed Evidence and exact Change
+Record references. Any other S9 mutation is a candidate change and MUST return
+through S3–S6.
 
-S9 finalizes the exact logical Change Record content/representation for the authorized final candidate **before** S10. On an SCM host, it can therefore be included in the same Commit.
+### S9 Finalization Bundle
+
+S9 finalizes the exact logical Change Record content/representation for the
+authorized final candidate **before** S10. It MAY also include zero or more
+deterministic support artifacts required solely to keep durable references in
+that exact Change Record resolvable after ordinary runtime expiry. Together
+these form the **Finalization Bundle**. On an SCM host, the exact bundle can
+therefore be included in the same Commit.
 
 ```text
 final reviewed candidate
-  → S9 finalize Change Record
+  → S9 finalize Change Record + permitted deterministic support artifacts
   → S10 Commit / Durable Finalization
   → S11 Optional Push or N/A
   → S12 Cleanup
@@ -473,20 +584,57 @@ A Change Record MUST be generated from:
 
 MUST NOT be generated from “the Agent remembers what it did.”
 
+Every support artifact in the Finalization Bundle MUST:
+
+- be deterministic from authority and Evidence already validated before S6
+- introduce no new business/source intent
+- be necessary to resolve a durable reference in the exact Change Record
+- be produced by the authority owner of that support artifact
+- be written inside an already-authorized durable project boundary under the
+  existing ownership model
+- be included in and integrity-bound to the exact S10 finalization candidate
+
+The final support set and its semantic content MUST be deterministic
+consequences of the validated Evidence references and Change Record
+finalization rules. Additional substantive or non-deterministic content is a
+candidate change and requires re-review and current S6 authorization.
+
 Temporal semantics:
 
-- Before S10 succeeds, the Change Record describes the final **candidate** submission and is not yet durable as-built history.
-- After S10 succeeds, the same S9-finalized logical Change Record content becomes long-term durable as-built history. No second content rewrite is required.
-- If S10 fails or is interrupted, it MUST NOT be described as an already-submitted historical fact, and completed Develop Sessions MUST NOT be cleaned up as submitted history.
+- Before S10 succeeds, the Change Record and any prepared support artifacts
+  are candidate-only and are not yet durable history.
+- After S10 succeeds, the same S9-finalized logical Change Record becomes
+  long-term durable as-built history and its referenced support artifacts
+  become durable support. No second content rewrite is required.
+- If S10 fails or is interrupted, neither the Change Record nor its prepared
+  support artifacts may be described as durable historical fact. Candidate-only
+  support artifacts require deterministic cleanup or recovery, and completed
+  Develop Sessions MUST NOT be cleaned up as submitted history.
+
+P6 Test Evidence validates the **reviewed candidate**. A permitted S9 support
+artifact is only a deterministic retained representation of that
+already-validated Evidence. It does not claim that P6 re-tested new substantive
+candidate content, and this treatment MUST NOT be generalized to generated
+files or `.scaffold/ext/` broadly.
 
 P3 defines draft / final state mechanics.
 
 S10 is the authoritative durable submission finalization operation:
 
-- On an SCM host with Commit capability, S10 is Commit of the final candidate.
-- On a no-SCM host, S10 is a P8-defined atomic or conflict-detectable durable finalization/publication operation. Its success MUST be durably distinguishable after restart; failure or interruption MUST NOT create false submitted history. It MUST NOT pretend that an SCM Commit occurred.
+- On an SCM host with Commit capability, S10 is Commit of the reviewed
+  candidate plus the exact Finalization Bundle. Every tracked support artifact
+  in the bundle MUST belong to that exact Commit tree.
+- On a no-SCM host, S10 is a P8-defined atomic or conflict-detectable durable
+  finalization/publication operation for the same logical Finalization Bundle.
+  Its success MUST be durably distinguishable after restart; failure or
+  interruption MUST NOT create false submitted history. It MUST NOT pretend
+  that an SCM Commit occurred.
 - S11 Push is optional when a push-capable SCM exists and **N/A** otherwise.
 - Concrete no-SCM success-marker/publication and recovery mechanics belong to P8; these semantics do not add a thirteenth stage.
+
+S10 MUST bind the exact resulting candidate/tree. A missing, changed,
+unexpected, or incompletely finalized support artifact is a finalization
+mismatch and MUST fail closed.
 
 After successful S10:
 
@@ -573,8 +721,12 @@ ordinary project
   → Scaffold-managed project
   → Task Book
   → Develop  ↔  Test
-  → all Task stages complete + stage acceptance satisfied
-    + task-level final required tests satisfy acceptance
+  → all required Task Stages COMPLETE
+    + every Stage Completion Decision relied upon for READY is SATISFIED
+      and current for the actual candidate
+    + task-level final required tests satisfy their defined acceptance conditions
+    + the Task Completion Decision is SATISFIED and current for the actual candidate
+    + no required blocker remains
   → READY_FOR_REVIEW
   → Submit
   → real-diff review + structural + knowledge + test-completeness reviews
@@ -582,7 +734,7 @@ ordinary project
   → Human Approval (candidate-bound)
   → Repository Sync
   → if the candidate changed: S8 → S3/S4/S5 → S6 (new candidate)
-  → S9 finalize Change Record
+  → S9 finalize Change Record + permitted deterministic referenced support
   → S10 Commit / Durable Finalization
   → S11 Optional Push (separate authorization) or N/A
   → S12 Cleanup

@@ -39,17 +39,19 @@ def sha256_text(*parts: str) -> str:
     return sha256_bytes(*(p.encode("utf-8") for p in parts))
 
 
-def list_files(root: str | Path) -> list[str]:
-    base = Path(root)
-    out: list[str] = []
-    if not base.exists():
-        return out
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d != ".git"]
-        for name in filenames:
-            full = Path(dirpath) / name
-            out.append(str(full.relative_to(base)).replace("\\", "/"))
-    return sorted(out)
+def list_files(
+    root: str | Path,
+    *,
+    exact_observe: list[str] | None = None,
+    budget: Any = None,
+) -> list[str]:
+    """Observed in-scope files. Excluded heavy roots are not recursively listed."""
+    from scaffold_p5.inventory import list_observed_files, observe_inventory
+
+    observation = observe_inventory(
+        root, exact_observe=exact_observe, budget=budget
+    )
+    return list_observed_files(observation)
 
 
 def file_digest(path: str | Path) -> str:

@@ -11,6 +11,9 @@ from scaffold_p5.models import (
     OWNERSHIP_MODES,
     SESSION_STATES,
 )
+from scaffold_p5.agents import AGENTS_ROUTER_REGION
+from scaffold_p5.ownership import ownership_registry_issues, resolve_ownership
+from scaffold_p5.rules import rule_ref_issues
 
 
 PROJECT_SCHEMA_VERSION = "1"
@@ -89,7 +92,12 @@ def validate_project_data(data: Any) -> tuple[str, list[str]]:
     ):
         return "UNSUPPORTED", ["project.yaml ownership contains an unsupported entry"]
     else:
+        issues.extend(ownership_registry_issues(ownership))
         issues.extend(_core_machine_ownership_issues(ownership))
+
+        issues.extend(_managed_region_index_issues(data.get("managed_regions"), ownership))
+
+    issues.extend(rule_ref_issues(data.get("rule_refs"), "project.yaml rule_refs"))
 
     if not isinstance(data.get("knowledge"), dict):
         issues.append("project.yaml knowledge must be a mapping")
@@ -227,13 +235,10 @@ def whole_file_mutation_allowed(
 ) -> tuple[bool, str]:
     """Internal whole-file mutation eligibility. Not a Foundation outcome."""
     normalized = str(path).replace("\\", "/")
-    if not isinstance(ownership, dict):
-        return False, (
-            f"project ownership registry is missing; cannot mutate {normalized}"
-        )
-    mode = ownership.get(normalized)
-    if mode is None:
-        return False, f"missing ownership for {normalized}"
+    resolved = resolve_ownership(ownership, normalized)
+    if resolved.status != "RESOLVED":
+        return False, resolved.reason
+    mode = resolved.mode
     if mode == "GENERATED":
         return True, "GENERATED whole-file mutation is allowed"
     if mode == "HUMAN_OWNED":
@@ -247,6 +252,114 @@ def whole_file_mutation_allowed(
             f"{normalized} is MANAGED but no bounded managed region is defined"
         )
     return False, f"unknown/invalid ownership {mode!r} for {normalized}"
+
+
+def plan_owned_text_mutation(
+    ownership: Any,
+    path: str,
+    *,
+    exists: bool,
+    is_file: bool = True,
+    bounded_region: bool = False,
+) -> dict[str, Any]:
+    """Canonical text-mutation plan. Does not write and does not invent ownership."""
+    normalized = str(path).replace("\\", "/")
+    resolved = resolve_ownership(ownership, normalized)
+    allowed, reason = whole_file_mutation_allowed(
+        ownership, normalized, bounded_region=bounded_region
+    )
+    result: dict[str, Any] = {
+        "status": resolved.status,
+        "mode": resolved.mode,
+        "matched_key": resolved.matched_key,
+        "reason": resolved.reason or reason,
+        "write": False,
+        "register_generated": False,
+        "preserve": False,
+        "blockers": [],
+        "needs_human": False,
+    }
+    if exists and not is_file:
+        result["blockers"] = [f"{normalized} exists but is not a regular file"]
+        result["needs_human"] = True
+        return result
+    if resolved.status == "CONFLICTING":
+        result["blockers"] = [resolved.reason]
+        result["needs_human"] = True
+        return result
+    if exists:
+        if allowed:
+            result["write"] = True
+            return result
+        if resolved.mode == "HUMAN_OWNED":
+            result["preserve"] = True
+            result["needs_human"] = True
+            result["reason"] = reason
+            return result
+        if resolved.mode == "MANAGED":
+            result["preserve"] = True
+            result["needs_human"] = True
+            result["blockers"] = [reason]
+            result["reason"] = reason
+            return result
+        result["preserve"] = True
+        result["needs_human"] = True
+        result["blockers"] = [f"{normalized} exists without truthful ownership"]
+        result["reason"] = result["blockers"][0]
+        return result
+    if resolved.status == "UNKNOWN":
+        result["register_generated"] = True
+        result["write"] = True
+        result["mode"] = "GENERATED"
+        result["reason"] = "absent UNKNOWN knowledge may be registered GENERATED"
+        return result
+    if allowed:
+        result["write"] = True
+        return result
+    result["needs_human"] = True
+    result["blockers"] = [
+        f"{normalized} is absent but ownership is {resolved.mode}"
+    ]
+    result["reason"] = result["blockers"][0]
+    return result
+
+
+def _managed_region_index_issues(value: Any, ownership: Any) -> list[str]:
+    issues: list[str] = []
+    index = value
+    if index is None:
+        index = {}
+    elif not isinstance(index, dict):
+        return ["project.yaml managed_regions must be a mapping"]
+    for path, regions in index.items():
+        if not isinstance(path, str) or not path:
+            issues.append("project.yaml managed_regions path is invalid")
+            continue
+        if not isinstance(regions, list) or not regions or any(
+            not isinstance(item, str) or not item.strip() for item in regions
+        ):
+            issues.append(
+                f"project.yaml managed_regions for {path} must be a list of region ids"
+            )
+            continue
+        if len(set(regions)) != len(regions):
+            issues.append(
+                f"project.yaml managed_regions for {path} has duplicate region ids"
+            )
+        if isinstance(ownership, dict) and ownership.get(path) != "MANAGED":
+            issues.append(
+                f"project.yaml managed_regions lists {path} but ownership is not MANAGED"
+            )
+    if isinstance(ownership, dict) and ownership.get("AGENTS.md") == "MANAGED":
+        agents_regions = index.get("AGENTS.md") if isinstance(index, dict) else None
+        if not (
+            isinstance(agents_regions, list)
+            and AGENTS_ROUTER_REGION in agents_regions
+        ):
+            issues.append(
+                "MANAGED AGENTS.md must register approved managed region agents-router"
+            )
+    return issues
 
 
 def _core_machine_ownership_issues(ownership: dict[str, Any]) -> list[str]:

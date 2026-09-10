@@ -11,12 +11,18 @@ from scaffold_p5.adoption import (
     persist_session,
     plan_from_dict,
     plan_to_dict,
+    ownership_presentation,
+    preservation_presentation,
     publish_lock_authority,
     rebuild_adoption_plan,
     replace_session_plan,
     update_session,
 )
 from scaffold_p5.compatibility import evaluate_host, lock_update_plan
+from scaffold_p5.ownership_update import (
+    apply_ownership_update,
+    build_ownership_update_plan,
+)
 from scaffold_p5.discovery import critical_unresolved, discover
 from scaffold_p5.distribution import Distribution
 from scaffold_p5.full import (
@@ -25,6 +31,7 @@ from scaffold_p5.full import (
     expected_normalization_mutations,
     normalize,
 )
+from scaffold_p5.currentness import evaluate_understanding_currentness
 from scaffold_p5.host_state import (
     PROJECT_YAML,
     compare_adoption_state,
@@ -41,7 +48,6 @@ from scaffold_p5.migration import (
     bindings_still_hold,
     build_migration_plan,
     complete_migration,
-    create_execution,
     delete_execution,
     derive_migration_target,
     load_execution,
@@ -55,9 +61,13 @@ from scaffold_p5.migration import (
 from scaffold_p5.models import AdoptionPlan, DiscoveryFact, UNDERSTAND_MODES
 from scaffold_p5.packages import exact_match
 from scaffold_p5.preflight import PreflightDecision, run_preflight
+from scaffold_p5.knowledge_assessment import publish_knowledge_assessment
 from scaffold_p5.refresh import refresh_host, refreshable_ownership_contract_host
-from scaffold_p5.result import skill_result
+from scaffold_p5.refresh_completion import produce_refresh_completion
+from scaffold_p5.result import adoption_approval_human_gate, skill_result
+from scaffold_p5.resume import resume_project
 from scaffold_p5.schemas import whole_file_mutation_allowed
+from scaffold_p5.understanding import persist_project_understanding
 
 
 class UnderstandEngine:
@@ -82,7 +92,10 @@ class UnderstandEngine:
             snapshot.lifecycle == "RECOVERY_REQUIRED"
             or bool(snapshot.migration_recovery.get("requires_isolation"))
         )
-        if recovery_isolation and mode in {"full", "refresh"}:
+        resume_ok = (
+            mode == "refresh" and str(opts.get("action") or "").strip() == "resume"
+        )
+        if recovery_isolation and mode in {"full", "refresh"} and not resume_ok:
             return self._base(
                 mode,
                 "BLOCKED",
@@ -175,7 +188,13 @@ class UnderstandEngine:
             derived_copy=bool(opts.get("derived_copy")),
         )
         extras["plan"] = plan_to_dict(plan)
+        extras["preservation_presentation"] = preservation_presentation(plan)
+        extras["ownership_presentation"] = ownership_presentation(plan)
         extras["authority"] = "selected_distribution_release"
+        extras["human_gate"] = adoption_approval_human_gate(plan)
+        extras["preview_is_not_approval"] = True
+        extras["generic_adoption_intent_is_not_plan_approval"] = True
+        extras["exact_plan_approval_required"] = True
         if not approval_matches(plan, opts.get("approval")):
             return self._base(
                 "bootstrap",
@@ -208,8 +227,14 @@ class UnderstandEngine:
         if opts.get("replan"):
             return self._replan_adoption(snapshot, preflight, opts, extras, plan=plan)
         extras["plan"] = plan_to_dict(plan)
+        extras["preservation_presentation"] = preservation_presentation(plan)
+        extras["ownership_presentation"] = ownership_presentation(plan)
         extras["authority"] = "approved_plan_selected_release"
         extras["zero_context_recovery"] = True
+        extras["human_gate"] = adoption_approval_human_gate(plan)
+        extras["preview_is_not_approval"] = True
+        extras["generic_adoption_intent_is_not_plan_approval"] = True
+        extras["exact_plan_approval_required"] = True
         if not approval_matches(plan, opts.get("approval")):
             return self._base(
                 "bootstrap",
@@ -296,6 +321,12 @@ class UnderstandEngine:
             session_data,
         )
         extras["plan"] = plan_to_dict(replacement)
+        extras["preservation_presentation"] = preservation_presentation(replacement)
+        extras["ownership_presentation"] = ownership_presentation(replacement)
+        extras["human_gate"] = adoption_approval_human_gate(replacement)
+        extras["preview_is_not_approval"] = True
+        extras["generic_adoption_intent_is_not_plan_approval"] = True
+        extras["exact_plan_approval_required"] = True
         extras["replaces_plan"] = old.plan_id
         extras["authority"] = None
         if not approval_matches(replacement, opts.get("approval")):
@@ -321,13 +352,27 @@ class UnderstandEngine:
         )
 
     def _apply_adoption(self, plan: AdoptionPlan, extra_facts, opts, extras, resume_dir):
+        preserve_truncation = [
+            item
+            for item in plan.activation_blockers
+            if item.startswith("human_owned_preservation:")
+        ]
+        if preserve_truncation:
+            return self._base(
+                "bootstrap",
+                "BLOCKED",
+                blockers=list(preserve_truncation)
+                + ["human-owned preservation discovery is incomplete; Apply is unsafe"],
+                next_route="understand.bootstrap",
+                extras=extras,
+            )
         existing_agents = (self.root / "AGENTS.md").exists() and any(
             a.target == "AGENTS.md" and a.action_class == "PRESERVE" for a in plan.actions
         )
         preserve_bytes = {
             a.target: (self.root / a.target).read_bytes()
             for a in plan.actions
-            if a.action_class == "PRESERVE" and (self.root / a.target).exists()
+            if a.action_class == "PRESERVE" and (self.root / a.target).is_file()
         }
         derived = bool(opts.get("derived_copy")) or any(
             a.target == ".scaffold/derived/understand.md" for a in plan.actions
@@ -446,7 +491,7 @@ class UnderstandEngine:
                 extras=extras,
             )
         if "B7_PASSED" not in checkpoints and "LOCK_AUTHORITY_ESTABLISHED" not in checkpoints:
-            critical = critical_unresolved(plan.facts + extra_facts)
+            critical = critical_unresolved(discover(self.root, extra_facts))
         else:
             critical = []
         if critical:
@@ -459,14 +504,22 @@ class UnderstandEngine:
                 pending_validation=["B7"],
             )
             extras["critical_facts"] = [f.name for f in critical]
+            blockers = ["B7 FAIL: unresolved critical UNKNOWN/CONFLICTING"] + [
+                f"{f.name}:{f.confidence}" for f in critical
+            ]
+            agents_action = next(
+                (action for action in plan.actions if action.target == "AGENTS.md"),
+                None,
+            )
+            if agents_action and agents_action.action_class == "MANAGED_UPDATE":
+                blockers.append("approved AGENTS integration did not materialize")
             return self._base(
                 "bootstrap",
                 "FAILED",
                 baseline=plan.baseline,
                 mutations="bounded",
                 artifacts=artifacts,
-                blockers=["B7 FAIL: unresolved critical UNKNOWN/CONFLICTING"]
-                + [f"{f.name}:{f.confidence}" for f in critical],
+                blockers=blockers,
                 next_route="re-run bootstrap with replan=true; review replacement Plan; no activation waiver",
                 extras=extras,
             )
@@ -655,6 +708,17 @@ class UnderstandEngine:
                     },
                 )
             result = refresh_host(self.root)
+            extras = {
+                "preflight_context": preflight.context,
+                "note": "ACTIVE full stays inside Refresh rules",
+            }
+            self._maybe_publish_knowledge_assessment("full", opts, extras)
+            if result.get("ok") and not result.get("conflicts"):
+                extras["understanding"] = self._persist_understanding(
+                    producer_mode="full",
+                    incremental=False,
+                    expected_head_digest=opts.get("expected_head_digest"),
+                )
             return self._base(
                 "full",
                 result.get("outcome")
@@ -668,19 +732,25 @@ class UnderstandEngine:
                     if result.get("conflicts")
                     else "understand/refresh"
                 ),
-                extras={"preflight_context": preflight.context, "note": "ACTIVE full stays inside Refresh rules"},
+                extras=extras,
             )
         return self._base("full", "BLOCKED", blockers=preflight.blockers or ["full cannot run"], extras={"host_class": snapshot.host_class})
 
     def _refresh(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
         extras = {"preflight_context": preflight.context, "host_class": snapshot.host_class, "authority": preflight.authority}
+        action = str(opts.get("action") or "").strip()
+        if action == "resume":
+            return self._resume(snapshot, preflight, opts)
         if (
             snapshot.host_class != "ESTABLISHED_HOST" or not preflight.allowed
         ) and not refreshable_ownership_contract_host(snapshot):
             return self._base("refresh", "BLOCKED", blockers=preflight.blockers or ["refresh requires established host"], extras=extras)
+        if action == "understand":
+            return self._understand_currentness(snapshot, preflight, opts)
         result = refresh_host(self.root)
         extras["conflicts"] = result.get("conflicts") or []
         extras["untouched_business"] = result.get("untouched_business") or []
+        self._maybe_publish_knowledge_assessment("refresh", opts, extras)
         return self._base(
             "refresh",
             result.get("outcome")
@@ -697,6 +767,189 @@ class UnderstandEngine:
             ),
             extras=extras,
         )
+
+    def _resume(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
+        view = resume_project(
+            self.root,
+            distribution=self.distribution,
+            task_id=opts.get("task_id"),
+        )
+        extras = {
+            "preflight_context": preflight.context,
+            "host_class": snapshot.host_class,
+            "authority": view.get("authority"),
+            "summary": view.get("summary"),
+            "understanding": view.get("understanding"),
+            "project": view.get("project"),
+            "work": view.get("work"),
+            "test": view.get("test"),
+            "submit": view.get("submit"),
+            "next_route_reason": view.get("next_route_reason"),
+            "ambiguous_task_ids": list(view.get("ambiguous_task_ids") or []),
+            "observational": True,
+            "chat_memory": False,
+        }
+        return self._base(
+            "refresh",
+            "COMPLETED" if view.get("ok") else "FAILED",
+            baseline=_baseline(snapshot),
+            mutations="none",
+            artifacts=[],
+            blockers=[],
+            evidence=["zero-context resume reconstructed from project-local truth"],
+            next_route=str(view.get("next_route") or "human"),
+            extras=extras,
+        )
+
+    def _understand_currentness(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
+        incremental = bool(opts.get("incremental")) or str(opts.get("request") or "") == "incremental"
+        published = self._persist_understanding(
+            producer_mode="refresh",
+            incremental=incremental,
+            expected_head_digest=opts.get("expected_head_digest"),
+            produce_completion=opts.get("produce_completion", True),
+            knowledge_payloads=opts.get("knowledge_payloads"),
+        )
+        extras = {
+            "preflight_context": preflight.context,
+            "host_class": snapshot.host_class,
+            "understanding": published,
+            "incremental_requested": incremental,
+        }
+        if published.get("rejected_incremental") or (
+            not published.get("ok") and published.get("needs_human")
+        ):
+            return self._base(
+                "refresh",
+                "NEEDS_HUMAN",
+                baseline=_baseline(snapshot),
+                mutations="none",
+                blockers=list(published.get("blockers") or []),
+                next_route="understand.refresh",
+                extras=extras,
+            )
+        if not published.get("ok"):
+            return self._base(
+                "refresh",
+                "BLOCKED",
+                baseline=_baseline(snapshot),
+                mutations="none",
+                blockers=list(published.get("blockers") or ["understanding persist failed"]),
+                next_route="understand.refresh",
+                extras=extras,
+            )
+        resume = resume_project(self.root, distribution=self.distribution, task_id=opts.get("task_id"))
+        extras["authority"] = resume.get("authority")
+        extras["summary"] = resume.get("summary")
+        extras["next_route_reason"] = resume.get("next_route_reason")
+        artifacts = []
+        if published.get("locator"):
+            artifacts.append(".scaffold/runtime/" + str(published["locator"]))
+        artifacts.extend(
+            ".scaffold/runtime/" + str(item)
+            for item in (published.get("completion_locators") or [])
+            if item
+        )
+        return self._base(
+            "refresh",
+            "COMPLETED",
+            baseline=_baseline(snapshot),
+            mutations="bounded" if published.get("mutations") else "none",
+            artifacts=artifacts,
+            blockers=[],
+            evidence=[
+                "understanding currentness bound to physical module/structural authority "
+                "and Understand refresh-completion receipts"
+            ],
+            next_route=str(resume.get("next_route") or "none"),
+            extras=extras,
+        )
+
+    def _persist_understanding(
+        self,
+        *,
+        producer_mode: str,
+        incremental: bool,
+        expected_head_digest: Any,
+        produce_completion: bool = True,
+        knowledge_payloads: Any = None,
+    ) -> dict[str, Any]:
+        evaluation = evaluate_understanding_currentness(self.root)
+        currentness = str(evaluation.get("currentness") or "UNKNOWN")
+        if produce_completion and currentness != "CURRENT":
+            if not (incremental and currentness in {"FULL_REFRESH_REQUIRED", "UNKNOWN"}):
+                if incremental and currentness == "PARTIAL_REFRESH_REQUIRED":
+                    module_ids = list(evaluation.get("affected_module_ids") or [])
+                else:
+                    observed = evaluation.get("observed") or {}
+                    module_ids = [
+                        str(item.get("id"))
+                        for item in observed.get("modules") or []
+                        if isinstance(item, dict) and item.get("id")
+                    ]
+                if module_ids:
+                    produced = produce_refresh_completion(
+                        self.root,
+                        module_ids=module_ids,
+                        producer_mode=producer_mode,
+                        knowledge_payloads=knowledge_payloads
+                        if isinstance(knowledge_payloads, dict)
+                        else None,
+                    )
+                    if not produced.get("ok"):
+                        return {
+                            "ok": False,
+                            "needs_human": bool(produced.get("needs_human")),
+                            "currentness": currentness,
+                            "blockers": list(
+                                produced.get("blockers")
+                                or ["refresh completion production failed"]
+                            ),
+                            "evaluation": evaluation,
+                            "mutations": False,
+                        }
+        return persist_project_understanding(
+            self.root,
+            mode="incremental" if incremental else "full",
+            incremental=incremental,
+            expected_head_digest=expected_head_digest if isinstance(expected_head_digest, str) else None,
+            producer_mode=producer_mode,
+        )
+
+    def _maybe_publish_knowledge_assessment(
+        self,
+        mode: str,
+        opts: dict[str, Any],
+        extras: dict[str, Any],
+    ) -> None:
+        handoff = opts.get("structural_impacts")
+        if handoff is None:
+            handoff = opts.get("structural")
+        if isinstance(handoff, dict):
+            impacts = handoff.get("impacts")
+        elif isinstance(handoff, list):
+            impacts = handoff
+        else:
+            return
+        if not isinstance(impacts, list) or not impacts:
+            return
+        published = publish_knowledge_assessment(
+            self.root,
+            mode=mode,
+            impacts=list(impacts),
+            outcomes=list(opts.get("knowledge_outcomes") or []),
+        )
+        extras["knowledge_assessment"] = {
+            "ok": published.get("ok"),
+            "locator": published.get("locator"),
+            "impact_digest": published.get("impact_digest"),
+            "candidate_digest": published.get("candidate_digest"),
+            "assessment_digest": published.get("assessment_digest"),
+            "current_head_locator": published.get("current_head_locator"),
+            "blockers": list(published.get("blockers") or []),
+        }
+        if published.get("locator"):
+            extras["knowledge_assessment_ref"] = published["locator"]
 
     def _compatibility(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
         extras = {
@@ -889,6 +1142,67 @@ class UnderstandEngine:
                 next_route="submit later if durable publication is required",
                 extras=extras,
             )
+        if action == "ownership_update":
+            plan = build_ownership_update_plan(self.root)
+            extras["ownership_update_plan"] = plan
+            extras["plan_digest"] = plan.get("digest")
+            if not plan.get("valid"):
+                return self._base(
+                    "compatibility",
+                    "BLOCKED",
+                    mutations="none",
+                    blockers=plan.get("blockers") or [
+                        "P6 durable Evidence ownership update is not eligible"
+                    ],
+                    next_route="human review of ownership",
+                    extras=extras,
+                )
+            approval = opts.get("approval")
+            if (
+                not approval
+                or not approval.get("approved")
+                or (approval.get("plan_digest") or approval.get("digest"))
+                != plan["digest"]
+            ):
+                return self._base(
+                    "compatibility",
+                    "NEEDS_HUMAN",
+                    mutations="none",
+                    compatibility=overall,
+                    blockers=["explicit P6 durable Evidence ownership-update approval is required"],
+                    next_route="review ownership update plan",
+                    extras=extras,
+                )
+            applied = apply_ownership_update(self.root, plan)
+            extras["ownership_update"] = {
+                "ok": applied.get("ok"),
+                "applied": applied.get("applied"),
+                "plan_digest": (applied.get("plan") or {}).get("digest"),
+            }
+            if not applied.get("ok"):
+                return self._base(
+                    "compatibility",
+                    "BLOCKED",
+                    mutations="partial" if applied.get("applied") else "none",
+                    artifacts=list(applied.get("artifacts") or []),
+                    blockers=applied.get("blockers") or [
+                        "ownership update could not be applied"
+                    ],
+                    next_route="review ownership update plan",
+                    extras=extras,
+                )
+            return self._base(
+                "compatibility",
+                "COMPLETED",
+                mutations="bounded",
+                artifacts=[PROJECT_YAML],
+                compatibility=overall,
+                evidence=[
+                    "P6 durable Evidence area registered as GENERATED after exact approval"
+                ],
+                next_route="understand.refresh",
+                extras=extras,
+            )
         if action == "migrate":
             return self._migrate(snapshot, evaluation, opts, extras)
         return self._base("compatibility", "FAILED", blockers=[f"unknown compatibility action: {action}"], extras=extras)
@@ -933,16 +1247,12 @@ class UnderstandEngine:
             compatibility_binding=compatibility_binding,
         )
         extras["migration_plan"] = plan
-        if not migration_approval_matches(plan, opts.get("approval")):
-            return self._base(
-                "compatibility",
-                "NEEDS_HUMAN",
-                mutations="none",
-                compatibility="MIGRATION_REQUIRED",
-                blockers=["Migration Plan Approval is required and is not SUBMIT_AUTHORIZED"],
-                next_route="human review of Migration Plan",
-                extras=extras,
-            )
+        extras["fresh_application_owner"] = "develop"
+        extras["plan_approval_is_not_application_authority"] = True
+        extras["pre_compatibility"] = evaluation.get("overall") or "MIGRATION_REQUIRED"
+        extras["plan_reviewed"] = migration_approval_matches(
+            plan, opts.get("approval")
+        )
         issues = bindings_still_hold(
             self.root,
             plan,
@@ -950,10 +1260,22 @@ class UnderstandEngine:
             evaluation,
         )
         if issues:
+            extras["human_action"] = {
+                "observed": "The current Migration Plan is not bound to this host state.",
+                "why_stopped": "Plan bindings changed before Task-bound application.",
+                "human_action_required": (
+                    "Re-evaluate compatibility and re-approve the current Plan "
+                    "through Task-bound Develop application."
+                ),
+            }
             return self._base(
                 "compatibility",
                 "NEEDS_HUMAN",
-                blockers=["migration bindings changed; re-evaluate and re-approve"] + issues,
+                mutations="none",
+                compatibility="MIGRATION_REQUIRED",
+                blockers=["migration bindings changed; re-evaluate and re-approve"]
+                + issues,
+                next_route="develop",
                 extras=extras,
             )
         allowed, reason = whole_file_mutation_allowed(
@@ -961,6 +1283,14 @@ class UnderstandEngine:
             PROJECT_YAML,
         )
         if not allowed:
+            extras["human_action"] = {
+                "observed": "A bounded Migration Plan exists.",
+                "why_stopped": reason,
+                "human_action_required": (
+                    "Resolve project.yaml ownership before any whole-file "
+                    "migration mutation. HUMAN_OWNED content is not silently overwritten."
+                ),
+            }
             return self._base(
                 "compatibility",
                 "NEEDS_HUMAN",
@@ -970,180 +1300,31 @@ class UnderstandEngine:
                 next_route="resolve project.yaml ownership before Migration",
                 extras=extras,
             )
-        directory = create_execution(self.root, plan, observed_approved=True)
-        data = load_execution(directory)
-        if opts.get("abort_before_mutation"):
-            data["status"] = "ABORTED"
-            extras["migration"] = dict(data)
-            delete_execution(directory)
-            return self._base(
-                "compatibility",
-                "COMPLETED",
-                mutations="none",
-                compatibility="MIGRATION_REQUIRED",
-                evidence=["ABORTED before mutation"],
-                extras=extras,
-            )
-        pre_mutation_snapshot = snapshot_host(self.root)
-        pre_mutation_evaluation = evaluate_host(
-            pre_mutation_snapshot,
-            self.distribution,
-        )
-        pre_mutation_issues = bindings_still_hold(
-            self.root,
-            plan,
-            pre_mutation_snapshot,
-            pre_mutation_evaluation,
-        )
-        if pre_mutation_issues:
-            data["blockers"] = pre_mutation_issues
-            save_execution(directory, data)
-            extras["migration"] = data
-            return self._base(
-                "compatibility",
-                "NEEDS_HUMAN",
-                mutations="none",
-                blockers=[
-                    "migration source state changed before first persistent mutation"
-                ]
-                + pre_mutation_issues,
-                next_route="re-evaluate compatibility → regenerate plan → human re-approval",
-                extras=extras,
-            )
-        data["status"] = "APPLYING"
-        data["checkpoints_completed"] = []
-        data["checkpoints_remaining"] = [
-            CONTRACT_GENERATION_UPDATED,
-            VALIDATION_PASSED,
-        ]
-        data["observed_expected_state"] = "PRE_MUTATION"
-        save_execution(directory, data)
-        if not apply_contract_generation(
-            self.root,
-            plan["target_contract_generation"],
-        ):
-            data["blockers"] = [
-                "project.yaml became non-executable before migration mutation"
-            ]
-            save_execution(directory, data)
-            return self._base(
-                "compatibility",
-                "BLOCKED",
-                mutations="none",
-                blockers=list(data["blockers"]),
-                next_route="resolve project host schema/authority",
-                extras=extras,
-            )
-        data["status"] = "VALIDATING"
-        data["checkpoints_completed"] = [CONTRACT_GENERATION_UPDATED]
-        data["checkpoints_remaining"] = [VALIDATION_PASSED]
-        data["observed_expected_state"] = "VALIDATING"
-        save_execution(directory, data)
-        if opts.get("interrupt_after") in {"first_mutation", "validating"}:
-            data["status"] = "RECOVERY_REQUIRED"
-            save_execution(directory, data)
-            mark_recovery_required(self.root)
-            extras["migration"] = data
-            return self._base(
-                "compatibility",
-                "BLOCKED",
-                mutations="partial",
-                artifacts=[PROJECT_YAML],
-                compatibility="MIGRATION_REQUIRED",
-                blockers=["interrupted after persistent mutation; RECOVERY_REQUIRED"],
-                next_route="resume migration execution",
-                extras=extras,
-            )
-        applied_issues = validate_applied_state(
-            plan,
-            snapshot_host(self.root),
-        )
-        if applied_issues:
-            data["status"] = "RECOVERY_REQUIRED"
-            save_execution(directory, data)
-            mark_recovery_required(self.root)
-            extras["migration"] = data
-            return self._base(
-                "compatibility",
-                "FAILED",
-                blockers=["validation could not establish migrated host"]
-                + applied_issues,
-                extras=extras,
-            )
-        post_apply_evaluation = evaluate_host(
-            snapshot_host(self.root),
-            self.distribution,
-        )
-        if post_apply_evaluation.get("overall") not in {
-            "EXACT",
-            "COMPATIBLE",
-        }:
-            data["status"] = "RECOVERY_REQUIRED"
-            data["blockers"] = [
-                "migration validation did not resolve the approved compatibility cause"
-            ]
-            save_execution(directory, data)
-            mark_recovery_required(self.root)
-            extras["migration"] = data
-            extras["post_apply_evaluation"] = post_apply_evaluation
-            return self._base(
-                "compatibility",
-                "BLOCKED",
-                mutations="partial",
-                artifacts=[PROJECT_YAML],
-                compatibility=post_apply_evaluation.get("overall"),
-                blockers=list(data["blockers"]),
-                next_route="retain RECOVERY_REQUIRED and resolve compatibility evidence",
-                extras=extras,
-            )
-        data["checkpoints_completed"] = [
-            CONTRACT_GENERATION_UPDATED,
-            VALIDATION_PASSED,
-        ]
-        data["checkpoints_remaining"] = []
-        data["observed_expected_state"] = "VALIDATION_PASSED"
-        save_execution(directory, data)
-        if opts.get("interrupt_after") == "validation_passed":
-            data["status"] = "RECOVERY_REQUIRED"
-            save_execution(directory, data)
-            mark_recovery_required(self.root)
-            extras["migration"] = data
-            return self._base(
-                "compatibility",
-                "BLOCKED",
-                mutations="partial",
-                artifacts=[PROJECT_YAML],
-                compatibility="MIGRATION_REQUIRED",
-                blockers=["interrupted after validation checkpoint; RECOVERY_REQUIRED"],
-                next_route="resume migration execution finalization",
-                extras=extras,
-            )
-        if not complete_migration(
-            self.root,
-            plan["target_contract_generation"],
-        ):
-            return self._base(
-                "compatibility",
-                "BLOCKED",
-                mutations="none",
-                blockers=[
-                    "project.yaml became non-executable before migration completion"
-                ],
-                next_route="resolve project host schema/authority",
-                extras=extras,
-            )
-        data["status"] = "COMPLETED"
-        save_execution(directory, data)
-        delete_execution(directory)
-        extras["migration"] = {"status": "COMPLETED", "plan_id": plan["plan_id"]}
+        extras["human_action"] = {
+            "observed": (
+                "A bounded Migration Plan is ready. No durable project-local "
+                "state has been changed."
+            ),
+            "why_stopped": (
+                "Fresh Migration application is Task-bound Develop work. "
+                "Plan-only approval is not application authority."
+            ),
+            "human_action_required": (
+                "Approve this exact Plan for the current Task identity, Task "
+                "revision, and candidate, then run Develop "
+                "execute_approved_migration. Understand does not start a "
+                "fresh persistent apply."
+            ),
+        }
         return self._base(
             "compatibility",
-            "COMPLETED",
-            mutations="bounded",
-            artifacts=[PROJECT_YAML],
+            "NEEDS_HUMAN",
+            mutations="none",
             compatibility="MIGRATION_REQUIRED",
-            evidence=["PREPARED", "APPLYING", "VALIDATING", "COMPLETED"],
-            next_route="normal host operation",
+            blockers=[
+                "fresh Migration application requires Task-bound Develop authority"
+            ],
+            next_route="develop",
             extras=extras,
         )
 
@@ -1388,11 +1569,15 @@ class UnderstandEngine:
                 "status": "COMPLETED",
                 "plan_id": plan["plan_id"],
             }
+            extras["pre_compatibility"] = plan.get("compatibility") or "MIGRATION_REQUIRED"
+            extras["post_compatibility"] = final_evaluation.get("overall")
+            extras["current_compatibility"] = final_evaluation.get("overall")
             return self._base(
                 "compatibility",
                 "COMPLETED",
                 mutations="bounded",
                 artifacts=[PROJECT_YAML],
+                compatibility=final_evaluation.get("overall"),
                 evidence=["resumed from exact approved checkpoint"],
                 extras=extras,
             )

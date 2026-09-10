@@ -209,6 +209,13 @@ Exact YAML keys are **not** frozen here. Each file MUST be capable of representi
 
 Active hosts MAY have empty `tasks/` and `changes/` directories. They MUST NOT put Task/Change **schemas** in `project.yaml`.
 
+A later phase MAY place a deterministic support-artifact representation under
+`.scaffold/ext/<namespace>/` when that phase owns the artifact schema and a
+durable Change Record must retain a resolvable opaque reference to it. Such use
+is shared and durable when tracked, remains non-core, and MUST satisfy the
+ownership registry. It MUST NOT redefine `runtime/` as durable, add an
+unnamespaced `.scaffold/` root, or create another canonical development record.
+
 ---
 
 ## 9. Shared vs local, durable vs temporary
@@ -479,6 +486,20 @@ Domain extras (engine, assets, deploy, analysis) MUST live under `.scaffold/ext/
 
 MUST NOT: overload core file meanings; create competing authorities; replace core semantics; drop arbitrary files on `.scaffold/` root.
 
+A P6-owned deterministic Test Evidence support representation MAY use this
+boundary when required solely to keep a durable Change Record's public P6
+locator resolvable after normal runtime expiry. Foundation does not freeze the
+namespace spelling or physical Evidence schema. P6 owns that representation;
+P8 may request materialization through validated opaque references and may
+include the resulting artifacts in the permitted S9 Finalization Bundle.
+
+Only the minimal material required for P6 resolution may be retained. The
+artifact MUST preserve P6-required candidate binding, provenance, and
+integrity; MUST be covered as Scaffold-written by the existing GENERATED or
+MANAGED ownership semantics; and MUST NOT grant Test any Commit or Submit
+authority. This permission is not a global candidate-identity exclusion for
+`.scaffold/ext/`.
+
 No extension runtime in P2.
 
 ---
@@ -587,9 +608,9 @@ Compatibility MUST NOT be assumed silently. Detailed protocol: **P4**.
 | **P3** | Task Book, Develop Session, Change Record schemas; IDs; Adoption/Develop session persistence |
 | **P4** | Skill package, Rule load/route, `skills.lock` contents, compatibility, migration |
 | **P5** | Creating/updating these artifacts in practice; Full / Refresh / Compatibility; freshness maintenance |
-| **P6** | `tests.yaml` **execution**, Test Matrix, native tests, Evidence |
+| **P6** | `tests.yaml` **execution**, Test Matrix, native tests, Evidence, and owned deterministic materialization/resolution of minimal durable Test support artifacts |
 | **P7** | Task-driven edits; Develop Session |
-| **P8** | Diff-derived consistency and test completeness; `SUBMIT_AUTHORIZED`; final Change Record; SCM Commit or no-SCM durable finalization; optional Push |
+| **P8** | Diff-derived consistency and test completeness; `SUBMIT_AUTHORIZED`; final Change Record and Finalization Bundle orchestration; SCM Commit or no-SCM durable finalization; optional Push |
 
 ---
 

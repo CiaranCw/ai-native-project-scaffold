@@ -101,19 +101,20 @@ class P6Rev4Tests(unittest.TestCase):
         report["verification"]["test_complete"] = True
         self.assertNotEqual(self._validate(report), "VALID")
 
-    def test_X11_required_fail_may_still_be_test_complete(self):
+    def test_X11_required_fail_is_coverage_complete_not_test_complete(self):
         write_host(self.host, [failing_profile()])
         result = test_engine(self.host).run()
         report = result.extras["report"]
         completeness = result.extras["completeness"]
         self.assertEqual(report["profiles"][0]["result"], "FAIL")
         self.assertTrue(completeness["required_set_authoritative"])
-        self.assertTrue(completeness["test_complete"])
+        self.assertTrue(completeness["coverage_complete"])
+        self.assertFalse(completeness["test_complete"])
         self.assertFalse(completeness["test_pass"])
         self.assertEqual(self._validate(report), "VALID")
         loaded = load_completed_report(self.host, result.extras["report_id"])
         self.assertIsNotNone(loaded)
-        self.assertTrue(loaded["verification"]["test_complete"])
+        self.assertFalse(loaded["verification"]["test_complete"])
         self.assertFalse(loaded["verification"]["test_pass"])
 
     def test_X12_normal_completed_pass_report_still_usable(self):

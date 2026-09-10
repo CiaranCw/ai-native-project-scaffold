@@ -263,6 +263,7 @@ def load_fixture_distribution(
     actual_understand_version: str | None = None,
     extra_package_dirs: list[Path] | None = None,
     repo_understand: Path | None = None,
+    actual_understand_dir: Path | None = None,
 ) -> Distribution:
     packages_root = fixture_root / "packages"
     package_dirs = [p for p in packages_root.iterdir() if p.is_dir()]
@@ -274,12 +275,13 @@ def load_fixture_distribution(
     for rel_file in (fixture_root / "releases").glob("*.yaml"):
         data = yaml_lite.load(read_text(rel_file))
         releases[str(data["release_id"])] = dict(data.get("core") or {})
-    actual_dir = None
-    if actual_understand_version:
-        if repo_understand is not None and actual_understand_version == "2.0.0":
+    actual_dir = actual_understand_dir
+    if actual_dir is None and actual_understand_version:
+        version_dir = packages_root / f"understand-{actual_understand_version}"
+        if version_dir.is_dir():
+            actual_dir = version_dir
+        elif repo_understand is not None and actual_understand_version == "2.0.0":
             actual_dir = repo_understand
-        else:
-            actual_dir = packages_root / f"understand-{actual_understand_version}"
     return load_distribution(
         package_dirs=package_dirs,
         releases=releases,

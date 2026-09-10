@@ -8,7 +8,7 @@ from unittest import mock
 
 from p6_support import git
 from p7_support import TASK_A
-from p8_support import init_submit_git, submit_engine, write_ready_task, write_submit_host
+from p8_support import init_submit_git, run_submit, submit_engine, write_ready_task, write_submit_host
 from support import write
 from scaffold_p5.io_util import write_yaml_atomic
 from scaffold_p6.candidate import observe_candidate
@@ -238,15 +238,13 @@ class P8Rev2Tests(unittest.TestCase):
         before_s11=None,
         after_s10_commit=None,
     ):
-        digest = observe_candidate(self.host).digest
-        authorization = {"granted": True, "candidate_digest": digest}
-        return submit_engine(self.host).run(
+        return run_submit(
+            self.host,
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized=authorization,
-            push_authorized=authorization if push else None,
+            push=push,
             fail_push=fail_push,
             before_s11=before_s11,
             after_s10_commit=after_s10_commit,

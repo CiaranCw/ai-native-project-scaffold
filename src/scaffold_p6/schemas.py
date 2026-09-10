@@ -6,16 +6,24 @@ from collections import Counter
 from typing import Any
 
 from scaffold_p5 import yaml_lite
+from scaffold_p5.ownership import normalize_project_path
 
 from scaffold_p6.models import (
     CANONICAL_DEVELOPMENT_RECORDS,
     EVIDENCE_KINDS,
+    NOT_RUN_REASONS,
     PROVENANCE,
     RECORD_CLASS,
     REPORT_SCHEMA_VERSION,
     SCENARIO_RESULTS,
     SUPPORT_KIND,
     TERMINAL_USABLE,
+)
+from scaffold_p6.trace import (
+    envelope_from_evidence,
+    validate_retention_class,
+    validate_role,
+    validate_trace_envelope,
 )
 
 
@@ -27,6 +35,7 @@ ID_LIST_FIELDS = (
     "terminal_usable",
     "missing_required",
     "blocked_required",
+    "not_selected",
 )
 
 REQUIRED_COUNTERS = (
@@ -48,6 +57,7 @@ REQUIRED_COMPLETENESS_BOOLS = (
     "batch_evidence_complete",
     "test_pass",
     "test_complete",
+    "coverage_complete",
     "required_set_authoritative",
 )
 
@@ -82,6 +92,7 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
         "mode",
         "candidate",
         "candidate_match",
+        "scope",
         "profiles",
         "completeness",
         "verification",
@@ -95,6 +106,27 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
         issues.append("report candidate binding is missing")
     if not _is_bool(data.get("candidate_match")):
         issues.append("candidate_match must be a boolean")
+    scope = data.get("scope")
+    if not isinstance(scope, dict):
+        issues.append("scope must be a mapping")
+    else:
+        bound_candidate = (
+            candidate.get("candidate_digest") if isinstance(candidate, dict) else None
+        )
+        if scope.get("candidate_digest") != bound_candidate:
+            issues.append("scope candidate_digest does not match report candidate")
+        for field in ("paths", "modules"):
+            values = scope.get(field)
+            if not isinstance(values, list):
+                issues.append(f"scope.{field} must be a list")
+            elif any(
+                not isinstance(value, str)
+                or normalize_project_path(value, area=False) != value
+                for value in values
+            ):
+                issues.append(
+                    f"scope.{field} must contain portable project-relative values"
+                )
     profiles_raw = data.get("profiles")
     if not isinstance(profiles_raw, list):
         issues.append("profiles must be a list of profile mappings")
@@ -112,6 +144,17 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
                 issues.append("profile provenance is unsupported")
         if not _is_bool(row.get("evidence_complete")):
             issues.append("profile evidence_complete must be a boolean")
+        if row.get("result") == "NOT_RUN":
+            reason = row.get("not_run_reason")
+            if reason not in NOT_RUN_REASONS:
+                issues.append("NOT_RUN profile requires an explicit not_run_reason")
+        evidence_ids = row.get("evidence_ids")
+        if not isinstance(evidence_ids, list) or any(
+            not isinstance(value, str) or not value for value in evidence_ids
+        ):
+            issues.append("profile evidence_ids must be a list of nonempty strings")
+        elif len(evidence_ids) != len(set(evidence_ids)):
+            issues.append("profile evidence_ids must be unique")
     completeness = data.get("completeness")
     verification = data.get("verification")
     if not isinstance(completeness, dict):
@@ -132,7 +175,18 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
     elif not isinstance(evidence, list):
         issues.append("evidence must be a list")
         evidence = []
+    candidate_digest = (
+        (candidate or {}).get("candidate_digest")
+        if isinstance(candidate, dict)
+        else None
+    )
     seen_evidence: set[str] = set()
+    evidence_by_id: dict[str, dict[str, Any]] = {}
+    profile_ids = {
+        str(row.get("id"))
+        for row in profiles_raw
+        if isinstance(row, dict) and row.get("id")
+    }
     for item in evidence:
         if not isinstance(item, dict):
             issues.append("evidence item is not a mapping")
@@ -143,13 +197,54 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
             issues.append("unsupported evidence kind")
         if not item.get("candidate_digest"):
             issues.append("evidence candidate binding is missing")
+        elif candidate_digest and item.get("candidate_digest") != candidate_digest:
+            issues.append("evidence candidate binding does not match the report")
         if not item.get("profile_id"):
             issues.append("evidence profile binding is missing")
+        elif str(item.get("profile_id")) not in profile_ids:
+            issues.append("evidence profile binding is absent from report profiles")
+        if not _is_bool(item.get("usable")):
+            issues.append("evidence usable must be a boolean")
+        if item.get("result") is not None and item.get("result") not in SCENARIO_RESULTS:
+            issues.append("evidence result is not a legal verification result")
+        issues.extend(validate_role(item.get("role")))
+        issues.extend(validate_retention_class(item.get("retention_class")))
+        envelope = envelope_from_evidence(item)
+        if envelope is not None and item.get("kind") in {"event_trace", "structured_state"}:
+            issues.extend(validate_trace_envelope(envelope))
         evidence_id = item.get("evidence_id")
         if evidence_id in seen_evidence:
             issues.append("duplicate evidence id")
         if evidence_id:
             seen_evidence.add(str(evidence_id))
+            evidence_by_id[str(evidence_id)] = item
+    for profile in profiles_raw:
+        if not isinstance(profile, dict):
+            continue
+        evidence_ids = profile.get("evidence_ids")
+        if not isinstance(evidence_ids, list):
+            continue
+        profile_id = str(profile.get("id") or "")
+        for evidence_id in evidence_ids:
+            item = evidence_by_id.get(str(evidence_id))
+            if item is None:
+                issues.append("profile evidence_id is absent from report Evidence")
+            elif str(item.get("profile_id") or "") != profile_id:
+                issues.append("profile evidence_id belongs to a different profile")
+        if (
+            profile.get("result") in TERMINAL_USABLE
+            and profile.get("evidence_complete") is True
+            and not any(
+                isinstance(evidence_by_id.get(str(evidence_id)), dict)
+                and evidence_by_id[str(evidence_id)].get("usable") is True
+                and evidence_by_id[str(evidence_id)].get("result")
+                == profile.get("result")
+                for evidence_id in evidence_ids
+            )
+        ):
+            issues.append(
+                "terminal evidence-complete profile lacks matching result Evidence"
+            )
     refs = data.get("evidence_refs")
     if refs is None:
         refs = []
@@ -158,9 +253,6 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
         refs = []
     seen_refs: set[str] = set()
     report_id = data.get("report_id")
-    candidate_digest = (
-        (candidate or {}).get("candidate_digest") if isinstance(candidate, dict) else None
-    )
     for ref in refs:
         if not isinstance(ref, dict):
             issues.append("evidence ref is not a mapping")
@@ -184,6 +276,8 @@ def _validate_report(data: Any) -> tuple[str, list[str]]:
             digest = ref.get("digest")
             if not (isinstance(digest, str) and digest.strip()):
                 issues.append("resolvable evidence ref requires a digest")
+            if ref_id not in seen_evidence:
+                issues.append("resolvable evidence ref has no report Evidence item")
     issues.extend(_semantic_consistency(data))
     if issues:
         return "INCOMPLETE", issues
@@ -202,6 +296,11 @@ def _required_completeness_field_issues(completeness: dict[str, Any]) -> list[st
             issues.append(f"completeness missing {field}")
         elif not _is_bool(completeness.get(field)):
             issues.append(f"{field} must be a boolean")
+    policy = completeness.get("required_policy")
+    if "required_policy" not in completeness:
+        issues.append("completeness missing required_policy")
+    elif policy not in {"UNKNOWN", "VERIFIED"}:
+        issues.append("required_policy must be UNKNOWN or VERIFIED")
     return issues
 
 
@@ -237,10 +336,15 @@ def _semantic_consistency(data: dict[str, Any]) -> list[str]:
     ):
         issues.append("candidate_match does not match completeness.candidate_match")
     if data.get("candidate_match") is False or completeness.get("candidate_match") is False:
-        if completeness.get("test_pass") is True or completeness.get("test_complete") is True:
+        if (
+            completeness.get("test_pass") is True
+            or completeness.get("test_complete") is True
+            or completeness.get("coverage_complete") is True
+        ):
             issues.append("candidate mismatch cannot yield pass or coverage completeness")
     required_ids = _id_list(completeness, "required")
     optional_ids = _id_list(completeness, "optional")
+    selected_ids = _id_list(completeness, "selected")
     if required_ids is not None and optional_ids is not None:
         overlap = set(required_ids) & set(optional_ids)
         if overlap:
@@ -306,11 +410,55 @@ def _semantic_consistency(data: dict[str, Any]) -> list[str]:
             issues.append("test_complete requires authoritative required-set coverage")
         if completeness.get("evidence_complete") is not True or not derived_coverage:
             issues.append("test_complete requires required evidence completeness")
+        if completeness.get("required_fail"):
+            issues.append("required FAIL cannot yield test_complete")
         if required_ids is not None:
             if any(row.get("result") not in TERMINAL_USABLE for row in required_rows):
                 issues.append("required BLOCKED/NOT_RUN cannot yield test_complete")
         elif completeness.get("required_set_authoritative") is False:
             issues.append("non-authoritative empty required set cannot yield test_complete")
+        adequacy = completeness.get("adequacy")
+        if isinstance(adequacy, dict) and adequacy.get("status") in {"UNSATISFIED", "UNKNOWN"}:
+            issues.append("engine-derived adequacy UNSATISFIED/UNKNOWN cannot yield test_complete")
+        sav = completeness.get("sav")
+        if isinstance(sav, dict) and sav.get("applied") and sav.get("requirement_pass") is not True:
+            issues.append("test_complete requires satisfied required proof obligations")
+    if completeness.get("coverage_complete") is True:
+        if completeness.get("required_set_authoritative") is not True:
+            issues.append("coverage_complete requires authoritative required-set coverage")
+        if completeness.get("evidence_complete") is not True or not derived_coverage:
+            issues.append("coverage_complete requires required evidence completeness")
+        if required_ids is not None:
+            if any(row.get("result") not in TERMINAL_USABLE for row in required_rows):
+                issues.append("required BLOCKED/NOT_RUN cannot yield coverage_complete")
+        elif completeness.get("required_set_authoritative") is False:
+            issues.append("non-authoritative empty required set cannot yield coverage_complete")
+        if selected_ids is not None and optional_ids is not None:
+            selected_optional = set(selected_ids) & set(optional_ids)
+            selected_optional_rows = [
+                row for row in profiles if row.get("id") in selected_optional
+            ]
+            if (
+                len(selected_optional_rows) != len(selected_optional)
+                or any(
+                    row.get("result") not in TERMINAL_USABLE
+                    or row.get("evidence_complete") is not True
+                    for row in selected_optional_rows
+                )
+            ):
+                issues.append(
+                    "selected optional BLOCKED/NOT_RUN cannot yield coverage_complete"
+                )
+    if (
+        completeness.get("required_set_authoritative") is True
+        and completeness.get("required_policy") != "VERIFIED"
+    ):
+        issues.append("authoritative required policy must be VERIFIED")
+    if (
+        completeness.get("required_set_authoritative") is not True
+        and completeness.get("required_policy") == "VERIFIED"
+    ):
+        issues.append("required_policy VERIFIED requires required_set_authoritative")
     return issues
 
 
@@ -355,7 +503,7 @@ def _membership_issues(
             issues.append(f"completeness.required id {required_id!r} is not a required profile")
     for optional_id in optional_ids:
         row = by_id.get(optional_id)
-        if row is not None and row.get("required") is not False:
+        if row is not None and row.get("required") is True:
             issues.append(f"completeness.optional id {optional_id!r} is not an optional profile")
     return issues
 

@@ -99,7 +99,7 @@ class P7DevelopTests(unittest.TestCase):
         write_task(self.host)
         write_lock(
             self.host,
-            four_core_lock_skills(develop_entry=dummy_lock_entry("2.0.0", "1" * 64)),
+            four_core_lock_skills(develop_entry=dummy_lock_entry("9.9.9", "1" * 64)),
         )
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
@@ -251,7 +251,8 @@ class P7DevelopTests(unittest.TestCase):
     def test_D21_authorized_task_mutation_succeeds(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host)
         result = develop_engine(self.host).run(
@@ -269,9 +270,9 @@ class P7DevelopTests(unittest.TestCase):
             self.host,
             ownership={
                 **CORE_OWNERSHIP,
-                "src/app.py": "GENERATED",
-                "src/other.py": "GENERATED",
+                "src/": "HUMAN_OWNED",
             },
+            source_areas=["src"],
         )
         write_task(self.host)
         result = develop_engine(self.host).run(
@@ -440,10 +441,11 @@ class P7DevelopTests(unittest.TestCase):
         write_task(self.host)
         ownership = {
             **CORE_OWNERSHIP,
-            "src/app.py": "GENERATED",
+            "src/": "HUMAN_OWNED",
         }
         project = read_yaml(self.host / ".scaffold/project.yaml")
         project["ownership"] = ownership
+        project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
         test = TestEngine(self.host, REPO / "skills" / "test").run(
             "scoped_verification",
@@ -476,7 +478,8 @@ class P7DevelopTests(unittest.TestCase):
     def test_D32_repair_cannot_commit_push_submit_or_migrate(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host)
         init_git(self.host)
@@ -510,10 +513,11 @@ class P7DevelopTests(unittest.TestCase):
         bind_develop_lock(self.host)
         ownership = {
             **CORE_OWNERSHIP,
-            "src/app.py": "GENERATED",
+            "src/": "HUMAN_OWNED",
         }
         project = read_yaml(self.host / ".scaffold/project.yaml")
         project["ownership"] = ownership
+        project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
 
 
@@ -527,4 +531,4 @@ class P7PresenceTests(unittest.TestCase):
         self.assertTrue((REPO / "src/scaffold_p7").is_dir())
         self.assertTrue((REPO / "src/scaffold_p8").is_dir())
         self.assertTrue((REPO / "skills/submit").is_dir())
-        self.assertEqual(actual_develop_lock_entry()["skill_version"], "2.0.0")
+        self.assertEqual(actual_develop_lock_entry()["skill_version"], "2.1.0")

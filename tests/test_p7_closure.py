@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from p6_support import CORE_OWNERSHIP
-from p7_support import TASK_A, develop_engine, write_active_host, write_task
+from p7_support import TASK_A, develop_engine, ready_lifecycle_opts, write_active_host, write_task
 from scaffold_p5.io_util import read_text, read_yaml
 from scaffold_p6.candidate import observe_candidate
 from scaffold_p7.models import SESSIONS_DIR
@@ -18,12 +18,10 @@ COMPLETE_STAGES = [
         "goal": "Write the fixture source.",
         "acceptance": "src/app.py has the expected content.",
         "status": "COMPLETE",
-        "required_tests": [
-            {"requirement_id": "unit", "observed_outcome": "PASS"}
-        ],
+        "required_tests": [],
     }
 ]
-FINAL_PASS = [{"requirement_id": "unit", "observed_outcome": "PASS"}]
+FINAL_PASS: list[dict] = []
 
 
 class P7ClosureTests(unittest.TestCase):
@@ -98,6 +96,7 @@ class P7ClosureTests(unittest.TestCase):
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
             before_ready_task_publish=compete,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -119,7 +118,8 @@ class P7ClosureTests(unittest.TestCase):
     def test_G04_ready_conflict_keeps_source_and_honest_mutations(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
         seen = {}
@@ -136,6 +136,7 @@ class P7ClosureTests(unittest.TestCase):
             task_id=TASK_A,
             writes=[{"path": "src/app.py", "content": "kept = True\n"}],
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
             before_ready_task_publish=compete,
         )
         self.assertEqual(result.outcome, "BLOCKED")

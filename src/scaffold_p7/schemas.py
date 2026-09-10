@@ -128,6 +128,21 @@ def validate_task_book(data: Any, *, expected_id: str | None = None) -> list[str
                     f"stage {stage_id or index} required_tests",
                 )
             )
+        if "completion_decision" in stage:
+            issues.extend(
+                _stage_completion_decision_issues(
+                    stage.get("completion_decision"),
+                    field=f"stage {stage_id or index} completion_decision",
+                    stage_id=stage_id if isinstance(stage_id, str) else None,
+                )
+            )
+    if "task_completion_decision" in data:
+        issues.extend(
+            _task_completion_decision_issues(
+                data.get("task_completion_decision"),
+                field="task_completion_decision",
+            )
+        )
     return issues
 
 
@@ -158,7 +173,9 @@ def validate_develop_session(
         issues.append("Develop Session task_id is missing or malformed")
     if data.get("mode") not in {"normal_task", "repair"}:
         issues.append("Develop Session mode must be normal_task or repair")
-    if not _nonempty_text(data.get("project_name")):
+    if "project_name" in data and not isinstance(data.get("project_name"), str):
+        issues.append("Develop Session project_name must be a string")
+    elif "project_name" not in data:
         issues.append("Develop Session project_name is required")
     if data.get("status") == "SUBMITTED":
         issues.append("Develop Session must not use SUBMITTED")
@@ -248,6 +265,7 @@ def _test_ref_list_issues(value: Any, field: str) -> list[str]:
         evidence = item.get("evidence_ref")
         if evidence is not None and not isinstance(evidence, dict):
             issues.append(f"{field}[{index}] evidence_ref must be a mapping")
+        issues.extend(_execution_binding_issues(item.get("execution_binding"), f"{field}[{index}]"))
     return issues
 
 
@@ -277,3 +295,108 @@ def _overlay_issues(overlay: Any, field: str) -> list[str]:
 
 def _nonempty_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def execution_binding_issues(value: Any, field: str) -> list[str]:
+    """Shared FND3 execution_binding constraints. Absent/None is valid."""
+    return _execution_binding_issues(value, field)
+
+
+def _execution_binding_issues(value: Any, field: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"{field} execution_binding must be a mapping"]
+    issues: list[str] = []
+    if value.get("kind") != "test_profile":
+        issues.append(f"{field} execution_binding.kind must be test_profile")
+    if not _nonempty_text(value.get("profile_id")):
+        issues.append(f"{field} execution_binding.profile_id is missing or empty")
+    return issues
+
+
+_DECISION_OUTCOMES = {"SATISFIED", "UNSATISFIED", "UNKNOWN"}
+
+
+def _stage_completion_decision_issues(
+    value: Any,
+    *,
+    field: str,
+    stage_id: str | None = None,
+) -> list[str]:
+    issues = _decision_body_issues(value, field=field)
+    if not isinstance(value, dict):
+        return issues
+    target = value.get("stage_id")
+    if not isinstance(target, str) or not target.strip():
+        issues.append(
+            f"{field} stage_id is missing; Stage Completion Decision is unscoped"
+        )
+    elif stage_id is not None and target != stage_id:
+        issues.append(f"{field} stage_id must match the containing Stage")
+    return issues
+
+
+def _task_completion_decision_issues(value: Any, *, field: str) -> list[str]:
+    return _decision_body_issues(value, field=field)
+
+
+def _completion_decision_issues(
+    value: Any,
+    *,
+    field: str,
+    stage_id: str | None = None,
+) -> list[str]:
+    """Compatibility wrapper. Prefer the Stage/Task-specific validators."""
+    if stage_id is not None:
+        return _stage_completion_decision_issues(
+            value, field=field, stage_id=stage_id
+        )
+    return _task_completion_decision_issues(value, field=field)
+
+
+def _decision_body_issues(value: Any, *, field: str) -> list[str]:
+    if not isinstance(value, dict):
+        return [f"{field} must be a mapping"]
+    issues: list[str] = []
+    if value.get("outcome") not in _DECISION_OUTCOMES:
+        issues.append(
+            f"{field} outcome must be SATISFIED, UNSATISFIED, or UNKNOWN"
+        )
+    if not _nonempty_text(value.get("candidate_digest")):
+        issues.append(f"{field} candidate_digest is missing")
+    if not _nonempty_text(value.get("rationale")):
+        issues.append(f"{field} rationale is missing")
+    basis = value.get("basis")
+    if not isinstance(basis, list) or not basis:
+        issues.append(f"{field} basis must be a nonempty list")
+    else:
+        for index, item in enumerate(basis):
+            if not isinstance(item, dict):
+                issues.append(f"{field} basis[{index}] must be a mapping")
+                continue
+            if not _nonempty_text(item.get("kind")) or not _nonempty_text(item.get("summary")):
+                issues.append(f"{field} basis[{index}] must name kind and summary")
+            if item.get("report") is not None or item.get("raw_report") is not None:
+                issues.append(f"{field} basis[{index}] must not store a raw Test Report")
+            ref = item.get("evidence_ref")
+            if ref is None:
+                continue
+            if not isinstance(ref, dict):
+                issues.append(f"{field} basis[{index}] evidence_ref must be a mapping")
+                continue
+            locator = ref.get("locator")
+            if not isinstance(locator, str) or not locator.strip():
+                issues.append(f"{field} basis[{index}] evidence locator is missing")
+            elif locator.startswith("/") or "\\" in locator or ":" in locator.split("/", 1)[0]:
+                issues.append(f"{field} basis[{index}] evidence locator is not portable")
+    supersedes = value.get("supersedes")
+    if supersedes is None:
+        return issues
+    if not isinstance(supersedes, dict):
+        issues.append(f"{field} supersedes must be a mapping")
+        return issues
+    for key in ("candidate_digest", "outcome", "rationale"):
+        if not _nonempty_text(supersedes.get(key)):
+            issues.append(f"{field} supersedes.{key} is missing")
+    return issues

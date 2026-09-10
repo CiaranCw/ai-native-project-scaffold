@@ -6,7 +6,13 @@ from typing import Iterable
 
 from scaffold_p5 import yaml_lite
 from scaffold_p5.io_util import read_text, sha256_text
-from scaffold_p5.models import CORE_SKILLS, LoadedPackage, PackageRef
+from scaffold_p5.models import (
+    CORE_SKILLS,
+    DEVELOP_MODES,
+    UNDERSTAND_MODES,
+    LoadedPackage,
+    PackageRef,
+)
 
 SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 FORMAT_RE = re.compile(r"^[1-9][0-9]*$")
@@ -91,15 +97,17 @@ def load_package(path: str | Path) -> LoadedPackage:
         reasons.append("modes must not contain duplicates")
 
     if skill_id == "understand":
-        if set(modes) != {"bootstrap", "full", "refresh", "compatibility"}:
+        if set(modes) != set(UNDERSTAND_MODES):
             reasons.append("Understand modes must be exactly bootstrap/full/refresh/compatibility")
-        for required in ("bootstrap", "full", "refresh", "compatibility"):
+        for required in UNDERSTAND_MODES:
             if required not in modes:
                 reasons.append(f"understand missing mode {required}")
         md_lower = skill_md.lower()
-        for token in ("bootstrap", "full", "refresh", "compatibility"):
+        for token in UNDERSTAND_MODES:
             if token not in md_lower:
                 reasons.append(f"SKILL.md omits {token}")
+    elif isinstance(modes_value, list) and all(isinstance(mode, str) for mode in modes):
+        reasons.extend(_mode_ownership_issues(skill_id, modes))
 
     forbidden = sorted(_find_forbidden_fields(manifest))
     if forbidden:
@@ -264,6 +272,41 @@ def capability_owner(capability: str) -> str:
     return capability.split(".", 1)[0] if "." in capability else ""
 
 
+SUBMIT_STAGE_MODE_RE = re.compile(r"^s(?:[1-9]|1[0-2])$", re.I)
+MODE_HOME = {
+    "bootstrap": "understand",
+    "full": "understand",
+    "refresh": "understand",
+    "compatibility": "understand",
+    "normal_task": "develop",
+    "repair": "develop",
+    "scoped_verification": "test",
+}
+
+
+def _is_submit_stage_mode(mode: str) -> bool:
+    return bool(SUBMIT_STAGE_MODE_RE.fullmatch(mode))
+
+
+def _mode_ownership_issues(skill_id: str, modes: list[str]) -> list[str]:
+    issues: list[str] = []
+    for mode in modes:
+        if _is_submit_stage_mode(mode):
+            issues.append(
+                f"{skill_id} must not declare Submit stage {mode} as a top-level mode"
+            )
+            continue
+        home = MODE_HOME.get(mode)
+        if home and home != skill_id:
+            issues.append(f"{skill_id} must not declare {home}-owned mode {mode}")
+            continue
+        if skill_id == "develop" and mode not in DEVELOP_MODES:
+            issues.append(f"Develop must not declare unknown mode {mode}")
+        elif skill_id == "submit":
+            issues.append("Submit must not declare top-level modes")
+    return issues
+
+
 def _find_forbidden_fields(value, path: str = "") -> set[str]:
     found: set[str] = set()
     if isinstance(value, dict):
@@ -278,17 +321,26 @@ def _find_forbidden_fields(value, path: str = "") -> set[str]:
     return found
 
 
+_CANONICAL_SKILL_ID_RE = re.compile(
+    r"(?m)^-\s*`skill_id`\s*:\s*`([a-z][a-z0-9_-]*)`\s*$",
+    re.I,
+)
+_CANONICAL_SKILL_VERSION_RE = re.compile(
+    r"(?m)^-\s*`skill_version`\s*:\s*`"
+    r"((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))`\s*$",
+    re.I,
+)
+
+
 def _entry_identity_contradiction(skill_md: str, skill_id: str, version: str) -> str | None:
     if not skill_md:
         return None
-    ids = re.findall(r"(?:skill_id|skill id)\s*[`:'\"]*\s*([a-z][a-z0-9_-]*)", skill_md, re.I)
+    ids = [match.group(1) for match in _CANONICAL_SKILL_ID_RE.finditer(skill_md)]
     if ids and any(value.lower() != skill_id for value in ids):
         return "skill.yaml / entry skill_id contradiction"
-    versions = re.findall(
-        r"(?:skill_version|skill version)\s*[`:'\"]*\s*([0-9]+\.[0-9]+\.[0-9]+)",
-        skill_md,
-        re.I,
-    )
+    versions = [
+        match.group(1) for match in _CANONICAL_SKILL_VERSION_RE.finditer(skill_md)
+    ]
     if versions and any(value != version for value in versions):
         return "skill.yaml / entry skill_version contradiction"
     return None

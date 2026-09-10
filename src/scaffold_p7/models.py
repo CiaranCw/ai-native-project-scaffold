@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 SKILL_ID = "develop"
-SKILL_VERSION = "2.0.0"
+SKILL_VERSION = "2.1.0"
 DEVELOP_MODES = ("normal_task", "repair")
-PROVIDES = ("develop.implement", "develop.repair")
+PROVIDES = ("develop.implement", "develop.repair", "develop.task_intake")
 REQUIRES: tuple[str, ...] = ()
 
 TASK_RECORD_TYPE = "task_book"
@@ -19,6 +19,7 @@ EXECUTABLE_COMPAT = frozenset({"EXACT", "COMPATIBLE"})
 
 TASKS_DIR = ".scaffold/tasks"
 SESSIONS_DIR = ".scaffold/runtime/develop-sessions"
+REPAIR_STATE_DIR = ".scaffold/runtime/repair-state"
 PROJECT_YAML = ".scaffold/project.yaml"
 MODULES_YAML = ".scaffold/modules.yaml"
 

@@ -9,6 +9,7 @@ from p7_support import (
     TASK_A,
     TASK_B,
     develop_engine,
+    ready_lifecycle_opts,
     repair_handoff,
     write_active_host,
     write_task,
@@ -218,7 +219,8 @@ class P7Rev1Tests(unittest.TestCase):
     def test_E15_stale_repair_candidate_blocks_before_mutation(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host)
         result = develop_engine(self.host).run(
@@ -261,7 +263,8 @@ class P7Rev1Tests(unittest.TestCase):
         write(self.host, "src/app.py", "value = 1\n")
         write_task(self.host)
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        project["ownership"] = {**CORE_OWNERSHIP, "src/app.py": "GENERATED"}
+        project["ownership"] = {**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"}
+        project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
         test = TestEngine(self.host, REPO / "skills" / "test").run(
             "scoped_verification",
@@ -331,7 +334,8 @@ class P7Rev1Tests(unittest.TestCase):
     def test_E21_successful_source_mutation_reports_source(self):
         write_active_host(
             self.host,
-            ownership={**CORE_OWNERSHIP, "src/app.py": "GENERATED"},
+            ownership={**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"},
+            source_areas=["src"],
         )
         write_task(self.host)
         result = develop_engine(self.host).run(
@@ -352,17 +356,16 @@ class P7Rev1Tests(unittest.TestCase):
                     "goal": "Write the fixture source.",
                     "acceptance": "src/app.py has the expected content.",
                     "status": "COMPLETE",
-                    "required_tests": [
-                        {"requirement_id": "unit", "observed_outcome": "PASS"}
-                    ],
+                    "required_tests": [],
                 }
             ],
-            final_tests=[{"requirement_id": "unit", "observed_outcome": "PASS"}],
+            final_tests=[],
         )
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
             request_ready_for_review=True,
+            **ready_lifecycle_opts(),
         )
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["ready_for_review"])

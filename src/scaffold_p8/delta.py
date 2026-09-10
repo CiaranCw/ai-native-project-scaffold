@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from scaffold_p5.io_util import file_digest, read_yaml
+from scaffold_p5.scm import observe_scm, parse_porcelain_z
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
 from scaffold_p6.candidate import RUNTIME_PREFIX
 from scaffold_p7.schemas import validate_develop_session, validate_files_yaml
 
+from scaffold_p8.noscms import observe_noscms_diff
 from scaffold_p8.models import PROVENANCE_CLASSES, SESSIONS_DIR
 
 
@@ -23,25 +24,25 @@ def observe_real_paths(root: Path) -> list[str]:
 
 
 def observe_real_diff(root: Path) -> dict[str, Any]:
-    if (root / ".git").exists():
-        ok, payload, reason = _run_git_status(root)
-        if not ok:
+    scm = observe_scm(root)
+    if scm.kind == "git":
+        status_ok, _status_payload, status_reason = _run_git_status(root)
+        if not scm.ok or not status_ok:
             return {
                 "ok": False,
                 "kind": "git",
+                "observation_state": scm.observation_state,
+                "observation_ok": False,
                 "entries": [],
                 "paths": [],
-                "blockers": [reason or "Git real Diff observation is UNKNOWN"],
+                "project_root": ".",
+                "scm_root": scm.scm_root_label,
+                "blockers": (
+                    [status_reason] if status_reason else list(scm.blockers)
+                )
+                or ["Git real Diff observation is UNKNOWN"],
             }
-        entries, parse_issues = _parse_porcelain_z(payload)
-        if parse_issues:
-            return {
-                "ok": False,
-                "kind": "git",
-                "entries": [],
-                "paths": [],
-                "blockers": parse_issues,
-            }
+        entries = [_delta_entry(row) for row in scm.entries]
         entries = [
             row
             for row in entries
@@ -51,20 +52,16 @@ def observe_real_diff(root: Path) -> dict[str, Any]:
         return {
             "ok": True,
             "kind": "git",
+            "observation_state": scm.observation_state,
+            "observation_ok": True,
+            "project_root": ".",
+            "scm_root": scm.scm_root_label,
             "entries": entries,
             "paths": _entry_paths(entries),
             "pathspecs": _entry_pathspecs(entries),
             "blockers": [],
         }
-    paths = _noscms_paths(root)
-    return {
-        "ok": True,
-        "kind": "none",
-        "entries": [{"path": path, "change": "modified"} for path in paths],
-        "paths": paths,
-        "pathspecs": paths,
-        "blockers": [],
-    }
+    return observe_noscms_diff(root)
 
 
 def classify_delta(
@@ -177,73 +174,37 @@ def _session_overridden(real_paths: list[str], sessions: list[dict[str, Any]]) -
     return bool(remembered - set(real_paths))
 
 
-def _run_git_status(root: Path) -> tuple[bool, bytes, str]:
-    try:
-        completed = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "status",
-                "--porcelain=v1",
-                "-z",
-                "--untracked-files=all",
-            ],
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, b"", f"Git real Diff observation failed: {exc}"
-    if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", "replace").strip()
-        return False, b"", "Git real Diff observation failed" + (
-            f": {detail}" if detail else ""
-        )
-    return True, completed.stdout, ""
-
-
 def _parse_porcelain_z(
     payload: bytes,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    entries: list[dict[str, Any]] = []
-    issues: list[str] = []
-    parts = payload.split(b"\0")
-    index = 0
-    while index < len(parts):
-        raw = parts[index]
-        index += 1
-        if not raw:
-            continue
-        text = raw.decode("utf-8", "replace")
-        if len(text) < 4 or text[2] != " ":
-            issues.append("Git real Diff contains a malformed porcelain entry")
-            continue
-        code = text[:2]
-        path = text[3:].replace("\\", "/")
-        if not path:
-            issues.append("Git real Diff contains an empty path")
-            continue
-        rename_or_copy = any(item in {"R", "C"} for item in code)
-        orig_path = ""
-        if rename_or_copy:
-            if index >= len(parts) or not parts[index]:
-                issues.append("Git rename/copy entry is missing its original path")
-                continue
-            orig_path = (
-                parts[index].decode("utf-8", "replace").replace("\\", "/")
-            )
-            index += 1
-        entries.append(
-            {
-                "path": path,
-                "orig_path": orig_path,
-                "change": _change_kind(code),
-                "index_status": code[0],
-                "worktree_status": code[1],
-            }
+    entries, issues = parse_porcelain_z(payload)
+    return [_delta_entry(row) for row in entries], [
+        "Git real Diff contains invalid porcelain: " + issue for issue in issues
+    ]
+
+
+def _run_git_status(root: Path) -> tuple[bool, bytes, str]:
+    """Compatibility test seam backed by shared SCM observation."""
+    observed = observe_scm(root)
+    if observed.kind != "git" or not observed.ok:
+        return (
+            False,
+            b"",
+            "; ".join(observed.blockers)
+            or "Git real Diff observation is UNKNOWN",
         )
-    return entries, issues
+    return True, b"", ""
+
+
+def _delta_entry(row: dict[str, Any]) -> dict[str, Any]:
+    code = str(row.get("code") or "")
+    return {
+        "path": str(row.get("path") or ""),
+        "orig_path": str(row.get("orig_path") or ""),
+        "change": _change_kind(code),
+        "index_status": code[0] if len(code) > 0 else "",
+        "worktree_status": code[1] if len(code) > 1 else "",
+    }
 
 
 def _change_kind(code: str) -> str:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from p6_support import git
 from p7_support import TASK_A
-from p8_support import init_submit_git, submit_engine, write_submit_host
+from p8_support import init_submit_git, run_submit, submit_engine, write_submit_host
 from support import write
 from scaffold_p6.candidate import observe_candidate
 
@@ -179,15 +179,13 @@ class P8ClosureTests(unittest.TestCase):
         fail_push: bool = False,
         before_s11=None,
     ):
-        digest = observe_candidate(self.host).digest
-        authorization = {"granted": True, "candidate_digest": digest}
-        return submit_engine(self.host).run(
+        return run_submit(
+            self.host,
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorized=authorization,
-            push_authorized=authorization if push else None,
+            push=push,
             fail_push=fail_push,
             before_s11=before_s11,
         )

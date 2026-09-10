@@ -33,7 +33,11 @@ This distribution repository does **not** contain a live host tree.
 │   ├── tasks/                    schema: P3
 │   ├── changes/                  schema: P3
 │   ├── runtime/                  LOCAL / TEMPORARY / ignored
-│   │   └── local/                machine paths only; not secrets
+│   │   ├── local/                machine paths only; not secrets
+│   │   ├── repair-state/         supporting Repair recovery (P9)
+│   │   ├── migration-executions/ P5 operational migration artifact
+│   │   ├── understand-assessments/  S4 supporting Knowledge Assessment
+│   │   └── understand-currentness/  supporting incremental understanding
 │   └── ext/<namespace>/          OPTIONAL domain extras
 │
 ├── CLAUDE.md / Cursor rules / …  thin bridges only
@@ -128,7 +132,8 @@ project.yaml     identity, lifecycle + maintenance conditions,
        ├─ tasks/          Task Books                          → P3
        ├─ changes/        Change Records: candidate before S10;
        │                  as-built after successful S10       → P3
-       ├─ ext/<ns>/       optional domain metadata
+       ├─ ext/<ns>/       optional namespaced domain metadata or
+       │                  owned durable support artifacts
        └─ runtime/        NOT knowledge
               ├─ sessions / caches
               └─ local/   machine-only paths

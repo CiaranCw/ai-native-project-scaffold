@@ -109,7 +109,13 @@ class P6Rev2Tests(unittest.TestCase):
         write(self.host, "README.md", "# none\n")
         write_project(self.host)
         write_commands(self.host, [])
-        write_tests(self.host, [], applicable=False, applicability="NOT_APPLICABLE")
+        write_tests(
+            self.host,
+            [],
+            applicable=False,
+            applicability="NOT_APPLICABLE",
+            required_authority="VERIFIED",
+        )
         c = test_engine(self.host).run().extras["completeness"]
         self.assertTrue(c["required_set_authoritative"])
         self.assertTrue(c["test_complete"])

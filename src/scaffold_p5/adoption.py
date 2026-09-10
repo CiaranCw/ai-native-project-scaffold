@@ -5,7 +5,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from scaffold_p5.discovery import facts_as_dicts
+from scaffold_p5.agents import (
+    AGENTS_ROUTER_REGION,
+    GENUINE,
+    SAFE_INTEGRATE,
+    classify_agents_file,
+    has_managed_router_region,
+)
+from scaffold_p5.discovery import (
+    facts_as_dicts,
+    module_paths,
+    observed_testing_surface,
+    resolve_existing,
+)
+from scaffold_p5.discovery_context import DiscoverySession
 from scaffold_p5.distribution import Distribution
 from scaffold_p5.host_state import (
     AGENTS_MD,
@@ -24,6 +37,12 @@ from scaffold_p5.host_state import (
     scm_baseline,
     workspace_fingerprint,
 )
+from scaffold_p5.inventory import (
+    EXCLUDED_DIR_NAMES,
+    InventoryBudget,
+    MetadataWalk,
+    bounded_metadata_walk,
+)
 from scaffold_p5.io_util import (
     file_digest,
     read_yaml,
@@ -31,6 +50,7 @@ from scaffold_p5.io_util import (
     write_yaml_atomic,
 )
 from scaffold_p5.models import AdoptionPlan, DiscoveryFact, PackageRef, PlanAction
+from scaffold_p5.ownership import P6_DURABLE_EVIDENCE_AREA, source_area_key
 from scaffold_p5.preflight import PreflightDecision
 from scaffold_p5.schemas import (
     ADOPTION_PLAN_SCHEMA_VERSION,
@@ -72,6 +92,7 @@ def build_adoption_plan(
     distribution: Distribution,
     preflight: PreflightDecision,
     derived_copy: bool = False,
+    budget: InventoryBudget | None = None,
 ) -> AdoptionPlan:
     release = distribution.selected_release
     if release is None:
@@ -80,29 +101,10 @@ def build_adoption_plan(
     intended = preflight.intended_lock or _intended_from_release(release)
     baseline = scm_baseline(root)
     baseline["workspace"] = workspace_fingerprint(root, _baseline_paths(root))
-    baseline["inventory"] = durable_inventory(root)
     actions: list[PlanAction] = []
+    actions.append(_agents_plan_action(root, facts))
     existing_agents = (root / AGENTS_MD).exists()
     if existing_agents:
-        bridge = next(
-            (fact for fact in facts if fact.name == "agents_scaffold_bridge"),
-            None,
-        )
-        genuine_bridge = bool(
-            bridge and bridge.confidence == "VERIFIED" and bridge.value is True
-        )
-        actions.append(
-            PlanAction(
-                "PRESERVE",
-                AGENTS_MD,
-                "HUMAN_OWNED",
-                "Existing Agent router remains human text"
-                if genuine_bridge
-                else "Existing Agent router is not a proven Scaffold bridge; human resolution required",
-                "file bytes unchanged",
-                "THIN_BRIDGE" if genuine_bridge else "DEFER",
-            )
-        )
         actions.append(
             _create_or_preserve(
                 root,
@@ -112,15 +114,6 @@ def build_adoption_plan(
             )
         )
     else:
-        actions.append(
-            PlanAction(
-                "CREATE",
-                AGENTS_MD,
-                "GENERATED",
-                "No existing router; create thin Scaffold router",
-                "create AGENTS.md",
-            )
-        )
         actions.append(
             _create_or_preserve(
                 root,
@@ -138,6 +131,7 @@ def build_adoption_plan(
                 f"create {target}",
             )
         )
+    actions.append(_p6_durable_evidence_area_action())
     architecture = _fact(facts, "architecture")
     if (
         architecture
@@ -182,18 +176,29 @@ def build_adoption_plan(
                 "create development knowledge entry",
             )
         )
-    tests = _fact(facts, "test_tree")
-    if tests and tests.confidence == "VERIFIED" and tests.value:
+    if observed_testing_surface(facts):
         actions.append(
             _create_or_preserve(
                 root,
                 TESTING_MD,
-                "P2 testing entry is required when tests are observed",
+                "P2 testing entry is required when a test surface is observed",
                 "create testing knowledge entry",
             )
         )
     source = _fact(facts, "source_tree")
-    for module in (source.value if source and source.value else []):
+    for area in (source.value if source and source.value else []):
+        area_key = source_area_key(area)
+        if area_key and not any(action.target == area_key for action in actions):
+            actions.append(
+                PlanAction(
+                    "PRESERVE",
+                    area_key,
+                    "HUMAN_OWNED",
+                    "Observed business source area remains human-owned",
+                    "business source bytes unchanged during Adoption",
+                )
+            )
+    for module in module_paths(facts):
         actions.append(
             _create_or_preserve(
                 root,
@@ -203,7 +208,8 @@ def build_adoption_plan(
             )
         )
     known_targets = {action.target for action in actions}
-    for path in _preserve_human_paths(root):
+    preserved, preserve_walk = _preserve_human_paths(root, budget=budget)
+    for path in preserved:
         if path in known_targets:
             continue
         actions.append(
@@ -215,6 +221,19 @@ def build_adoption_plan(
                 "bytes unchanged",
             )
         )
+    if preserve_walk.truncated or preserve_walk.unknown:
+        facts = list(facts) + [
+            DiscoveryFact(
+                "human_owned_preservation",
+                {
+                    "observation": preserve_walk.observation,
+                    "paths": list(preserved),
+                    "entries_enumerated": preserve_walk.entries_enumerated,
+                },
+                "UNKNOWN",
+                True,
+            )
+        ]
     clients = next((f.value for f in facts if f.name == "existing_ai_clients"), [])
     for client in clients or []:
         if client == AGENTS_MD:
@@ -251,11 +270,12 @@ def build_adoption_plan(
             )
         )
     envelope = [a.target for a in actions if a.action_class in {"CREATE", "MANAGED_UPDATE"}]
-    blockers = [
-        f.name + ":" + f.confidence
-        for f in facts
-        if f.critical and f.confidence in {"UNKNOWN", "CONFLICTING"}
-    ]
+    coverage: dict[str, Any] = {}
+    baseline["inventory"] = durable_inventory(
+        root, exact_observe=envelope, coverage_out=coverage
+    )
+    baseline["inventory_coverage"] = coverage
+    blockers = _activation_blockers(facts, actions)
     body = {
         "schema_version": ADOPTION_PLAN_SCHEMA_VERSION,
         "release_id": release.release_id,
@@ -293,25 +313,16 @@ def rebuild_adoption_plan(
 ) -> AdoptionPlan:
     """Create a new human-review candidate from current durable state."""
     actions: list[PlanAction] = []
-    bridge = _fact(facts, "agents_scaffold_bridge")
     proven_generated = _proven_session_targets(root, old, session)
     for previous in old.actions:
+        if previous.target == AGENTS_MD:
+            actions.append(_agents_plan_action(root, facts))
+            continue
+        if previous.target.endswith("/"):
+            actions.append(previous)
+            continue
         action = previous
-        if previous.target == AGENTS_MD and previous.ownership == "HUMAN_OWNED":
-            genuine = bool(
-                bridge and bridge.confidence == "VERIFIED" and bridge.value is True
-            )
-            action = PlanAction(
-                "PRESERVE",
-                AGENTS_MD,
-                "HUMAN_OWNED",
-                "Replacement Plan revalidated the existing Agent router"
-                if genuine
-                else "Existing Agent router remains unresolved and requires human action",
-                "file bytes unchanged",
-                "THIN_BRIDGE" if genuine else "DEFER",
-            )
-        elif (
+        if (
             previous.action_class in {"CREATE", "MANAGED_UPDATE"}
             and (root / previous.target).exists()
             and previous.ownership in {"GENERATED", "MANAGED"}
@@ -326,23 +337,12 @@ def rebuild_adoption_plan(
                     previous.client_strategy,
                 )
             else:
-                genuine = bool(
-                    previous.target == AGENTS_MD
-                    and bridge
-                    and bridge.confidence == "VERIFIED"
-                    and bridge.value is True
-                )
                 action = PlanAction(
                     "PRESERVE",
                     previous.target,
                     "HUMAN_OWNED",
                     "Existing target lacks current Session generation provenance",
                     "file bytes unchanged",
-                    (
-                        "THIN_BRIDGE"
-                        if genuine
-                        else ("DEFER" if previous.target == AGENTS_MD else None)
-                    ),
                 )
         actions.append(action)
 
@@ -388,12 +388,8 @@ def rebuild_adoption_plan(
                 proven_generated,
             )
         )
-    tests = _fact(facts, "test_tree")
-    if (
-        tests
-        and tests.confidence == "VERIFIED"
-        and tests.value
-        and not any(action.target == TESTING_MD for action in actions)
+    if observed_testing_surface(facts) and not any(
+        action.target == TESTING_MD for action in actions
     ):
         actions.append(
             _replacement_target(
@@ -405,7 +401,19 @@ def rebuild_adoption_plan(
             )
         )
     source = _fact(facts, "source_tree")
-    for module in (source.value if source and source.value else []):
+    for area in (source.value if source and source.value else []):
+        area_key = source_area_key(area)
+        if area_key and not any(action.target == area_key for action in actions):
+            actions.append(
+                PlanAction(
+                    "PRESERVE",
+                    area_key,
+                    "HUMAN_OWNED",
+                    "Replacement Plan preserves observed business source authority",
+                    "business source bytes unchanged",
+                )
+            )
+    for module in module_paths(facts):
         target = f"{MODULE_DOCS}/{module}.md"
         if not any(action.target == target for action in actions):
             actions.append(
@@ -419,8 +427,10 @@ def rebuild_adoption_plan(
             )
 
     known = {action.target for action in actions}
-    for path in durable_inventory(root):
+    for path, row in durable_inventory(root).items():
         if path.startswith(".scaffold/runtime/") or path in known:
+            continue
+        if not isinstance(row, dict) or row.get("type") != "file":
             continue
         actions.append(
             PlanAction(
@@ -433,17 +443,17 @@ def rebuild_adoption_plan(
         )
     baseline = scm_baseline(root)
     baseline["workspace"] = workspace_fingerprint(root, _baseline_paths(root))
-    baseline["inventory"] = durable_inventory(root)
     envelope = [
         action.target
         for action in actions
         if action.action_class in {"CREATE", "MANAGED_UPDATE"}
     ]
-    blockers = [
-        f"{fact.name}:{fact.confidence}"
-        for fact in facts
-        if fact.critical and fact.confidence in {"UNKNOWN", "CONFLICTING"}
-    ]
+    coverage: dict[str, Any] = {}
+    baseline["inventory"] = durable_inventory(
+        root, exact_observe=envelope, coverage_out=coverage
+    )
+    baseline["inventory_coverage"] = coverage
+    blockers = _activation_blockers(facts, actions)
     body = {
         "schema_version": ADOPTION_PLAN_SCHEMA_VERSION,
         "release_id": old.release_id,
@@ -512,6 +522,7 @@ def plan_from_dict(data: dict[str, Any]) -> AdoptionPlan:
                 rationale=str(a["rationale"]),
                 expected=str(a["expected"]),
                 client_strategy=a.get("client_strategy"),
+                managed_region=a.get("managed_region"),
             )
             for a in data.get("actions") or []
         ],
@@ -752,7 +763,77 @@ def _action_dict(action: PlanAction) -> dict[str, Any]:
     }
     if action.client_strategy:
         data["client_strategy"] = action.client_strategy
+    if action.managed_region:
+        data["managed_region"] = action.managed_region
     return data
+
+
+def _agents_plan_action(root: Path, facts: list[DiscoveryFact]) -> PlanAction:
+    state = classify_agents_file(root)
+    if state == "absent":
+        return PlanAction(
+            "CREATE",
+            AGENTS_MD,
+            "GENERATED",
+            "No existing router; create thin Scaffold router",
+            "create AGENTS.md",
+        )
+    text = ""
+    if (root / AGENTS_MD).is_file():
+        try:
+            text = (root / AGENTS_MD).read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            text = ""
+    if state == GENUINE:
+        managed = has_managed_router_region(text)
+        return PlanAction(
+            "PRESERVE",
+            AGENTS_MD,
+            "MANAGED" if managed else "HUMAN_OWNED",
+            "Existing Agent router already satisfies the Scaffold routing contract",
+            "file bytes unchanged",
+            "THIN_BRIDGE",
+            AGENTS_ROUTER_REGION if managed else None,
+        )
+    if state == SAFE_INTEGRATE:
+        return PlanAction(
+            "MANAGED_UPDATE",
+            AGENTS_MD,
+            "MANAGED",
+            "Existing human AGENTS.md remains; propose a bounded Scaffold router region. No whole-file replace.",
+            "insert or replace the scaffold:managed:agents-router region only; human text outside the region is unchanged",
+            "THIN_BRIDGE",
+            AGENTS_ROUTER_REGION,
+        )
+    return PlanAction(
+        "PRESERVE",
+        AGENTS_MD,
+        "HUMAN_OWNED",
+        "Existing AGENTS.md has conflicting markers, an explicit anti-Scaffold instruction, or other unsafe integration evidence. Human must choose how the Layer-1 router is established.",
+        "file bytes unchanged",
+        "DEFER",
+    )
+
+
+def _activation_blockers(
+    facts: list[DiscoveryFact],
+    actions: list[PlanAction],
+) -> list[str]:
+    agents_action = next(
+        (action for action in actions if action.target == AGENTS_MD),
+        None,
+    )
+    planned_integration = bool(
+        agents_action and agents_action.action_class == "MANAGED_UPDATE"
+    )
+    blockers = []
+    for fact in facts:
+        if not fact.critical or fact.confidence not in {"UNKNOWN", "CONFLICTING"}:
+            continue
+        if fact.name == "agents_scaffold_bridge" and planned_integration:
+            continue
+        blockers.append(f"{fact.name}:{fact.confidence}")
+    return blockers
 
 
 def _create_or_preserve(
@@ -839,24 +920,113 @@ def _proven_session_targets(
     return proven
 
 
-def _preserve_human_paths(root: Path) -> list[str]:
-    out = []
+def _preserve_human_paths(
+    root: Path,
+    *,
+    budget: InventoryBudget | None = None,
+) -> tuple[list[str], MetadataWalk]:
+    out: list[str] = []
+    limits = budget or InventoryBudget()
+    session = DiscoverySession.ephemeral(root, budget=limits)
     for rel in ("README.md", "docs/notes.md", "docs/human.md"):
-        if (root / rel).exists():
-            out.append(rel)
-    docs = root / "docs"
-    if docs.exists():
-        for path in docs.rglob("*"):
-            if path.is_file():
-                rel = str(path.relative_to(root)).replace("\\", "/")
-                if rel not in out:
-                    out.append(rel)
-    return out
+        actual = resolve_existing(root, rel, session=session)
+        if actual:
+            out.append(actual)
+    walked = bounded_metadata_walk(
+        root,
+        start="docs",
+        budget=limits,
+        skip_dir_names=EXCLUDED_DIR_NAMES,
+        state=session.walk,
+        on_directory=session.remember_directory,
+        dir_cache=session.directories,
+    )
+    if not walked.unknown or walked.files or walked.directories:
+        for rel in walked.files:
+            if rel not in out:
+                out.append(rel)
+    return out, walked
 
 
 def _baseline_paths(root: Path) -> list[str]:
     paths = ["README.md", AGENTS_MD, "CLAUDE.md"]
     return [p for p in paths if (root / p).exists()]
+
+
+def _p6_durable_evidence_area_action() -> PlanAction:
+    return PlanAction(
+        "CREATE",
+        P6_DURABLE_EVIDENCE_AREA,
+        "GENERATED",
+        (
+            "P6 durable Evidence support-artifact root. Bootstrap registers "
+            "GENERATED area ownership only and does not create the directory."
+        ),
+        "register GENERATED area ownership only; no file created at Bootstrap",
+    )
+
+
+def ownership_presentation(plan: AdoptionPlan) -> dict[str, Any]:
+    """Human-facing GENERATED ownership in the reviewed Adoption Plan."""
+    generated_targets: list[dict[str, str]] = []
+    generated_areas: list[dict[str, str]] = []
+    for action in plan.actions:
+        if action.ownership != "GENERATED":
+            continue
+        row = {
+            "target": action.target,
+            "action_class": action.action_class,
+            "rationale": action.rationale,
+            "expected": action.expected,
+        }
+        generated_targets.append(row)
+        if action.target.endswith("/"):
+            generated_areas.append(row)
+    return {
+        "note": (
+            "GENERATED ownership below is part of the human-reviewed Adoption "
+            "Plan. It is not injected after Plan approval."
+        ),
+        "generated_targets": generated_targets,
+        "generated_areas": generated_areas,
+        "p6_durable_evidence_area": P6_DURABLE_EVIDENCE_AREA,
+    }
+
+
+def preservation_presentation(plan: AdoptionPlan) -> dict[str, Any]:
+    """Human-facing summary of important PRESERVE areas. Not a new record."""
+    important: list[str] = []
+    for action in plan.actions:
+        if action.action_class != "PRESERVE":
+            continue
+        target = action.target
+        if _important_preserved_area(target) and target not in important:
+            important.append(target)
+    return {
+        "note": (
+            "Important existing HUMAN_OWNED areas remain outside the mutation "
+            "envelope. Reference does not transfer ownership."
+        ),
+        "areas": important,
+    }
+
+
+def _important_preserved_area(target: str) -> bool:
+    lowered = target.replace("\\", "/")
+    if target in {AGENTS_MD, "CLAUDE.md", "CLAUDE.local.md", "README.md", "CODEX.md"}:
+        return True
+    if lowered.startswith(".cursor/") or lowered == ".cursor/rules":
+        return True
+    if lowered.startswith("docs/") or lowered.endswith("architecture.md"):
+        return True
+    if lowered.endswith("/") and lowered.rstrip("/").split("/")[0] in {
+        "src",
+        "lib",
+        "app",
+        "pkg",
+    }:
+        return True
+    return False
 
 
 def _fact(facts: list[DiscoveryFact], name: str) -> DiscoveryFact | None:

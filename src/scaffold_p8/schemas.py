@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Any
 
 from scaffold_p8.models import CHANGE_RECORD_TYPE, PROVENANCE_CLASSES, RECORD_SCHEMA_VERSION
@@ -11,6 +12,7 @@ from scaffold_p8.models import CHANGE_RECORD_TYPE, PROVENANCE_CLASSES, RECORD_SC
 
 CHANGE_ID_RE = re.compile(r"^change-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 TASK_ID_RE = re.compile(r"^task-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
+SESSION_ID_RE = re.compile(r"^dev-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40,64}$")
 RFC3339_RE = re.compile(
@@ -52,6 +54,11 @@ _FORBIDDEN_GRANT_FIELDS = (
     "commit_sha",
     "can_commit",
     "can_push",
+    "grant_ref",
+    "attempt_id",
+    "authorization_attempt_id",
+    "submit_authorization_ref",
+    "push_authorization_ref",
 )
 
 
@@ -195,6 +202,31 @@ def validate_change_record(data: Any, *, expected_id: str | None = None) -> list
             issues.append(
                 "provenance.relevant_develop_session_count must be a nonnegative integer"
             )
+        session_ids = provenance.get("relevant_develop_session_ids")
+        if not isinstance(session_ids, list):
+            issues.append("provenance.relevant_develop_session_ids must be a list")
+        else:
+            seen_ids: set[str] = set()
+            for index, item in enumerate(session_ids):
+                if not isinstance(item, str) or not SESSION_ID_RE.fullmatch(item):
+                    issues.append(
+                        f"provenance.relevant_develop_session_ids[{index}] is malformed"
+                    )
+                    continue
+                if item in seen_ids:
+                    issues.append(
+                        f"provenance.relevant_develop_session_ids contains duplicate {item}"
+                    )
+                seen_ids.add(item)
+        for field in (
+            "submit_authorized",
+            "grant_ref",
+            "grant",
+            "attempt_id",
+            "authorization_attempt_id",
+        ):
+            if field in provenance:
+                issues.append(f"Change Record must not persist {field}")
         classes = provenance.get("classes")
         if not isinstance(classes, dict):
             issues.append("provenance.classes must be a mapping")
@@ -278,7 +310,18 @@ def validate_finalization_marker(
         "change_record_digest",
         "finalization_digest",
     }
-    allowed = required | {"commit", "tree"}
+    lineage_fields = {
+        "baseline_generation",
+        "parent_generation",
+        "parent_representation_digest",
+        "parent_change_id",
+    }
+    allowed = required | {
+        "commit",
+        "tree",
+        "support_artifacts",
+        "representation_digest",
+    } | lineage_fields
     if set(data) - allowed:
         issues.append("finalization support artifact has unknown fields")
     for field in required:
@@ -301,6 +344,21 @@ def validate_finalization_marker(
         value = data.get(field)
         if not isinstance(value, str) or not HEX_DIGEST_RE.fullmatch(value):
             issues.append(f"finalization {field} is malformed")
+    representation = data.get("representation_digest")
+    if representation is not None and (
+        not isinstance(representation, str) or not HEX_DIGEST_RE.fullmatch(representation)
+    ):
+        issues.append("finalization representation_digest is malformed")
+    lineage_present = lineage_fields & set(data)
+    if data.get("scm_kind") == "none":
+        if lineage_present != lineage_fields:
+            issues.append("no-SCM finalization lineage fields are missing")
+        else:
+            issues.extend(noscms_lineage_shape_issues(data))
+    elif lineage_present and lineage_present != lineage_fields:
+        issues.append("finalization lineage fields are incomplete")
+    elif lineage_present == lineage_fields:
+        issues.extend(noscms_lineage_shape_issues(data))
     if data.get("scm_kind") == "git":
         for field in ("commit", "tree"):
             value = data.get(field)
@@ -308,6 +366,60 @@ def validate_finalization_marker(
                 issues.append(f"Git finalization {field} is malformed")
     elif "commit" in data or "tree" in data:
         issues.append("no-SCM finalization must not contain Git identity")
+    support = data.get("support_artifacts", [])
+    if not isinstance(support, list):
+        issues.append("finalization support_artifacts must be a list")
+    else:
+        seen: set[str] = set()
+        for item in support:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"path", "digest"}
+                or not isinstance(item.get("path"), str)
+                or not item["path"].startswith(".scaffold/ext/")
+                or any(
+                    part in {"", ".", ".."}
+                    for part in PurePosixPath(item["path"]).parts
+                )
+                or item["path"] in seen
+                or not isinstance(item.get("digest"), str)
+                or not HEX_DIGEST_RE.fullmatch(item["digest"])
+            ):
+                issues.append("finalization support_artifact is malformed")
+                continue
+            seen.add(item["path"])
+    return issues
+
+
+def noscms_lineage_shape_issues(data: Any) -> list[str]:
+    """Shared no-SCM lineage shape. Genesis parent_change_id is empty, not absent."""
+    if not isinstance(data, dict):
+        return ["no-SCM publication lineage is malformed"]
+    issues: list[str] = []
+    generation = data.get("baseline_generation")
+    parent_generation = data.get("parent_generation")
+    if type(generation) is not int or generation < 1:
+        issues.append("finalization baseline_generation is malformed")
+    if type(parent_generation) is not int or parent_generation < 0:
+        issues.append("finalization parent_generation is malformed")
+    elif type(generation) is int and parent_generation != generation - 1:
+        issues.append(
+            "finalization lineage parent_generation does not precede "
+            "baseline_generation"
+        )
+    parent_digest = data.get("parent_representation_digest")
+    if not isinstance(parent_digest, str) or not HEX_DIGEST_RE.fullmatch(
+        parent_digest
+    ):
+        issues.append("finalization parent_representation_digest is malformed")
+    parent_id = data.get("parent_change_id")
+    if not isinstance(parent_id, str):
+        issues.append("finalization parent_change_id is malformed")
+    elif type(parent_generation) is int and parent_generation == 0:
+        if parent_id != "":
+            issues.append("finalization lineage root parent_change_id must be empty")
+    elif not CHANGE_ID_RE.fullmatch(str(parent_id or "")):
+        issues.append("finalization parent_change_id is malformed")
     return issues
 
 

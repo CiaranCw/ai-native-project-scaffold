@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import REPO, adopt, distribution, engine, write
+from support import REPO, adopt, apply_fresh_migration, distribution, engine, write
 from scaffold_p5.engine import UnderstandEngine
 from scaffold_p5.host_state import durable_inventory, scm_baseline, snapshot_host
 from scaffold_p5.io_util import read_yaml, write_yaml_atomic
@@ -42,10 +42,9 @@ class P5Rev2Tests(unittest.TestCase):
     def _interrupt(self, checkpoint: str = "validating"):
         adopt(self.host)
         plan = self._plan()
-        result = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._approval(plan),
+        result = apply_fresh_migration(
+            self.host,
+            plan,
             interrupt_after=checkpoint,
         )
         self.assertEqual(result.outcome, "BLOCKED")
@@ -459,11 +458,7 @@ class P5Rev2Tests(unittest.TestCase):
     def test_AA24_existing_generation_two_pipeline_still_converges(self):
         adopt(self.host)
         plan = self._plan("2.1.0")
-        migrated = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._approval(plan),
-        )
+        migrated = apply_fresh_migration(self.host, plan)
         self.assertEqual(migrated.outcome, "COMPLETED")
         compatible = engine(self.host, "2.1.0").run("compatibility")
         self.assertEqual(compatible.compatibility, "COMPATIBLE")

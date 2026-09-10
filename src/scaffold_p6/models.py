@@ -7,7 +7,7 @@ from typing import Any
 
 
 SKILL_ID = "test"
-SKILL_VERSION = "2.0.0"
+SKILL_VERSION = "2.0.1"
 TEST_MODES = ("scoped_verification",)
 PROVIDES = ("test.scoped_verification",)
 REQUIRES: tuple[str, ...] = ()
@@ -15,6 +15,7 @@ REQUIRES: tuple[str, ...] = ()
 REPORT_SCHEMA_VERSION = "1"
 EVIDENCE_SCHEMA_VERSION = "1"
 CANDIDATE_SCHEMA_VERSION = "1"
+DURABLE_EVIDENCE_SCHEMA_VERSION = "1"
 
 SUPPORT_KIND = "test_report"
 RECORD_CLASS = "support_artifact"
@@ -38,12 +39,21 @@ EVIDENCE_KINDS = (
 )
 SCENARIO_RESULTS = ("PASS", "FAIL", "BLOCKED", "NOT_RUN")
 TERMINAL_USABLE = frozenset({"PASS", "FAIL"})
+NOT_RUN_REASONS = (
+    "not_selected",
+    "not_applicable",
+    "dependency_unavailable",
+    "prerequisite_blocked",
+    "outside_scope",
+)
 FACT_CLASSES = ("VERIFIED", "INFERRED", "UNKNOWN", "CONFLICTING")
 APPLICABILITY = ("APPLICABLE", "NOT_APPLICABLE", "UNKNOWN", "CONFLICTING")
 ADAPTERS = ("local",)
 INLINE_LOG_LIMIT = 4096
 
 TEST_RUNS = ".scaffold/runtime/test-runs"
+DURABLE_EVIDENCE_ROOT = ".scaffold/ext/test/evidence"
+MATERIALIZATIONS_DIR = ".scaffold/runtime/test-materializations"
 TESTS_YAML = ".scaffold/tests.yaml"
 COMMANDS_YAML = ".scaffold/commands.yaml"
 PROJECT_YAML = ".scaffold/project.yaml"
@@ -65,6 +75,10 @@ class CandidateIdentity:
     @property
     def kind(self) -> str:
         return str(self.data.get("kind") or "")
+
+    @property
+    def usable(self) -> bool:
+        return self.data.get("observation_ok") is True and bool(self.digest)
 
 
 @dataclass
@@ -140,3 +154,4 @@ class ScenarioResult:
     evidence_ids: list[str] = field(default_factory=list)
     evidence_complete: bool = False
     observation: dict[str, Any] | None = None
+    not_run_reason: str = ""

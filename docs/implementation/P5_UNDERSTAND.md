@@ -2,7 +2,7 @@
 
 This document records P5-owned concrete schemas and runtime boundaries so later phases can consume them without redefining Foundation. It is not a Foundation Contract and does not outrank P0–P4.
 
-P5 status: **ACTIVE / IMPLEMENTATION** (Rev5 candidate). Not COMPLETE, BASELINED, or PASS.
+P5 status: **CLOSED / BASELINED / REMOTELY PUBLISHED.** Implementation phase closed; later FA-2 corrections were applied in the current unreleased candidate. FA-2 is independently PASS / CLOSED. P9 Repair/Migration is PASS / CLOSED. P10 Incremental Understanding / Multi-Agent is PASS / CLOSED. Post-P10 real-pilot corrections (knowledge-currentness, Bootstrap exact-plan gate) are recorded in [DIVE_PILOT_CORRECTION_01.md](DIVE_PILOT_CORRECTION_01.md). This note does not claim DIVE Day-1 closed or v2.0 released.
 
 ## Layout
 
@@ -88,9 +88,19 @@ knowledge / capabilities / facts / clients
 
 Ownership registry lives here. No `ownership.yaml`. `.scaffold/runtime` is ephemeral.
 
+Verified ordinary source roots discovered by P5 are registered as explicit
+`HUMAN_OWNED` area keys such as `src/`. Exact artifact entries override a
+covering area. `source_areas` is descriptive discovery output, not an implicit
+ownership fallback. This lets later Develop resolve ordinary source through
+the same registry without falsely classifying it as GENERATED.
+
 Docs and client surfaces may be `GENERATED`, `MANAGED`, or `HUMAN_OWNED`.
 `AGENTS.md` and `docs/project/architecture.md` may be `HUMAN_OWNED` and are
-preserved.
+preserved. When `AGENTS.md` is `MANAGED`, `.scaffold/project.yaml` also records
+an adjacent `managed_regions` index (not a new ownership mode or YAML root
+file), for example `AGENTS.md: [agents-router]`. Registry and actual
+`scaffold:managed` markers must agree. Refresh may rewrite only the already
+approved registered region when that identity and its bounds are coherent.
 
 The required durable machine artifacts must be declared explicitly and may use
 only `GENERATED` or `MANAGED`:
@@ -123,6 +133,12 @@ missing / unknown ownership → blocked
 
 Adoption Plan Approval, Migration Plan Approval, and lock-update approval do
 not override that policy.
+
+Optional Project Rule references remain pointers in existing P2 authority:
+`project.yaml.rule_refs`, module-row `rule_refs`, and test/profile
+`rule_refs`. AGENTS routes to those indexes; it is not a second Rule-reference
+registry and does not make an otherwise-unindexed Rule document authoritative.
+P5 Refresh preserves declared references rather than regenerating them away.
 
 P5 observes `project.yaml` as `ABSENT`, `VALID`, `MALFORMED`,
 `UNSUPPORTED`, or `INCOMPLETE`. Schema-1 execution requires a mapping with
@@ -177,7 +193,15 @@ expected-mutation/provenance structures. Missing or unsupported required
 structure cannot disappear into a fresh-host fallback.
 
 The Plan baseline contains a portable durable inventory of path/type/digest
-metadata. It excludes SCM internals, bytecode/cache files, and
+metadata for fully observed in-scope files. Heavy generic roots (`node_modules`,
+`vendor`, `dist`, `build`, and similar) are recorded as present/excluded rather
+than recursively hashed. Exact mutation-envelope targets are fully observed even
+when they sit under an otherwise excluded root. Inventory coverage reports
+truncation and unknown observation explicitly; excluded or truncated roots are
+not treated as empty or fully verified. See
+[PC_SCF_H2_BOUNDED_VERIFICATION.md](PC_SCF_H2_BOUNDED_VERIFICATION.md).
+Core exclusion classes are generic directory names, not consumer-project paths.
+The inventory still excludes SCM internals, bytecode/cache files, and
 `.scaffold/runtime/` bookkeeping. Recovery requires exactly one usable current
 Session, an intact Session/Plan identity and content digest binding, and an
 actual host state that is a proven prefix of the approved envelope. Checkpoint
@@ -213,7 +237,22 @@ validation, and an approval for the prior digest cannot authorize recovery.
 - `execution.yaml` — `PREPARED|APPLYING|VALIDATING|COMPLETED|RECOVERY_REQUIRED|ABORTED`
 - `plan.yaml` — bound Migration Plan
 
-Not a fifth Skill. Not a fourth canonical development record.
+Not a fifth Skill. Not a fourth canonical development record. Migration is
+not Adoption: Adoption attaches a non-normalized project; Migration applies
+only to a VALID scaffold-aware host whose compatibility result is
+`MIGRATION_REQUIRED`. Version difference alone is not migration. Fresh
+persistent Migration application MUST be initiated through Task-bound
+Develop authority when the application approval binds Plan identity/digest
+to the current Task id, Task revision, and candidate digest **before** any
+durable Develop Session/Task mutation. Understand compatibility may
+evaluate, construct the exact current Plan, and route to Develop. It MUST
+NOT start a fresh persistent apply from Plan-only approval. Understand
+still owns evaluation, Plan construction, Execution lifecycle, recovery,
+and post-migration validation. Develop does not fork that state machine.
+Successful Migration reports the validated post-migration compatibility
+(`EXACT` or `COMPATIBLE`) as the current result; pre-migration
+`MIGRATION_REQUIRED` is retained as historical extras, not as current
+authority.
 
 The durable checkpoint sequence is:
 
@@ -291,7 +330,7 @@ Selected Distribution Release pinned Understand
 = intended initial lock Understand
 ```
 
-Established-host `COMPATIBLE` substitution is explicit (`may_substitute_for`) only. No pre-lock substitution.
+Established-host `COMPATIBLE` substitution is explicit (`may_substitute_for`) only and applies uniformly to understand, develop, test, and submit. Exact identity still has priority when present. No pre-lock substitution.
 
 Bootstrap additionally checks release-set validity, supported package format,
 target Project Contract generation, Adoption Session record capability,
@@ -324,6 +363,21 @@ approval.
 
 UNKNOWN test evidence remains `knowledge.testing: unknown` and
 `tests.yaml.applicability: UNKNOWN`; it is never converted to NOT_APPLICABLE.
+Observed test availability is recorded from multiple generic evidence channels
+(manifest test commands, nested test directories/filename patterns, and testing
+docs). Observed availability is not an authoritative REQUIRED test policy. FA-2
+Batch 3 keeps observed profiles from becoming authoritative zero-required policy.
+Verified absence of a test surface may truthfully set availability applicability
+to `NOT_APPLICABLE`, but P5 still writes `required_authority: UNKNOWN`; absence
+is not normative zero-required authority.
+Declared manifest commands are indexed as declared/not-validated
+and are not executed. Emitted repository paths keep Git/filesystem spelling.
+`project.yaml` `name` uses declared package/product evidence rather than the
+worktree basename, and leaves CONFLICTING identity unresolved. Absence of secret
+inspection remains UNKNOWN rather than a VERIFIED negative. Module boundaries
+are promoted only when directory layout is corroborated by a second evidence
+channel.
+
 Observed build/test/architecture/module facts create the applicable generated
 `development.md`, `testing.md`, architecture pointer, and minimal module
 entries only when their target paths are absent. A pre-existing canonical
@@ -378,10 +432,17 @@ cannot silently forget the conflict. After resolution and convergence, Refresh
 clears `NEEDS_REFRESH` and the conflict list, then advances the baseline
 together.
 
-An existing `AGENTS.md` is recorded as `THIN_BRIDGE` only when its actual
-content routes to `project.yaml`, the project overview, and `skills.lock`.
-Otherwise it is PRESERVE/DEFER with a critical integration blocker; P5 never
-silently replaces HUMAN_OWNED content.
+An existing `AGENTS.md` that already satisfies the Layer-1 router contract is
+recorded as `THIN_BRIDGE` and PRESERVE (HUMAN_OWNED whole file, or MANAGED
+when a unique `scaffold:managed:agents-router` region is already present). An
+ordinary human-owned non-router `AGENTS.md` is not silently replaced: B3 may
+propose a bounded MANAGED region via `MANAGED_UPDATE` + `THIN_BRIDGE`. That
+proposal is inside the mutation envelope and Plan digest; no edit occurs
+before B4. Conflicting markers, an explicit anti-Scaffold instruction, or other
+unsafe evidence stay PRESERVE/DEFER and require a human choice. B7
+re-observes the post-apply host and must not carry a stale pre-Apply
+`agents_scaffold_bridge:CONFLICTING` blocker after a successful approved
+integration.
 
 ## Compatibility / lock update
 
@@ -407,6 +468,18 @@ project schema is executable, but persistence is `NEEDS_HUMAN` / blocked,
 mutations are none, and bytes stay unchanged. The same ownership gate applies
 to Migration project writes and `skills.lock` updates before an Execution is
 created or approval is treated as write authority.
+
+Fresh Adoption Plans include the P6 durable Evidence area
+`.scaffold/ext/test/evidence/` as `CREATE` / `GENERATED`. That declaration is
+visible in the human-reviewed Plan and `ownership_presentation` before
+approval. Bootstrap does not create the directory. It does not grant
+`.scaffold/ext/` or other extension namespaces.
+
+Already-adopted hosts missing that area use Understand `compatibility`
+`action="ownership_update"`: plan-first, digest-bound, `project.yaml` only,
+and only when the path is UNKNOWN with no HUMAN_OWNED / MANAGED / CONFLICTING
+or more-specific covering declaration. Refresh `register_generated_ownership`
+is not this recovery path.
 
 ## Migration recovery and convergence
 
@@ -458,10 +531,123 @@ clean/dirty status, tracked-change presence, untracked-change presence, and
 nested Git workspace evidence. Dirty work is valid input and is never
 auto-committed or stashed.
 
+SCM detection resolves ordinary Git worktree membership instead of checking
+only `<project_root>/.git`. A project nested under a parent Git worktree is
+reported as Git while status paths are projected back to the project root;
+unrelated parent-worktree changes are excluded. Git membership with failed or
+invalid observation remains `kind: git`, `confidence: UNKNOWN`, and explicit
+`OBSERVATION_FAILED`; it is never converted to clean or no-SCM truth.
+
 No-SCM remains first-class: `kind: none`, null Git identity fields, and the same
 portable filesystem evidence. P5 never invents a Git SHA and does not require
 history, tags, remotes, or Git itself for core operation.
 
+## Knowledge Assessment (FA2-FND-004)
+
+The live Understand package is `understand@2.1.0`, a MINOR extension of
+released `understand@2.0.0`. Released `2.0.0` remains immutable and does not
+include Knowledge Assessment publication. The live package declares
+`may_substitute_for: understand@2.0.0`. Pre-adoption Bootstrap still requires
+the exact release-pinned Understand package.
+
+Understand owns semantic knowledge assessment. Refresh (or Full on an ACTIVE
+host) may publish a supporting Knowledge Assessment after optional allowed
+GENERATED/MANAGED updates:
+
+```text
+.scaffold/runtime/understand-assessments/<ka-id>/assessment.yaml
+.scaffold/runtime/understand-assessments/heads/<binding-digest>/head.yaml
+```
+
+The public locator is `understand-assessments/<ka-id>/assessment.yaml`. P6
+candidate identity excludes `.scaffold/runtime/`, so neither the Assessment
+nor the current-head creates a second candidate digest. Producer `skill_id`
+is `understand` and `mode` is `refresh` or `full`. The assessment binds the
+current P6 `candidate_digest` and a deterministic digest of the exact
+handed-off S3 knowledge-relevant impact set. Per-impact outcomes are
+`SATISFIED`, `NEEDS_REFRESH`, `NEEDS_HUMAN`, and `UNKNOWN`. Boolean false is
+not UNKNOWN. HUMAN_OWNED surfaces are not silently overwritten.
+
+For each `(candidate_digest, impact_digest)` binding there is exactly one
+current-head. A later publication for the same binding supersedes the previous
+Assessment. P8 S4 consumes that current head and verifies published-byte
+integrity; a raw caller SATISFIED dictionary is not authority; a superseded
+locator MUST NOT be replayed. Change Record `knowledge_updates` is not S4
+authority.
+
+## Zero-context resume and incremental understanding (P10)
+
+P10 extends unreleased `understand@2.1.0` in place. It does not add a fifth
+Understand mode and does not create a fourth canonical development record.
+
+Default `refresh` with no `action` remains GENERATED/MANAGED host-knowledge
+refresh. P10 adds Refresh **actions**:
+
+| Action | Mutation | Role |
+| --- | --- | --- |
+| `resume` | none | Observational zero-context project entry |
+| `understand` | supporting current-head + completion receipts | Persist understanding only after refresh completion covers the observed scope |
+
+Currentness taxonomy:
+
+`CURRENT` | `PARTIAL_REFRESH_REQUIRED` | `FULL_REFRESH_REQUIRED` | `UNKNOWN`
+
+Physical observation answers **what requires refresh**. Understand-produced
+refresh-completion receipts answer **whether that refresh completed** against
+the exact current source/module/structural bytes **and** the current module
+knowledge bytes. Observation cannot self-certify `CURRENT`. `incremental=true`
+is not completion proof. Current knowledge-file digest MUST equal the
+completion `knowledge_digest`. Missing `output_locator` or mismatched
+`result.yaml` bytes fail closed. Post-receipt knowledge enrichment without a
+new completion cannot remain `CURRENT`.
+
+Receipts are not mutation authority. Knowledge writes still follow
+`project.yaml`: GENERATED whole-file, MANAGED bounded region only,
+HUMAN_OWNED preserve, UNKNOWN/CONFLICTING fail closed. Canonical
+`resolve_ownership(...)` is the resolver. Area registrations count.
+Absent UNKNOWN knowledge may be registered GENERATED through existing
+Refresh ownership authority before the completion binds structural
+authority; the receipt must not bind a pre-registration digest.
+
+Physical observation authority is declared `modules.yaml` path digests plus
+structural digests of `modules.yaml`, `commands.yaml`, `tests.yaml`,
+`skills.lock`, and selected `project.yaml` identity fields. Timestamps, chat,
+and filename hints are not currentness authority. A SATISFIED Knowledge
+Assessment does not establish project understanding.
+
+Supporting layout:
+
+```text
+.scaffold/runtime/understand-currentness/<uc-id>/snapshot.yaml
+.scaffold/runtime/understand-currentness/heads/project/head.yaml
+.scaffold/runtime/understand-currentness/completions/<rc-id>/completion.yaml
+.scaffold/runtime/understand-currentness/completions/<rc-id>/result.yaml
+.scaffold/runtime/understand-currentness/handoff.yaml
+```
+
+Completion receipts are supporting, not canonical. `handoff.yaml` is derived
+and non-authoritative. Fresh Agents reconstruct from canonical records plus
+current supporting heads. Repeated resume/understand against unchanged
+physical state is a no-op for new current-heads. Current-head publication uses
+expected-head-digest CAS and a local head lock so concurrent publishers cannot
+leave ambiguous current authority. `head.record_id` must name the snapshot
+identified by `head.locator`.
+
+Routing is reconstructed, not a global status collapse. Migration
+`RECOVERY_REQUIRED` outranks ordinary Develop/Submit continuation. Malformed
+canonical Task Book or Develop Session authority fail-closes to `human` before
+optimistic continuation. Multiple active Tasks without `task_id` return
+`human` rather than a guessed Task. Fresh resume routes from
+`continuable_ready_task_ids` (historical READY minus Tasks already consumed
+by proven S10 Change Record durability). It does not add a SUBMITTED Task
+status and does not mutate Task Books.
+
+Natural language such as “Continue this project.” maps to `refresh action=resume`.
+There is no fifth routing engine.
+
+See [P10_INCREMENTAL_MULTIAGENT.md](P10_INCREMENTAL_MULTIAGENT.md).
+
+
 ## Out of scope
 
-P6 Test, P7 Develop, and P8 Submit implementations are absent. Fixture D/T/S manifests exist only so a four-Skill release can be tested.
+P5 does not implement Test, Develop, or Submit product lifecycle. Those later implementation phases closed separately; later FA-2 corrections were applied in the current unreleased candidate. Fixture D/T/S manifests exist so a four-Skill release can be tested.

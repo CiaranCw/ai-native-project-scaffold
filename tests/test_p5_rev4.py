@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from typing import get_args
 
-from support import FIXTURE_DIST, REPO, adopt, engine, write
+from support import FIXTURE_DIST, REPO, adopt, apply_fresh_migration, engine, write
 from scaffold_p5.adoption import (
     persist_session,
     plan_from_dict,
@@ -364,11 +364,7 @@ class P5Rev4Tests(unittest.TestCase):
             action="migrate",
         )
         plan = preview.extras["migration_plan"]
-        migrated = engine(self.host, "2.1.0").run(
-            "compatibility",
-            action="migrate",
-            approval=self._migration_approval(plan),
-        )
+        migrated = apply_fresh_migration(self.host, plan)
         self.assertEqual(migrated.outcome, "COMPLETED")
         self.assertEqual(
             engine(self.host, "2.1.0").run("compatibility").compatibility,

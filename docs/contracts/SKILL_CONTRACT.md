@@ -388,15 +388,55 @@ This remains **two Skills**, not a `DevelopTest` Skill.
 
 Test results alone MUST NOT grant `TASK_COMPLETE`, `READY_FOR_REVIEW`, or `SUBMIT_AUTHORIZED` (P0/P3).
 
+Develop owns the distinct P3 Stage Completion Decisions and Task Completion
+Decision. They may reference P6 public Evidence but MUST NOT forge Test
+Evidence or treat `TEST_PASS` as either acceptance decision. Each decision
+and every resulting Task/Stage transition uses the canonical Task Book
+conditional-publication path.
+
+Task planned `requirement_id` and P6 Test `profile_id` are distinct
+identities. For a fresh executable profile to supply Evidence automatically,
+current Task authority MUST contain an explicit durable execution binding:
+
+```text
+Task requirement R → P6 Test profile P
+```
+
+Develop derives the nested invocation from that binding and carries explicit
+`requirement_id`→`profile_id` pairs plus selected profile IDs. Test executes
+profiles and returns public locator output whose resolution preserves each
+producing `profile_id`; Test does not decide that P satisfies R. Develop may
+attach a locator to R only when R's current binding names that resolved
+profile. Equal strings, list order, a sole selected result, or caller prose
+MUST NOT create the association. Without an explicit binding, fresh execution
+does not authorize automatic Task locator attachment.
+
+The binding is durably recoverable from the Task Book and is substantive Task
+authority. Changing it changes the P6 candidate. Result-side locator and
+observed-outcome publication is bounded Task control-plane progress. When the
+current Task's substantive projection is unchanged, those result fields are
+candidate-neutral. Authorized Scaffold publication of them still MUST use Task
+CAS. **candidate-equivalent != publication-authorized.** Legitimate HUMAN, CI,
+or EXTERNAL P6 Evidence may instead be cited by its explicit opaque locator
+without an automated profile binding.
+
 ### 16.2 Submit MUST NOT become Develop
 
 If Submit discovers an implementation defect, missing required project change, or substantive repair requirement:
 
 - Submit MUST NOT silently edit business/source content by switching itself into Develop
-- Submit blocks / returns a **repair handoff**
+- Submit blocks / returns a **repair handoff** with one or more explicit
+  `target_stage_ids` when the blocker deterministically maps to current Task
+  Stage authority
 - Develop (or Develop `repair`) → Test → Submit **re-enters** with a **new** candidate
 
 P8 implements this. P4 freezes the routing boundary.
+
+If Submit cannot deterministically map the blocker to a Stage, it MUST return
+an unresolved repair route rather than guess the first, last, or all Stages.
+For a READY Task, only a current, Task-bound, Stage-targeted
+`submit_to_develop` handoff permits P7 to atomically reopen the Task and exact
+target Stages. P8 does not write the Task Book.
 
 ### 16.3 Submit → Understand
 
@@ -412,11 +452,20 @@ Cross-Skill handoff MUST carry only needed engineering state. MUST NOT copy enti
 
 | From → To | Carries (conceptually) |
 | --- | --- |
-| Develop → Test | Test requirement + candidate / worktree context |
-| Test → Develop | Result / evidence references + failure / blocker |
+| Develop → Test | Explicit Task `requirement_id`→Test `profile_id` execution bindings, selected profile IDs, and candidate / worktree context |
+| Test → Develop | Producing profile identity + public Evidence locator references + result / failure / blocker |
 | Develop → Submit | READY_FOR_REVIEW Task + current candidate context |
 | Submit → Understand | Freshness / compatibility scope |
-| Submit → Develop | Repair requirement as **HANDOFF**, not silent nested source editing |
+| Submit → Develop | Repair requirement as **HANDOFF**: Task and candidate binding, blockers, explicit `target_stage_ids`, optional P6 Evidence refs, and non-escalating bounded capabilities |
+
+Candidate identity remains P6-owned. P7 and P8 consume P6's single
+content-deterministic semantic candidate projection; neither may invent a
+digest or trust a caller-provided identity. When current Task control-plane
+bytes leave the substantive Task authority projection unchanged, P6 candidate
+identity remains the same regardless of which process wrote those bytes. A
+source, project, configuration, or substantive Task authority mutation still
+changes the candidate. The complete real Diff remains visible to Submit in
+either case. Authorized Task publication still requires P3 CAS.
 
 ---
 

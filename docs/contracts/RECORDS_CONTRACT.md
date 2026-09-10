@@ -89,6 +89,10 @@ P3 fills filenames **inside** P2-reserved directories. It MUST NOT add another `
 | Change Record | `.scaffold/changes/<change-id>.yaml` | YES | YES after successful Submit-S10 durable finalization; candidate before S10 (same logical content) |
 | Develop Session | `.scaffold/runtime/develop-sessions/<develop-session-id>/` | NO — local | NO — temporary |
 | Adoption Session | `.scaffold/runtime/adoption-sessions/<adoption-session-id>/` | NO — local | NO — temporary |
+| Knowledge Assessment | `.scaffold/runtime/understand-assessments/<assessment-id>/assessment.yaml` | NO — local | NO — temporary supporting artifact; not a canonical development record |
+| Understanding currentness | `.scaffold/runtime/understand-currentness/<snapshot-id>/snapshot.yaml` | NO — local | NO — temporary supporting artifact; not a canonical development record |
+| Repair supporting state | `.scaffold/runtime/repair-state/<task-id>.yaml` | NO — local | NO — temporary supporting artifact; not a canonical development record |
+| Scenario-Aware Verification plan | `.scaffold/runtime/test-plans/<plan-id>/plan.yaml` | NO — local | NO — temporary supporting artifact; not a canonical development record |
 
 Develop Session directory (host, not this distribution repo):
 
@@ -106,6 +110,47 @@ Adoption Session directory:
 .scaffold/runtime/adoption-sessions/<adoption-session-id>/
 └── session.yaml          REQUIRED
 ```
+
+Knowledge Assessment directory (Understand-owned supporting artifact):
+
+```text
+.scaffold/runtime/understand-assessments/<assessment-id>/
+└── assessment.yaml       REQUIRED
+.scaffold/runtime/understand-assessments/heads/<binding-digest>/
+└── head.yaml             REQUIRED current-head for one (candidate, impact) binding
+```
+
+Knowledge Assessment is **not** a canonical development record. It is candidate-bound and impact-bound supporting authority for Submit-S4. Candidate + impact equality is not enough: S4 may use only the current-head Assessment whose published bytes still match the head integrity digest. A superseded locator MUST NOT be replayed.
+
+Understanding currentness directory (Understand-owned supporting artifact):
+
+```text
+.scaffold/runtime/understand-currentness/<snapshot-id>/
+└── snapshot.yaml         REQUIRED physical/module currentness snapshot
+.scaffold/runtime/understand-currentness/heads/project/
+└── head.yaml             REQUIRED current-head for project-scope understanding
+.scaffold/runtime/understand-currentness/completions/<completion-id>/
+├── completion.yaml       REQUIRED supporting refresh-completion receipt
+└── result.yaml           REQUIRED Understand refresh output binding
+.scaffold/runtime/understand-currentness/handoff.yaml
+                          OPTIONAL derived summary; not authority
+```
+
+Understanding currentness is **not** a canonical development record and is **not** a Knowledge Assessment. Observation of declared module physical digests and structural indexes decides the required refresh scope. A new current-head may become CURRENT only after Understand-produced supporting refresh-completion receipts bind that exact physical/output authority **and** current module knowledge bytes still match each bound `knowledge_digest`. `head.record_id` MUST identify the snapshot named by `head.locator`. A derived handoff summary MUST NOT be trusted when its locator/digest does not match the current-head snapshot. Missing currentness fails closed to `FULL_REFRESH_REQUIRED` / `UNKNOWN`. A review package that includes `completion.yaml` MUST also include referenced `result.yaml`.
+
+Scenario-Aware Verification directory (Test-owned supporting artifact):
+
+```text
+.scaffold/runtime/test-plans/<plan-id>/
+└── plan.yaml             REQUIRED supporting verification plan
+.scaffold/runtime/test-plans/heads/<task-id>/<requirement-id>/
+└── head.yaml             REQUIRED current-head for one Task requirement
+```
+
+Scenario-Aware Verification plans are **not** a canonical development record
+and are **not** a fifth Skill. They describe what a bound Test profile must
+prove for one Task requirement. Missing/stale/mismatched current-head fails
+closed.
 
 `runtime/` remains **local / temporary / non-authoritative** and SHOULD normally be SCM-ignored (P2). Sessions MUST NOT be treated as handoff knowledge.
 
@@ -246,7 +291,8 @@ A Task Book MUST be capable of representing the fields below. Illustrative names
 | `record_revision` | Stale-write guard (§31) |
 | `title` | Short label, separate from ID |
 | `goal` | This round’s full goal — **what we want** |
-| `acceptance` | Final Task-level acceptance condition — **how we know the whole Task is done**. MUST NOT store a redundant `acceptance_met` boolean. `READY_FOR_REVIEW` itself asserts that this declared acceptance is satisfied. |
+| `acceptance` | Human-readable final Task-level acceptance criterion — **how we know the whole Task is done**. It remains intent, not a DSL. |
+| `task_completion_decision` | Current structured, durable, candidate-bound P7 decision about whether the declared Task-level acceptance criterion is satisfied |
 | `baseline` | Repository/workspace baseline **against which the task was planned** (SCM-agnostic; not proof of a clean tree) |
 | `scope` | Declared intent: modules, paths/areas, include, exclude, concise notes |
 | `stages` | One or more stages; lightweight tasks use **exactly one** |
@@ -260,6 +306,40 @@ Durable association is one-way: **Change Record → Task Book(s)** via `task_boo
 MUST NOT embed: full Git/SCM diff, file copies, large logs, Test Evidence bodies, chat transcripts, Agent reasoning, Develop Session hashes, or Develop Session patches.
 
 `goal` and Task-level `acceptance` MUST remain distinct. For a lightweight one-stage task, Task-level `acceptance` MAY be one concise sentence and MAY intentionally align with the single Stage `acceptance`. Stage `acceptance` remains the per-stage condition (§8.4).
+
+### 8.1.1 Task Completion Decision
+
+The Task-level `acceptance` text remains human-readable intent and is not
+automatically satisfied by all Stage statuses or final Test results. The
+current `task_completion_decision` is the structured decision **about** that
+criterion. It is supporting Task Book authority, not a fifth Task status or a
+fourth canonical record.
+
+The mapping MUST represent:
+
+| Concept | Required semantics |
+| --- | --- |
+| `candidate_digest` | Actual candidate evaluated by the Task decision |
+| `outcome` | The same bounded decision enum: exactly `SATISFIED` \| `UNSATISFIED` \| `UNKNOWN` |
+| `basis` | Nonempty bounded list of current authoritative facts used for the decision |
+| `rationale` | Concise reconstructable explanation of why the basis supports the outcome |
+| `supersedes` | Optional fixed summary of a prior Task decision that is no longer current: prior candidate digest, outcome, and concise rationale |
+
+P7 owns the Task lifecycle/acceptance decision. Its basis MAY reference
+current repository and Task facts, current Stage Completion Decisions, P6
+Evidence locators, final Test Evidence, and legitimate human-observation
+Evidence. P6 remains sole owner of Test/Evidence truth.
+
+Hidden chat reasoning, raw Test Report mappings, uncited “the user said yes,”
+successful source writes, `TEST_PASS`, or `TEST_COMPLETE` alone are not
+durable Task-acceptance authority. If the declared Task criterion cannot be
+determined from current authoritative facts, the outcome MUST be `UNKNOWN`
+and `READY_FOR_REVIEW` is not legal.
+
+A Task Completion Decision is current only when its `candidate_digest`
+equals the actual candidate digest and every cited P6 Evidence locator
+resolves as authoritative for that candidate. A `SATISFIED` Task decision for
+C1 MUST NOT support `READY_FOR_REVIEW` for C2.
 
 ### 8.2 Baseline
 
@@ -298,16 +378,77 @@ Each Stage MUST be capable of:
 | `required_tests` | Planned test **references** for this stage |
 | `result_summary` | Concise outcome when available |
 | `evidence_refs` | Opaque locators; P6 owns Evidence |
+| `completion_decision` | Current structured, durable, candidate-bound P7 decision about whether this Stage's human-readable acceptance criterion is satisfied |
 
 A Stage MUST NOT become `COMPLETE` merely because its tests **executed**.
 
-Normal `COMPLETE` requires **all** of:
+The transition `IN_PROGRESS` → `COMPLETE` is legal only when all of the
+following hold for the actual candidate at publication:
 
-1. implementation / acceptance condition satisfied
+1. current Stage Completion Decision is `SATISFIED` for the actual candidate
 2. required Stage tests satisfy their **defined acceptance requirements**
 3. no unresolved required-test blocker for that Stage
 
 If required tests fail: the Stage remains non-complete. Develop ↔ Test continues. Typical status remains `IN_PROGRESS`. `BLOCKED` is for an external/human/policy stop, not the ordinary fail-and-fix loop.
+
+#### 8.4.1 Stage Completion Decision
+
+The Stage `acceptance` text remains human-readable intent. It is not a DSL and
+need not be reducible to an automated Test. A Stage Completion Decision is the
+structured decision **about** that criterion; it does not replace the
+criterion or create a fourth canonical record.
+
+The current `completion_decision` MUST be a mapping capable of representing:
+
+| Concept | Required semantics |
+| --- | --- |
+| `stage_id` | Exact target Stage identity; MUST match the containing Stage |
+| `candidate_digest` | Actual candidate evaluated by the decision |
+| `outcome` | Exactly `SATISFIED` \| `UNSATISFIED` \| `UNKNOWN` |
+| `basis` | Nonempty bounded list of authoritative facts used for the decision |
+| `rationale` | Concise reconstructable explanation of why the basis supports the outcome |
+| `supersedes` | Optional fixed summary of a prior decision that is no longer current: prior candidate digest, outcome, and concise rationale |
+
+Each basis item MUST name its kind and contain a concise summary. When the
+basis relies on Test, CI, external, or human-observation Evidence, it MUST
+carry the relevant opaque P6 `evidence_ref.locator`. Repository observations
+and current Task/Stage facts MAY be named directly when observable under
+Develop authority. Hidden chat memory, a raw Test Report mapping, or an
+uncited “the user said yes” statement is not a durable basis.
+
+P7 owns the lifecycle decision and publication. P6 remains the sole owner of
+Test execution, Evidence truth, locator schema, integrity, and resolution.
+P7 MUST NOT forge or reinterpret P6 Evidence. P8 does not decide Stage
+completion.
+
+`UNKNOWN` is distinct from `UNSATISFIED`. If authoritative facts cannot
+determine the criterion, the outcome MUST be `UNKNOWN`; the Stage MUST NOT
+become `COMPLETE`, and Develop routes to the applicable Test, human
+observation, Understand, or repair action. Subjective acceptance MAY become
+`SATISFIED` only after an existing legitimate P6 human-observation or other
+explicit control/Evidence path supplies the cited authority.
+
+#### 8.4.2 Candidate currentness and revalidation
+
+A Stage Completion Decision is current only when its `candidate_digest`
+equals the actual candidate digest at publication/use and every cited
+Evidence locator resolves as authoritative for that candidate. Chat or
+Session continuity does not establish freshness.
+
+A `SATISFIED` decision for C1 MUST NOT complete a Stage or support
+`READY_FOR_REVIEW` for C2. A successful source write, `TEST_PASS`, or
+`TEST_COMPLETE` alone is insufficient.
+
+A `COMPLETE` status records that Stage completion was validly established
+under §8.4 when that status was published; it does not assert that the stored
+decision remains current for every later candidate. A Stage MAY therefore
+remain `COMPLETE` while P7 re-evaluates and atomically publishes a replacement
+`SATISFIED` completion decision for C2. Until that publication, its stale C1
+decision is historical progress only and cannot support Task readiness. If
+re-evaluation for C2 is `UNSATISFIED` or `UNKNOWN`, P7 MUST atomically move
+the Stage to `IN_PROGRESS`, or to `BLOCKED` only when the existing
+external/human/policy-stop meaning applies. No `REVALIDATING` Stage state is
+introduced.
 
 ### 8.5 Planned tests vs TEST_COMPLETE
 
@@ -327,22 +468,158 @@ Unplanned / manual / external changes in the real Diff still count. If the devel
 
 P3 MUST NOT define Test Report / Evidence schema. P6 owns that.
 
-Task Book and Change Record MAY reference Test Evidence with an **opaque locator**:
+Each Task planned Test reference keeps its own `requirement_id`. That identity
+names the Task obligation; it is **not** a P6 Test profile identity.
+
+When P7 expects a fresh P6 Test profile execution to produce Evidence for the
+requirement, the Task reference MUST carry an explicit durable
+`execution_binding` before execution:
 
 ```yaml
 # CONTRACT EXAMPLE fragment
 required_tests:
-  - requirement_id: "stage-1/config-parse"
+  - requirement_id: "task-required/check-save"
+    execution_binding:
+      kind: test_profile
+      profile_id: "unit-save-check"
+```
+
+`execution_binding.kind` is `test_profile` and `profile_id` is the exact P6
+Test Contract profile selected to execute. The binding is Task-owned planned
+authority. Creating, removing, or changing it is a substantive requirement-plan
+mutation, not a lifecycle-result update. P7 MUST NOT infer this association
+from string equality, list position, the only selected profile, or caller
+prose.
+Without explicit current Task binding, matching names, selection order, or a
+sole result MUST NOT be used to guess the association.
+
+The Develop→Test handoff carries the exact
+`requirement_id`→`profile_id` pairs derived from current Task authority plus
+the selected profile identities. P6 does not decide that a profile proves a
+Task requirement. P6 preserves the producing `profile_id` in its report and
+public locator resolution. P7 MAY attach the returned locator only when its
+resolved producing profile matches the Task reference's explicit
+`execution_binding.profile_id`.
+
+After that explicit join, Task Book and Change Record MAY reference Test
+Evidence with an **opaque locator**:
+
+```yaml
+# CONTRACT EXAMPLE fragment
+required_tests:
+  - requirement_id: "task-required/check-save"
+    execution_binding:
+      kind: test_profile
+      profile_id: "unit-save-check"
     evidence_ref:
       locator: "opaque-p6-locator"
     observed_outcome: PASS
 ```
+
+The durable Task reference therefore lets a fresh Agent recover both the
+planned execution association and the exact Evidence proof without chat or a
+raw Test Report. `requirement_id` and `profile_id` MAY intentionally differ.
+No binding means a fresh profile execution supplies no automatic Task
+association, even if the strings happen to match; the requirement remains
+unresolved until explicit Task authority or an explicit legitimate Evidence
+locator exists. A wrong or mismatched binding cannot satisfy another
+requirement.
+
+Project-required Test profiles remain a separate obligation set derived from
+the Test Contract/project policy. They MUST NOT be collapsed into Task planned
+requirement identities. A Task requirement MAY instead cite legitimate P6
+HUMAN, CI, or EXTERNAL Evidence directly through its opaque locator where
+appropriate; no local automated profile or profile-ID equality is required.
 
 `observed_outcome` when present MUST be one of: `PASS` | `FAIL` | `NOT_EXECUTED` | `UNKNOWN`.
 
 MUST NOT copy full logs, screenshots, Evidence Bundles, or CI output into Task Book or Change Record.
 
 `WAIVED` / exception mechanics are **P8**. P3 MUST NOT invent a waiver that grants TEST_COMPLETE.
+
+### 8.7 P6 candidate projection and Task control-plane neutrality
+
+P6 owns one candidate identity and one public `candidate_digest`. P3 does not
+define a competing digest. To avoid a Task Book self-reference that cannot be
+represented, P6's candidate projection MUST treat Task Book content
+semantically rather than hashing every mutable Task byte without
+classification.
+
+For candidate currentness, the **substantive Task authority projection**
+includes at least:
+
+- record/schema/Task identity and creation identity
+- title, goal, Task acceptance, baseline, and scope
+- Stage identities, goals, and acceptance criteria
+- planned Stage/final `requirement_id` values
+- explicit `execution_binding` values and other requirement-plan authority
+
+Creating or removing a Task Book, or changing any projected fact above, changes
+the candidate. The following bounded control-plane facts MAY be omitted from
+the candidate-currentness projection:
+
+- `record_revision` and `updated_at`
+- Task and Stage progress `status`
+- `develop_session_ids` and concise progress/result summaries
+- result-side `evidence_ref`, `evidence_refs`, and `observed_outcome`
+- Stage `completion_decision` and Task `task_completion_decision`, including
+  bounded `supersedes`
+
+Those control-plane facts are omitted from candidate currentness whenever
+the **current** Task content's substantive Task authority projection is
+unchanged. P6 MUST NOT condition that omission on unverifiable historical facts
+such as which process wrote the identical current bytes. Identical current
+Task bytes MUST contribute the same candidate identity regardless of writer
+or publication path.
+
+P6 `candidate_digest` is content-deterministic. It answers what substantive
+project/Task candidate exists now. It is not a publication-provenance oracle
+and does not prove Task mutation authorization.
+
+§31 expected-revision atomic conditional publication remains mandatory for
+every authorized semantic Task mutation performed by Scaffold.
+**candidate-equivalent != publication-authorized.** A direct/manual/non-CAS
+write is not converted into an authorized P7 publication merely because it
+changes only candidate-neutral fields.
+
+A mutation that mixes a lifecycle update with goal, acceptance, scope,
+baseline, Stage plan, requirement identity, or execution-binding change is
+candidate-changing. Malformed or lifecycle-illegal content is not made
+authoritative by projection neutrality and MUST fail closed under Task
+schema and lifecycle authority, not by claiming the candidate digest knows
+the historical writer.
+
+This is **semantic currentness**, not a Diff exclusion, write permission,
+ownership permission, provenance proof, or Task lifecycle validation.
+Git status/Diff and no-SCM physical inventory continue to observe the complete
+Task Book bytes. Submit-S2/S3 may classify and review those changes, including
+unexpected or unattributed Task mutation. Arbitrary project/source/configuration
+content is never hidden by this Task-specific rule. Direct human or tool edits
+do not gain P7 Task publication authority merely because they touch a
+control-plane-shaped field.
+
+For Git, P6 keeps the repository revision, path/status observations, and real
+dirty-path facts, while the Task path's contribution to candidate identity uses
+the semantic Task authority projection. For no-SCM, the inventory keeps the
+Task path and file existence while using the same semantic projection for
+candidate identity. All non-Task files and all candidate-significant Task facts
+retain their ordinary candidate effect.
+
+Therefore a P6 report for substantive candidate C remains usable after a
+Task-only control-plane update whose current substantive projection is
+unchanged: fresh `observe_candidate` still yields C, whether those identical
+current bytes were published by P7 CAS or written by another process.
+Source/business/project mutation or a substantive Task authority mutation
+yields C2 and makes C Evidence stale. Stage/Task Completion Decisions bind
+to this same P6 digest. READY publication does not self-invalidate, while
+P8 still re-observes P6 candidate identity and the complete real Diff. The
+candidate remaining C does not prove the write was publication-authorized.
+
+This rule is independent of the FA2-FND-001 reviewed-candidate C versus S9
+finalization-candidate F distinction. C/F describes the permitted deterministic
+Finalization Bundle after review. Task control-plane neutrality defines the
+single P6 candidate projection before and during Develop/Submit currentness.
+It neither enlarges the S9 exception nor weakens C/F.
 
 ---
 
@@ -355,7 +632,7 @@ Frozen Stage states (exactly these four):
 | `PENDING` | Not started |
 | `IN_PROGRESS` | Implementation and/or Develop ↔ Test underway |
 | `BLOCKED` | Cannot continue without external/human/policy resolution beyond the ordinary test-fail-fix loop |
-| `COMPLETE` | §8.4 completion conditions hold |
+| `COMPLETE` | Stage completion was validly established under §8.4 when published; current-candidate readiness MAY require §8.4.2 revalidation |
 
 MUST NOT explode into dozens of Stage states.
 
@@ -376,9 +653,66 @@ MUST NOT persist `SUBMITTED` (or equivalent) as a Task status that would be writ
 
 Successful submission is established through a **durably finalized Change Record + the host’s authoritative S10 success evidence**, not by pre-writing submitted into the Task Book.
 
-If work continues after `READY_FOR_REVIEW` and before a durable Change Record exists, `status` MUST return to `IN_PROGRESS` until §11 holds again.
+If work continues after `READY_FOR_REVIEW` and before a durable Change Record exists, `status` MUST return to `IN_PROGRESS` until §11 holds again. For a Submit-requested repair, this transition is legal only through the explicit Stage-targeted protocol in §10.1.
 
 `CANCELED` is explicit. Canceled tasks MUST NOT be treated as READY_FOR_REVIEW. Associated OPEN Sessions MUST NOT be silently deleted; see §28.
+
+### 10.1 Stage-targeted READY repair
+
+A bounded `submit_to_develop` repair handoff for a
+`READY_FOR_REVIEW` Task MUST carry:
+
+- `kind: submit_to_develop`
+- the exact `task_id`
+- the current `candidate_digest`
+- a nonempty list of blocker facts
+- a nonempty `target_stage_ids` list
+- optional P6 Evidence refs
+- bounded capabilities that do not grant Commit, Push, or submission authorization
+
+P8 MAY name a target Stage only when the blocker deterministically maps to
+current Task Stage authority, such as a Stage-required Test failure, an
+explicit Stage-scoped acceptance blocker, or a source/structural blocker with
+an authoritative Task-to-Stage mapping. If no deterministic mapping exists,
+P8 MUST return unresolved repair routing; it MUST NOT guess the first, last,
+or all Stages.
+
+Given a matching Task, current candidate, existing target Stage identities,
+and expected Task revision N, P7 MAY atomically publish:
+
+```text
+Task READY_FOR_REVIEW → IN_PROGRESS
+each target Stage COMPLETE → IN_PROGRESS
+revision N → N+1
+```
+
+This is not generic READY reopening authority. A stale, malformed,
+wrong-Task, candidate-mismatched, empty-target, nonexistent-target, or
+capability-escalating handoff MUST NOT mutate the Task or any Stage. P8 does
+not write or reopen the Task; P7 consumes the handoff and uses §31 conditional
+publication.
+
+On target-Stage reopen, the prior current `SATISFIED` completion decision
+MUST cease to be current authority. The same atomic publication replaces it
+with an `UNKNOWN` repair-reopen decision and records the fixed `supersedes`
+summary of the prior decision. This preserves that the Stage was complete for
+C1 while making clear that the old decision cannot prove the repair
+lifecycle or a later C2.
+
+The same reopen publication MUST replace the current
+`task_completion_decision` with an `UNKNOWN` repair-reopen Task decision and
+MAY retain its bounded `supersedes` summary. Thus the old C1 Task decision
+cannot immediately restore READY before repair and current-candidate
+re-evaluation.
+
+A later Agent MUST be able to reconstruct the open Repair from the Task Book
+and project-local supporting state without chat history. Temporary Repair
+coordination MAY live at `.scaffold/runtime/repair-state/<task-id>.yaml`.
+That file is not a fourth canonical development record.
+
+P8 MAY name a target Stage only when the blocker deterministically maps
+through current Task `execution_binding.kind: test_profile`. Equal
+requirement and profile names MUST NOT manufacture that mapping.
 
 ---
 
@@ -392,17 +726,35 @@ For a standard Task Book:
 TASK_COMPLETE  =  all required Task stages are COMPLETE
 ```
 
-TASK_COMPLETE alone does **not** imply: final task-level tests accepted; TEST_COMPLETE; Structural Review pass; submission authorization; S10 readiness.
+`TASK_COMPLETE` is only the structural aggregation of required Stage status
+values. Because a Stage may remain `COMPLETE` while its prior decision is
+stale under §8.4.2, TASK_COMPLETE alone does **not** imply current-candidate
+Stage acceptance, current Task acceptance, `READY_FOR_REVIEW`, final
+task-level tests accepted, TEST_COMPLETE, Structural Review pass, submission
+authorization, or S10 readiness.
 
 **READY_FOR_REVIEW** (persisted Task `status`) requires:
 
 ```text
 all stages COMPLETE
++ every Stage completion_decision is SATISFIED and current for the actual candidate
 + task-level final required tests satisfy their defined acceptance conditions
-+ the Task Book’s declared Task-level acceptance is satisfied
++ task_completion_decision is SATISFIED and current for the actual candidate
++ no unresolved required blocker
 ```
 
-MUST NOT mark `READY_FOR_REVIEW` merely because final tests **ran**. MUST NOT persist a separate `acceptance_met` flag; `READY_FOR_REVIEW` itself asserts that the declared Task-level `acceptance` is satisfied.
+MUST NOT mark `READY_FOR_REVIEW` merely because final tests **ran** or because
+all Stage decisions and final Tests are satisfied while the current Task
+Completion Decision is `UNKNOWN` or `UNSATISFIED`. MUST NOT persist a
+redundant `acceptance_met` boolean; the structured
+`task_completion_decision` supplies reconstructable Task-acceptance authority.
+
+Every Stage decision relied upon for READY, including a
+non-target Stage left `COMPLETE` during repair, MUST be current for the actual
+candidate. A non-target Stage need not be blindly reopened, but its stale C1
+decision cannot support READY on C2; P7 must revalidate it under §8.4.2 or
+keep the Task non-ready. The Task Completion Decision must likewise be
+re-established as current and `SATISFIED` for C2.
 
 READY_FOR_REVIEW is **not** submit authorization and MUST NOT start S10 durable finalization or Push (Constitution).
 
@@ -840,12 +1192,14 @@ Preserve P0/P2 exactly. Do **not** add a Submit stage. Distinguish:
 | Term | Meaning |
 | --- | --- |
 | **REVIEWED CANDIDATE DIFF** | The real project/change-set reviewed through Submit-S3/S4/S5/S6 (and the Submit-S8 loop if needed). This is the **input** to Submit-S9. |
-| **S10 FINALIZATION CANDIDATE** | That reviewed candidate **plus** the deterministic Submit-S9 Change Record artifact/content in the representation P8 will durably finalize. On SCM hosts this is the Commit candidate tree. |
+| **S9 FINALIZATION BUNDLE** | The exact deterministic Change Record plus zero or more deterministic support artifacts required solely to keep durable references in that Change Record resolvable after ordinary runtime expiry. |
+| **S10 FINALIZATION CANDIDATE** | The reviewed candidate **plus** the permitted S9 Finalization Bundle in the representation P8 will durably finalize. On SCM hosts this is the exact Commit candidate tree. |
 
 ```text
 REVIEWED CANDIDATE DIFF
   → Submit-S9 finalize Change Record into .scaffold/changes/
-  → S10 FINALIZATION CANDIDATE = reviewed candidate + that artifact
+  → authority owner materializes any required deterministic support artifacts
+  → S10 FINALIZATION CANDIDATE = reviewed candidate + exact bundle
   → Submit-S10 Commit / Durable Finalization
 ```
 
@@ -853,11 +1207,40 @@ MUST NOT create the Change Record **after** S10.
 
 The Change Record `path_summary` describes the **REVIEWED CANDIDATE DIFF**. It MUST NOT recursively include itself.
 
-Any Submit-S9 mutation **other than** that expected deterministic Change Record finalization is **not** silently exempt from candidate-bound review. Submit-S9 MUST NOT mutate Task Books (see §28.3).
+Support artifacts in the S9 Finalization Bundle are not canonical development
+records. Each support artifact MUST:
+
+- be deterministically derivable from authority or Evidence already validated
+  before S6 and from the exact durable references selected for the Change
+  Record
+- add no business/source intent or substantive result not present in that
+  reviewed truth
+- be necessary for durable resolution of a reference in that exact Change
+  Record
+- be materialized by the phase that owns its schema, storage, and resolution
+- occupy an already-authorized durable project boundary and satisfy its
+  existing ownership rules
+- preserve the candidate binding, provenance, and integrity required by its
+  owning phase
+- be included in the exact S10 finalization candidate
+
+For P6 Test Evidence, P8 MAY request materialization using validated opaque
+Evidence references. P6 owns the physical representation and public resolver;
+P8 MUST NOT construct Test Evidence storage internals. The Change Record MUST
+use the public P6 locator protocol. P6 MUST retain only the minimal
+report/Evidence/integrity material required for durable resolution, and the
+locator MUST remain P6-resolvable without `.scaffold/runtime/`.
+
+The permitted Finalization Bundle is the only additional S9 exception. Any
+Submit-S9 mutation outside that exact deterministic bundle, or any support
+content that cannot be deterministically derived as required above, is **not**
+exempt from candidate-bound review and MUST return through S3–S6. Submit-S9
+MUST NOT mutate Task Books (see §28.3).
 
 If the reviewed candidate **materially** changes before retry (including after Submit-S7/S8 sync): the Change Record MUST be regenerated or revalidated **before** the next S10 attempt. A Change Record describing Candidate A MUST NOT be durably finalized with Candidate B.
 
-If only the S10 attempt failed and the candidate record representation is unchanged: the same candidate record MAY be retried.
+If only the S10 attempt failed and the candidate record and support-artifact
+representations are unchanged: the same Finalization Bundle MAY be retried.
 
 ---
 
@@ -867,8 +1250,8 @@ Publication is **contextual**. There is no second operation solely to flip a sta
 
 | Context | Meaning |
 | --- | --- |
-| S9-finalized record exists but authoritative S10 success has **not** occurred | **Candidate** Change Record |
-| The same S9-finalized logical content/representation is included in a **successful** S10 durable finalization | **Durable as-built** Change Record |
+| S9 Finalization Bundle exists but authoritative S10 success has **not** occurred | **Candidate** Change Record and candidate-only support artifacts |
+| The same S9-finalized logical content/representation is included in a **successful** S10 durable finalization | **Durable as-built** Change Record and durable referenced support artifacts |
 
 **“Same bytes”** means the exact Change Record content representation **selected/staged for the SCM commit after** repository-configured normalization / clean filtering (P2 already recognizes CRLF/LF and repository text policy).
 
@@ -880,15 +1263,34 @@ It does **not** require raw Windows working-tree bytes to equal the committed bl
 | SCM without such filtering | The finalized serialized record bytes |
 | No SCM | The project-defined finalized record representation (P8) |
 
-The candidate Change Record MUST NOT be rewritten after S10 merely to become “submitted.” MUST NOT invent a second post-finalization record mutation. This contract does **not** design Git-specific runtime filtering or the no-SCM publication mechanism.
+The candidate Change Record or support artifacts MUST NOT be rewritten after
+S10 merely to become “submitted” or “durable.” MUST NOT invent a second
+post-finalization mutation. This contract does **not** design Git-specific
+runtime filtering or the no-SCM publication mechanism.
 
-If S10 fails or is interrupted: the record remains a candidate. MUST NOT be described as successfully submitted history.
+If S10 fails or is interrupted: the record and prepared support artifacts
+remain candidate-only. They MUST NOT be described as successfully submitted
+history or durable Evidence, and deterministic cleanup or recovery is
+required. Temporary coordination state MAY live under `.scaffold/runtime/`,
+but it is not durable Evidence authority.
 
 This avoids lying if durable finalization fails, avoids a self-referential Commit SHA on SCM hosts, and avoids a second content mutation after S10.
 
-For an SCM host with Commit capability, S10 success is the successful Commit containing the finalized record representation. For a no-SCM host, S10 success is a P8-defined **atomic or conflict-detectable durable finalization/publication** of that candidate. It MUST be durably distinguishable after restart, MUST NOT pretend a Git/SCM Commit occurred, and MUST NOT create false submitted history on failure or interruption. P8 owns the concrete recoverable success marker/publication mechanism.
+For an SCM host with Commit capability, S10 success is the successful Commit
+containing the exact Finalization Bundle. A Change Record that points to a
+tracked support artifact absent from that Commit tree is not validly
+finalized. For a no-SCM host, S10 success is a P8-defined **atomic or
+conflict-detectable durable finalization/publication** of the same logical
+bundle. It MUST be durably distinguishable after restart, MUST NOT pretend a
+Git/SCM Commit occurred, and MUST NOT create false submitted history on
+failure or interruption. P8 owns the concrete recoverable success
+marker/publication mechanism.
 
-Before S10 success, the record remains candidate/not-yet-durable as-built history. After S10 success, the same S9-finalized logical content becomes durable as-built history; no second content rewrite is required. Session cleanup follows that successful durable finalization, not Push and not an invented revision.
+Before S10 success, the bundle remains candidate/not-yet-durable. After S10
+success, the same S9-finalized logical content becomes durable as-built history
+and referenced durable support; no second content rewrite is required.
+Session cleanup follows that successful durable finalization, not Push and not
+an invented revision.
 
 ---
 
@@ -1051,7 +1453,7 @@ MUST NOT silently delete an active/recoverable adoption state.
 
 ## Migration Execution operational artifact
 
-A migration MAY use a bounded operational **Migration Execution** artifact/session so P5 can reason about interruption after Apply begins. It is **not** a fourth canonical development record, not a Change Record replacement, and not development handoff history. P5 owns its exact path/schema and runtime use; any representation MUST remain within P2-approved storage/ownership boundaries and survive process restart while recovery may be required.
+A migration MAY use a bounded operational **Migration Execution** artifact/session so P5 can reason about interruption after Apply begins. It is **not** a fourth canonical development record, not a Change Record replacement, and not development handoff history. P5 owns its exact path/schema and runtime use; fresh persistent Migration application MUST be initiated through Task-bound Develop authority without creating a Migration Record. Understand compatibility may plan and route, and MUST resume an already-begun Execution through P5 recovery. It MUST NOT start a fresh persistent apply from Plan-only approval. Develop application of that Plan is Task-bound: the human approval MUST name the exact `plan_id`, `plan_digest`, `task_id`, `task_revision`, and current `candidate_digest`. The Execution MAY record a supporting `develop_binding` for recovery inspection. It remains an operational artifact, not Task Book / Develop Session / Change Record / Migration Record authority. Any representation MUST remain within P2-approved storage/ownership boundaries and survive process restart while recovery may be required.
 
 Minimum representation obligations:
 
@@ -1104,7 +1506,7 @@ The artifact MUST be retained while interruption/recovery reasoning is required 
 | --- | --- | --- |
 | Task Book → Develop Session | Temporary operational / advisory | MUST NOT be required for interpretation, including after Session cleanup |
 | Change Record → Task Book | Durable (the only durable association direction) | Task IDs remain; Task files remain historical |
-| Change Record → Test Evidence | Durable / externally resolvable as P6 defines | Opaque locator; P6 resolution |
+| Change Record → Test Evidence | Durable / externally resolvable as P6 defines | Opaque locator; P6 resolution remains possible after ordinary `.scaffold/runtime/` expiry |
 | Change Record → Develop Session | MUST NOT require Session survival | Compact summary only |
 
 Cross-record references MUST be stable, explicit, and non-circular where practical.
@@ -1112,6 +1514,13 @@ Cross-record references MUST be stable, explicit, and non-circular where practic
 Change Record MUST NOT require Develop Session directories to survive.
 
 Task Book MUST NOT require deleted Sessions to survive after submission.
+
+A durable Change Record's P6 Evidence locator MUST NOT require its originating
+`.scaffold/runtime/test-runs/` directory to survive. The S9 Finalization Bundle
+MUST contain the minimal deterministic P6-owned durable representation required
+to preserve candidate binding, provenance, integrity, and resolution. It MUST
+NOT copy full logs or Evidence bodies into the Change Record, and it does not
+promote Test Report to a canonical development record.
 
 A later Agent with durably finalized `tasks/` + `changes/` and the host’s authoritative S10 success evidence MUST be able to interpret intent vs as-built **without** `runtime/`.
 
@@ -1215,9 +1624,9 @@ MUST NOT silently clean history. MUST NOT accumulate unbounded session logs (Con
 | **P3** (this contract) | Data/lifecycle contracts: schemas, IDs, states, provenance classes, cleanup invariants, candidate/durable publication |
 | **P4** | Skill package, Skill routing, Rule loading, `skills.lock` contents, compatibility/migration protocol |
 | **P5** | Adoption execution, Understand Full / Refresh / Compatibility, Adoption Session **operational use**, Migration Execution operational use |
-| **P6** | Test Report/Evidence schema, test execution, Test Matrix, evidence storage/resolution, native tests, Game Legibility runtime |
+| **P6** | Test Report/Evidence schema, test execution, Test Matrix, Evidence storage/resolution, and deterministic materialization of minimal durable Test support artifacts requested through validated opaque references |
 | **P7** | Task-driven Develop behavior; creating/updating Task Books in practice; creating/sealing Develop Sessions; Repair Mode |
-| **P8** | Observed-S2; provenance classification **execution**; Structural Review; Knowledge Consistency; Test Completeness; candidate-bound human authorization; Change Record finalization; SCM Commit or no-SCM durable finalization; optional Push; Session cleanup |
+| **P8** | Observed-S2; provenance classification **execution**; Structural Review; Knowledge Consistency; Test Completeness; candidate-bound human authorization; Change Record and Finalization Bundle orchestration; SCM Commit or no-SCM durable finalization; optional Push; Session cleanup |
 
 P3 MUST NOT implement those runtimes.
 
@@ -1287,6 +1696,17 @@ stages:
       - requirement_id: save/write-checksum
         evidence_ref: { locator: "opaque-p6-locator-1" }
         observed_outcome: PASS
+    completion_decision:
+      stage_id: stage-1
+      candidate_digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      outcome: SATISFIED
+      basis:
+        - kind: repository_observation
+          summary: Header writer emits the required checksum field.
+        - kind: test_evidence
+          summary: Required checksum-write verification passed.
+          evidence_ref: { locator: "opaque-p6-locator-1" }
+      rationale: Current implementation observation and required P6 Evidence satisfy this Stage.
     result_summary: Header writer emits checksum.
   - stage_id: stage-2
     goal: Verify checksum on load.
@@ -1339,7 +1759,28 @@ stages:
       - requirement_id: config/app-yaml-parse
         evidence_ref: { locator: "opaque-p6-locator-3" }
         observed_outcome: PASS
+    completion_decision:
+      stage_id: stage-1
+      candidate_digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      outcome: SATISFIED
+      basis:
+        - kind: repository_observation
+          summary: Current config contains the corrected display name.
+        - kind: test_evidence
+          summary: Current config parse verification passed.
+          evidence_ref: { locator: "opaque-p6-locator-3" }
+      rationale: The observed correction and P6 Evidence satisfy the Stage criterion.
     result_summary: Typo corrected; parse check passed.
+task_completion_decision:
+  candidate_digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  outcome: SATISFIED
+  basis:
+    - kind: stage_decisions
+      summary: Every required Stage decision is current and SATISFIED.
+    - kind: final_test_evidence
+      summary: Current final configuration verification passed.
+      evidence_ref: { locator: "opaque-p6-locator-3" }
+  rationale: Current Stage and final Evidence satisfy the declared Task acceptance.
 final_tests:
   - requirement_id: config/app-yaml-parse
     evidence_ref: { locator: "opaque-p6-locator-3" }
@@ -1494,7 +1935,7 @@ Contract-level behavior. No fixtures.
 
 | Case | Behavior |
 | --- | --- |
-| **A** Simple one-stage typo/config task | Same Task Book schema; one Stage; small scope; Task-level `acceptance` MAY match the Stage `acceptance`; READY_FOR_REVIEW only after that Stage COMPLETE, planned final tests meet acceptance, and Task-level `acceptance` is satisfied. |
+| **A** Simple one-stage typo/config task | Same Task Book schema; one Stage; small scope; Task-level `acceptance` MAY match the Stage `acceptance`, but the two decisions remain distinct. READY_FOR_REVIEW requires that Stage COMPLETE with a current `SATISFIED` Stage decision, planned final tests accepted, and a current `SATISFIED` Task Completion Decision. |
 | **B** Multi-stage feature task | Ordered stages; a later Stage MAY stay PENDING while earlier work is IN_PROGRESS; TASK_COMPLETE only when **all** required stages COMPLETE. |
 | **C** Stage test fails, later passes | Failed required test ⇒ Stage stays non-complete (typically IN_PROGRESS). After fix + tests meet acceptance ⇒ Stage MAY become COMPLETE. Execution alone never completes the Stage. |
 | **D** All stages complete but final tests fail | TASK_COMPLETE holds; `status` MUST NOT become READY_FOR_REVIEW; remain in Develop ↔ Test. |
@@ -1525,6 +1966,60 @@ Contract-level behavior. No fixtures.
 | **AC** Unplanned extra file neither Session-covered nor clearly pre-existing | UNATTRIBUTED. Insufficient S0/S1 boundary evidence to prove PREEXISTING or POST. Still part of actual Diff. Not an error. Timestamps/mtimes alone MUST NOT promote it to POST. |
 | **AD** Task Book says tests complete but actual Diff adds another module | Planned Task tests ≠ TEST_COMPLETE. Submit derives required tests from actual Diff + `tests.yaml` + Task Book + policy. Extra module still requires its tests. |
 | **AE** Migration Apply interrupted after persistent mutation begins | Retain Migration Execution checkpoints; use RECOVERY_REQUIRED unless safe completion or coherent reversion is proven. Resume only from a provable approved checkpoint/prefix. Unexpected divergence invalidates approval applicability and requires re-evaluation, updated plan, and human re-approval. |
+| **FND-E01** Deterministic P6 support required by an exact Change Record reference | Minimal support derived solely from pre-S6 validated Evidence MAY join the S9 Finalization Bundle without a second S6 approval. |
+| **FND-E02** S9 writes unrelated source, business, or configuration content | Outside the Finalization Bundle exception. Prior authorization is invalid; return through S3–S6. |
+| **FND-E03** Proposed support bytes are not deterministically derivable from validated Evidence and exact Change Record references | Outside the exception; re-review and current authorization are required. |
+| **FND-E04** Git S10 Commit omits a tracked support artifact referenced by the Change Record | The exact bundle was not finalized; fail closed. |
+| **FND-E05** S10 fails or is interrupted after support preparation | Support remains candidate-only, is not durable historical Evidence, and requires deterministic cleanup or recovery. |
+| **FND-E06** Runtime Test-run expires after durable S10 | The Change Record's public P6 locator remains resolvable from the minimal durable support representation. |
+| **FND-E07** Finalization Bundle is introduced | Exactly three canonical records, four Skills, S1–S12, one candidate-bound S6 authorization, and the existing ownership modes remain unchanged. |
+| **FND2-E01** Normal completion on candidate C | Current authoritative basis plus satisfied required Stage Test Evidence permits P7 to publish `IN_PROGRESS` → `COMPLETE` only with a `SATISFIED` decision for C through Task CAS. |
+| **FND2-E02** Test passes while Stage acceptance is unknown | `TEST_PASS` is not acceptance; decision remains `UNKNOWN` and the Stage does not become `COMPLETE`. |
+| **FND2-E03** Acceptance appears satisfied but a required Test fails | Required `FAIL` prevents Stage completion even when the completion decision is `SATISFIED`. |
+| **FND2-E04** Completion decision is `SATISFIED` for C1 and candidate becomes C2 | The C1 decision is stale and cannot prove C2 Stage completion or Task readiness. |
+| **FND2-E05** Subjective acceptance lacks human-observation authority | Decision is `UNKNOWN`; after valid P6 human-observation Evidence, P7 may represent a candidate-bound `SATISFIED` decision that cites its locator. |
+| **FND2-E06** Every Stage is complete/current for C and final obligations hold | P7 may publish Task `IN_PROGRESS` → `READY_FOR_REVIEW` through §31 CAS only when every Stage decision and the Task Completion Decision are current/`SATISFIED` for C and final Task Test obligations are satisfied. If the Task decision is `UNKNOWN`, READY is forbidden even when all Stage decisions and final Tests are satisfied. This grants no Submit authorization. |
+| **FND2-E07** READY Task receives a valid current Stage-targeted Submit repair handoff | P7 may atomically publish Task `READY_FOR_REVIEW` → `IN_PROGRESS`, target Stage `COMPLETE` → `IN_PROGRESS`, and supersede the old decision. |
+| **FND2-E08** READY repair handoff has no deterministic Stage target | No Stage is guessed and no reopen occurs; routing remains explicitly unresolved. |
+| **FND2-E09** Repair handoff has wrong Task, stale candidate, nonexistent target, malformed shape, or elevated capabilities | No Task or Stage mutation occurs. |
+| **FND2-E10** Repair changes C1 to C2 | C1 Stage/Task decisions and Evidence cannot immediately restore READY; every relied-upon Stage decision and the Task Completion Decision must be current/`SATISFIED` for C2 and other current C2 obligations must be established. |
+| **FND2-E11** A non-target Stage remains `COMPLETE` with a C1 decision | Its status records valid historical completion, but Task cannot return READY on C2 until P7 publishes a current C2 `SATISFIED` Stage decision or legally reopens/blocks that Stage, and the Task Completion Decision is also current/`SATISFIED` for C2. |
+| **FND2-E12** FA2-FND-002 taxonomy and authority | Exactly three canonical development records, four Skills, unchanged four-value Task/Stage state sets, S1–S12, P3 CAS, P6 Evidence ownership, P7 Task mutation, P8 non-Task-write authority, and no new Submit authorization remain invariant. |
+| **FND3-E01** A `SATISFIED` Completion Decision for substantive candidate C is stored in its containing Task Book | The current Task content's substantive authority projection is unchanged, so the single P6 candidate remains C and the stored decision does not immediately stale itself. Remaining on C does not prove the write was P3/P7 CAS-authorized. |
+| **FND3-E02** Source/business content changes after Test or completion | The substantive candidate changes C→C2; old C Evidence and Completion Decisions are stale and cannot support completion or READY on C2. |
+| **FND3-E03** Task acceptance, scope, baseline, Stage plan, requirement identity, or execution binding changes | This is a substantive Task authority change, not neutral lifecycle metadata. The P6 candidate changes and old candidate-bound authority cannot be reused. |
+| **FND3-E04** Task `READY_FOR_REVIEW` and current decisions are stored without changing substantive Task authority | READY publication is representable: the current content remains on the same substantive candidate C and does not create impossible self-staleness. Remaining on C does not prove the write was P3/P7 CAS-authorized. |
+| **FND3-E05** A candidate-neutral Task control-plane byte change exists in the Task Book | Git/no-SCM physical observation and Submit real Diff still see the complete change; neutrality affects only P6 candidate currentness, not review/provenance visibility, write permission, or publication authorization. |
+| **FND3-E06** Task requirement `task-required/check-save` explicitly binds `test_profile: unit-save-check` | P7 may execute `unit-save-check` and attach only a P6 locator whose resolution preserves producing profile `unit-save-check` to that exact Task requirement; different IDs are expected and legal. |
+| **FND3-E07** A fresh Test execution has no explicit Task execution binding | P7 does not attach a locator by equal names, sole-result inference, list order, or guessing; the Task requirement remains unresolved unless it already has an explicit legitimate Evidence locator. |
+| **FND3-E08** An explicit binding names the wrong profile or its locator resolves to another profile | The mismatch cannot satisfy that requirement or any other requirement. |
+| **FND3-E09** Project policy requires profile P while a Task declares requirement R | P and R remain separate obligation sets. Project profile completion does not erase or rename Task requirement R, and R does not redefine project-required profile P. |
+| **FND3-E10** A Task requirement is satisfied by legitimate HUMAN, CI, or EXTERNAL P6 Evidence | The explicit opaque P6 locator may prove the requirement without a local automated profile binding or any requirement/profile string-equality rule. |
+| **FND3-R01** Final Task bytes X are identical after P7 CAS publication and after a direct non-CAS write of the same bytes | P6 candidate identity is content-deterministic and remains the same; candidate neutrality is not conditioned on post-hoc writer/process knowledge. P3 CAS remains mandatory for authorized Task publication. **candidate-equivalent != publication-authorized.** Complete physical Diff remains visible. Substantive Task mutation remains candidate-changing. |
+| **FND4-E01** Structural impact + no Knowledge Assessment | S4 is not PASS and routes to Understand. |
+| **FND4-E02** SATISFIED assessment for current candidate C and exact impact I | S4 may PASS. |
+| **FND4-E03** Assessment for C1 used after candidate becomes C2 | The C1 assessment is stale and cannot support C2. |
+| **FND4-E04** Assessment candidate current but impact digest differs | blocked; old impact binding is unusable. |
+| **FND4-E05** Assessment covers only a subset of required impacts | not PASS. |
+| **FND4-E06** Assessment outcome UNKNOWN | blocked / Understand route; UNKNOWN remains UNKNOWN. |
+| **FND4-E07** Assessment outcome NEEDS_HUMAN | explicit human blocker; S4 not PASS. |
+| **FND4-E08** Runtime Knowledge Assessment artifact exists | P6 candidate digest is unchanged; the artifact is excluded through existing runtime exclusion. |
+| **FND4-V01** Live Understand identity after FND-004 | The live package is no longer released `understand@2.0.0`; it is candidate `understand@2.1.0`. |
+| **FND4-V02** SKILL.md and skill.yaml identity | They agree; the package remains VALID. |
+| **FND4-V03** Live Understand package validation | VALID. |
+| **FND4-V04** Established host expecting released Understand `2.0.0` | Live `2.1.0` evaluates `COMPATIBLE`, not `EXACT`; actual version is surfaced; `skills.lock` is unchanged. |
+| **FND4-V05** Pre-adoption Bootstrap | Exact release-pinned Understand remains required; live `2.1.0` is not pre-lock compatible substitution. |
+| **FND4-V06** Released `understand@2.0.0` | Does not represent FND-004 Knowledge Assessment / current-head semantics. |
+| **FND4-C01** SATISFIED Assessment A then UNKNOWN B for the same C/I; Submit supplies A | A is superseded; S4 is not PASS. |
+| **FND4-C02** Same setup; Submit supplies B | Outcome remains UNKNOWN; S4 is not PASS. |
+| **FND4-C03** UNKNOWN A then SATISFIED B for the same C/I | B is current and may PASS; A remains superseded. |
+| **FND4-C04** No explicit locator | P8 resolves the current head only and MUST NOT scan timestamps or record ids. |
+| **FND4-C05** Historical artifacts exist but current head is missing or broken | UNKNOWN; P8 does not guess an Assessment. |
+| **FND4-C06** Assessment bytes change after current-head publication while remaining schema-valid | Integrity mismatch; S4 is not PASS. |
+| **FND4-C07** Current-head for C1 then candidate becomes C2 | The C1 head is stale and cannot PASS. |
+| **FND4-C08** Candidate stays C; S3 impact set changes I1 → I2 | The I1 head cannot support I2. |
+| **FND4-C09** Current-head runtime metadata is published or updated | P6 candidate digest is unchanged. |
+| **FND4-C10** A later process reads project-local runtime state | It recovers the same current Assessment authority. |
 
 ---
 
@@ -1549,7 +2044,7 @@ Agents implementing later phases MUST preserve:
 | M | No “human change” attribution is inferred |
 | N | Human-only work can Submit with no Task/Session |
 | O | Task Book planned tests do not equal TEST_COMPLETE |
-| P | READY_FOR_REVIEW requires final task tests accepted and declared Task-level acceptance satisfied |
+| P | READY_FOR_REVIEW requires current `SATISFIED` Stage and Task Completion Decisions plus accepted final Task tests |
 | Q | Failed required tests do not complete a Stage |
 | R | Simple task stays lightweight using the same schema |
 | S | Multiple Sessions compose deterministically |
@@ -1567,3 +2062,59 @@ Agents implementing later phases MUST preserve:
 | AE | No-SCM has durable S10 success semantics without pretending an SCM Commit |
 | AF | Migration interruption retains bounded recovery checkpoints without becoming a canonical development record |
 | AG | P4–P8 runtimes are not specified as implementations here |
+| AH | Only the exact deterministic S9 Finalization Bundle is exempt from a second candidate review |
+| AI | Durable P6 Evidence references remain resolvable after ordinary runtime expiry |
+| AJ | Finalization support artifacts remain non-canonical and preserve existing Skill, stage, authorization, and ownership boundaries |
+| AK | `TASK_COMPLETE` is structural Stage-status aggregation; current Stage/Task decision authority is additionally required for READY |
+| AL | P6 owns one content-deterministic semantic candidate projection; current Task control-plane bytes with unchanged substantive projection do not self-invalidate candidate identity, but do not prove publication authorization; substantive Task/source/project mutation changes candidate identity |
+| AM | Task `requirement_id` and P6 `profile_id` are distinct; fresh automatic locator attachment requires an explicit durable execution binding |
+| AN | Knowledge Assessment is Understand-owned supporting authority, not a fourth canonical development record; S4 SATISFIED requires current candidate-bound and impact-bound SATISFIED outcomes; lexical token presence is not S4 authority |
+
+---
+
+## 41. Knowledge Assessment (FA2-FND-004)
+
+Knowledge Assessment is a candidate-bound Knowledge Consistency Assessment. It
+is an Understand-owned supporting artifact, not a canonical development record.
+
+Minimum schema:
+
+```yaml
+record_type: knowledge_assessment
+schema_version: "1"
+record_id: ka-<utc-compact>-<8 hex>
+created_at: <RFC3339>
+producer:
+  skill_id: understand
+  mode: refresh  # or full
+candidate:
+  candidate_digest: <current P6 candidate_digest>
+impact_digest: <digest of exact current S3 knowledge-relevant impact set>
+assessments:
+  - impact_id: <digest of canonical impact projection>
+    class: PUBLIC_INTERFACE
+    path: src/save/api.py
+    outcome: SATISFIED  # SATISFIED | NEEDS_REFRESH | NEEDS_HUMAN | UNKNOWN
+    surfaces:
+      - docs/project/architecture.md
+    rationale: Explanatory text; MUST NOT override candidate or impact binding.
+```
+
+Allowed per-impact outcomes are exactly `SATISFIED`, `NEEDS_REFRESH`,
+`NEEDS_HUMAN`, and `UNKNOWN`. Boolean false MUST NOT represent UNKNOWN.
+`rationale` is explanatory and MUST NOT itself override candidate/impact binding.
+
+S3 owns structural-impact detection. S4 owns validation that each current
+knowledge-relevant S3 impact has current Knowledge Assessment authority.
+Understand owns semantic assessment / Refresh. Submit MUST NOT manufacture
+SATISFIED from mapped documentation pathnames, unrelated current documentation
+edits, pre-existing mentions, or current prose containing an impacted path,
+basename, module id, impact class, or any combination of those tokens.
+
+A Knowledge Assessment is S4-authoritative only when it is schema-valid,
+Understand-produced, candidate-bound, impact-bound, the current-head for that
+exact binding, and its published bytes still match the current-head integrity
+digest. Candidate + impact equality alone is NOT enough. C1 assessments MUST
+NOT support C2. A superseded locator MUST NOT be replayed. Change Record
+`knowledge_updates` / `understand_involvement` remain S9 summaries and are not
+S4 authority.
