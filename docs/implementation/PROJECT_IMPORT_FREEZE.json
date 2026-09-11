@@ -1,0 +1,54 @@
+{
+  "freeze": "PROJECT_IMPORT",
+  "supersedes": null,
+  "related_historical": "FIRST_USE_ENFORCEMENT_C04_HUMAN_APPROVAL",
+  "finding": "User-facing import-project orchestration over existing Consumer Installation INSTALL/UPDATE/VERIFY/STATUS. Not a fifth Skill. Not Adoption. Location/remote/path are operation-time locators only.",
+  "created_at": "2026-09-11T08:25:43Z",
+  "base_head": "ee8a7eb9eca2b82a519ba9172bef358dedb64364",
+  "base_tree": "480331e5a36d281177325a860d73b754d8953765",
+  "focused_gate": {
+    "tests": "test_project_import + CI01/CI05/CI15/CI16 + FU33 C04 smoke",
+    "ran": 14,
+    "fail": 0,
+    "error": 0,
+    "unexpected_skip": 0,
+    "result": "PASS"
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "7d0eb397f092ef291948c3fcb84c3eb477e19f10fc4916281a28fa9f507ad90e",
+      "size": 8683
+    },
+    {
+      "path": "docs/CONSUMER_INSTALLATION.md",
+      "sha256": "e98681351917d6f630f1defdec1175b969b7cb2c880e2e3418637de7aeb3e962",
+      "size": 8482
+    },
+    {
+      "path": "docs/QUICK_START.md",
+      "sha256": "6b40e0914270a366e8dfd19e56571ee38aefa49dab932411adb95735d2e69ee9",
+      "size": 3391
+    },
+    {
+      "path": "docs/implementation/CONSUMER_INSTALLATION_DESIGN.md",
+      "sha256": "5ca3c325e6aa4fd9f7b5d749661d19bbbac00b2bf5a324b5404966083060902c",
+      "size": 9076
+    },
+    {
+      "path": "src/scaffold_consumer.py",
+      "sha256": "a20652935583abb0a09a1815685fd288cbbee2876fd5e2747c3973e80d542ea0",
+      "size": 411
+    },
+    {
+      "path": "src/scaffold_p5/consumer_install.py",
+      "sha256": "a316d89af514863ac3c428afecd8a5adc2fa32d061097278fb55cee25d0ca80a",
+      "size": 80391
+    },
+    {
+      "path": "tests/test_project_import.py",
+      "sha256": "5df606fa6c496a2b9270cc142762533144912bfe4c50e87e4da51d53d7e3565d",
+      "size": 14444
+    }
+  ]
+}

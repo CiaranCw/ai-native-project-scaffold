@@ -7,6 +7,15 @@ This is **not** a game-test framework. Game projects are the primary research su
 Internal real-project entry: [docs/QUICK_START.md](docs/QUICK_START.md) and
 project-local installation: [docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md).
 
+```text
+git clone <Scaffold repository>
+cd <Scaffold repository>
+python src/scaffold_consumer.py import-project --host <project>
+```
+
+Then open the imported project in Cursor and give the Agent a normal business
+task. No Scaffold-specific prompt is required.
+
 ## Status
 
 **P0 — CLOSED / BASELINED** at `6ea16e343fdd4324983786186b17b2d59b059fb7`.

@@ -5,7 +5,11 @@ No product patch after freeze.
 
 | Failure mode | Status | Evidence |
 | --- | --- | --- |
-| Agent can discover Skills but runtime still requires Distribution | Closed | Canonical packages and `run.py` use `.scaffold/install/runtime/` only |
+| Agent can discover Scaffold and still mutate a NOT_ADOPTED host | Closed | Client-neutral `BLOCK_PROJECT_MUTATION`; Cursor Always Apply rule + `failClosed` pre-tool hooks deny Write/Delete/Shell/Task/MCP before execution; FU01–FU30 |
+| Agent self-approves Adoption via `--approved --plan-digest` after reading the digest | Closed | That spelling is an APPLY REQUEST. `beforeShellExecution` returns `ask` / FORCE_PROMPT; no-user path leaves the host NOT_ADOPTED (PC-CONSUMER-001-B2; FU31–FU39) |
+| Soft AGENTS wording treated as optional | Closed | Normative first-use region plus structural hook; anti-rationalization language; ordinary user task is not approval |
+| Agent deletes/rewrites hook/rule/AGENTS to bypass first-use | Closed | Those mutation tools are themselves denied while NOT_ADOPTED (FU16–FU18) |
+| Existing host `.cursor/hooks.json` overwritten | Closed | `MANAGED_JSON_FRAGMENT` ownership; unrelated hooks survive INSTALL/UPDATE (FU19–FU22) |
 | Runtime is self-contained but fresh Agent cannot discover entrypoint | Closed | AGENTS `scaffold-consumer` first-contact region plus exactly four Cursor adapters (`scaffold-understand/develop/test/submit`) |
 | Generic `.cursor/skills/scaffold/` fifth Skill | Closed | Adapter set is exactly four; VERIFY fails closed; UPDATE removes only that obsolete managed adapter |
 | AGENTS.md / `.gitattributes` hashed as whole-file MANAGED | Closed | `install.yaml` `regions:` records `MANAGED_REGION` digests only; CIC03 human-edit / C02-migration tests |
@@ -22,8 +26,11 @@ No product patch after freeze.
 
 Additional checks:
 
-- Mixed-ownership host files are only `AGENTS.md` and `.gitattributes`. Cursor adapters, `run.py`, packages, and runtime remain whole-file MANAGED.
-- Exactly four Skills; no Install/Bootstrap/Repair/Consumer Skill (CI-28).
+- Mixed-ownership host files are `AGENTS.md`, `.gitattributes`, and the
+  Scaffold fragment of `.cursor/hooks.json`. Cursor adapters, the Always Apply
+  first-use rule, `run.py`, packages, runtime, and the hook executable remain
+  whole-file MANAGED.
+- Exactly four Skills; no Install/Bootstrap/Repair/Consumer/first-use Skill (CI-28, FU23–FU24).
 - Skill package bytes/identities unchanged (Correction 05 identities).
 - Canonical Project-City and consumer-pilot were not installed into.
 - Agent2 remains not started (out of scope; no Project-City mutation).

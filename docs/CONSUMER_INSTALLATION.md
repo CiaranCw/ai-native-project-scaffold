@@ -6,19 +6,33 @@ Understand, Develop, Test, Submit. Repair remains a Develop mode.
 
 Design: [implementation/CONSUMER_INSTALLATION_DESIGN.md](implementation/CONSUMER_INSTALLATION_DESIGN.md).
 First-use chain: [implementation/FIRST_USE_WALKTHROUGH.md](implementation/FIRST_USE_WALKTHROUGH.md).
+First-use enforcement: [implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](implementation/FIRST_USE_ENFORCEMENT_DESIGN.md).
 
-## How do I install Scaffold into an existing project?
+## How do I import Scaffold into an existing project?
 
 From a Scaffold Distribution checkout (you need this path **only now**):
 
 ```text
-python src/scaffold_consumer.py install --host <project-root>
+git clone <Scaffold repository>
+cd <Scaffold repository>
+python src/scaffold_consumer.py import-project --host <project-root>
 ```
 
-The Distribution root is inferred from the invoked script. You may pass
-`--distribution <distribution-root>` explicitly. Preview without writing:
+`--host .` is supported. Import is the ordinary teammate command. It classifies
+the target and reuses official INSTALL, UPDATE, VERIFY, and STATUS. It does
+not adopt the project, write `project.yaml` / `skills.lock`, or run business
+work.
+
+A current VALID installation reports `ALREADY_READY` and does not rewrite
+managed bytes. A supported older/incomplete installation uses UPDATE. Managed
+drift and ownership conflicts fail closed.
+
+Lower-level operator commands remain:
 
 ```text
+python src/scaffold_consumer.py install --host <project-root>
+python src/scaffold_consumer.py update --host <project-root>
+python src/scaffold_consumer.py verify --host <project-root>
 python src/scaffold_consumer.py plan --host <project-root>
 ```
 
@@ -37,8 +51,13 @@ MANAGED consumer artifacts:
 - a bounded managed region in `.gitattributes` that sets `-text` on MANAGED
   install bytes so a normal `git add` / `git commit` / `git clone` cannot
   rewrite those hashes
-- a bounded managed region in `.gitattributes` that sets `-text` on MANAGED
-  install bytes so Git checkout cannot rewrite EOL
+- `.cursor/rules/scaffold-first-use.mdc` — Always Apply Cursor first-use rule
+  (whole-file MANAGED; not a Skill)
+- a Scaffold-owned fragment in `.cursor/hooks.json` — Cursor `preToolUse`,
+  `beforeShellExecution`, `subagentStart`, and `beforeMCPExecution`
+  enforcement adapter; unrelated host hooks are preserved
+- `.scaffold/install/cursor_first_use_hook.py` — hook executable under the
+  managed install tree
 
 Do **not** commit `__pycache__`, `.pyc`, test/review zips, or freeze JSON from
 the Distribution. A later teammate clone of **this host repository** is enough.
@@ -47,8 +66,11 @@ the Distribution. A later teammate clone of **this host repository** is enough.
 
 Repository-local `AGENTS.md` carries a managed `scaffold-consumer` region.
 That region is first-contact routing: Scaffold is installed, installation is
-not Adoption, ordinary work on a never-adopted host starts with Understand
-bootstrap, and the launcher is `python .scaffold/install/run.py`.
+not Adoption, `NOT_ADOPTED` is a mandatory authorization boundary rather than
+advisory guidance, ordinary business work is not authorized until Understand
+bootstrap and explicit human Plan approval complete, and the launcher is
+`python .scaffold/install/run.py`. The user business request is not Adoption
+approval. `NEEDS_HUMAN` means STOP.
 
 Cursor project skills live at `.cursor/skills/<name>/SKILL.md` (documented
 Cursor convention). Scaffold installs **exactly four** adapters:
@@ -97,8 +119,10 @@ Skill is still present. Unrelated project skills are not counted as Scaffold
 Skills. VERIFY also fails closed if the clone-stability Git-attributes policy
 is missing, malformed, or (in a Git repository) not actually effective
 (`git check-attr` must report `text: unset` for managed consumer paths).
-Human edits outside the `AGENTS.md` and `.gitattributes` managed regions
-do not fail VERIFY. Tampering inside those regions does.
+VERIFY checks the Always Apply first-use rule and the Scaffold hook fragment.
+Human edits outside the `AGENTS.md` and `.gitattributes` managed regions, and
+unrelated `.cursor/hooks.json` entries, do not fail VERIFY. Tampering inside
+Scaffold-owned regions/fragments does.
 
 ## How do I update it?
 
@@ -108,12 +132,15 @@ From a newer Distribution checkout:
 python src/scaffold_consumer.py update --host <project-root>
 ```
 
-Update rewrites only MANAGED install files and Scaffold managed regions.
-Unexpected whole-file or managed-region drift fails closed. Human edits
-outside `AGENTS.md` / `.gitattributes` managed regions are preserved.
-Unrelated human-owned files and client skills are not modified. A pre-C01
-managed generic `.cursor/skills/scaffold/` adapter is removed on UPDATE; an
-unmanaged file at that path is not deleted.
+Update rewrites only MANAGED install files, Scaffold managed regions, and the
+Scaffold hook fragment. Unexpected whole-file, managed-region, or Scaffold
+hook-fragment drift fails closed. Human edits outside `AGENTS.md` /
+`.gitattributes` managed regions are preserved. Unrelated human-owned files,
+client skills, Cursor rules, and unrelated Cursor hooks are not modified. A
+pre-C01 managed generic `.cursor/skills/scaffold/` adapter is removed on
+UPDATE; an unmanaged file at that path is not deleted. A clean RC2
+installation can UPDATE to add first-use enforcement artifacts without
+Adopting the host.
 
 ## Which files are MANAGED?
 
@@ -124,7 +151,14 @@ host files are recorded in `regions:` as `ownership: MANAGED_REGION`:
 - `AGENTS.md` region `scaffold-consumer`
 - `.gitattributes` region `scaffold-consumer-git`
 
-Only those regions are Scaffold-owned. Human/project text outside them is
+`.cursor/hooks.json` is recorded in `json_fragments:` as
+`ownership: MANAGED_JSON_FRAGMENT` / `fragment_id: scaffold-first-use`.
+Only that structured hook entry is Scaffold-owned. Unrelated hook types and
+human `preToolUse` commands are not install drift.
+
+`.cursor/rules/scaffold-first-use.mdc` is whole-file MANAGED.
+
+Human/project text outside managed regions, and unrelated hook entries, are
 not install drift. They remain traceable to the installed Scaffold
 release/commit.
 
@@ -135,9 +169,21 @@ Install does **not** adopt the project. After install the host stays
 no READY_FOR_REVIEW.
 
 First-use: Understand bootstrap previews an Adoption Plan and stops for
-explicit human approval of that exact plan digest. Only then does Scaffold
-write Adoption/work-plane records. `skills.lock` is that later expected-identity
-authority; `install.yaml` is product provenance and does not replace it.
+explicit human approval of that exact plan digest. `--approved --plan-digest`
+is the apply-request spelling, not proof that a human approved. Only then
+does Scaffold write Adoption/work-plane records. `skills.lock` is that later
+expected-identity authority; `install.yaml` is product provenance and does
+not replace it.
+
+On Cursor, Trusted-workspace project hooks deny ordinary project mutation
+while `NOT_ADOPTED`. The official digest-bound apply command is not
+unconditional ALLOW: `preToolUse` may continue it to `beforeShellExecution`,
+which returns `permission=ask` so Cursor itself requires interactive user
+confirmation (`FORCE_PROMPT`). That is a client enforcement adapter, not a
+fifth Skill and not a claim of hard enforcement on other clients. A human
+running the Scaffold CLI outside an Agent session is a different situation.
+Missing or drifted hook policy fails VERIFY (`INCOMPLETE` / `DRIFTED` /
+`INCOMPATIBLE` as applicable).
 
 ## How do I commit it into an internal project repository?
 

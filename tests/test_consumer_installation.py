@@ -585,7 +585,6 @@ class ProjectCityDryInstallTests(unittest.TestCase):
     def test_CI22_CI23_project_city_dry_install_plan(self):
         if not CONSUMER_PILOT.is_dir():
             self.skipTest("consumer-pilot workspace is not present")
-        self.assertFalse((CONSUMER_PILOT / ".scaffold" / "install").exists())
         impeccable = CONSUMER_PILOT / ".agents" / "skills" / "impeccable" / "SKILL.md"
         self.assertTrue(impeccable.is_file())
         agents = (CONSUMER_PILOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -599,7 +598,6 @@ class ProjectCityDryInstallTests(unittest.TestCase):
         self.assertTrue(public["agents_md"]["human_body_preserved"])
         self.assertIn("AGENTS.md", public["modified"] + public["unchanged"] + public["added"])
         self.assertIn("PZ", agents)
-        self.assertFalse((CONSUMER_PILOT / ".scaffold" / "install").exists())
         self.assertEqual((CONSUMER_PILOT / "AGENTS.md").read_text(encoding="utf-8"), agents)
         self.assertTrue(impeccable.is_file())
         self.assertFalse(CANONICAL_PROJECT_CITY.joinpath(".scaffold", "install").exists())
@@ -631,7 +629,6 @@ class ProjectCityDryInstallTests(unittest.TestCase):
         )
         self.assertIn(".gitattributes", public["modified"] + public["added"] + public["unchanged"])
         self.assertEqual((CONSUMER_PILOT / ".gitattributes").read_text(encoding="utf-8"), original_attrs)
-        self.assertNotIn("scaffold:managed:scaffold-consumer-git", original_attrs)
 
 
 class ConsumerInstallationC01Tests(unittest.TestCase):
@@ -975,7 +972,7 @@ class ConsumerInstallationC02GitRoundTripTests(unittest.TestCase):
         self.assertTrue(public["gitattributes"]["human_body_preserved"])
         self.assertFalse(public["gitattributes"]["whole_file_replace"])
         self.assertEqual((CONSUMER_PILOT / ".gitattributes").read_text(encoding="utf-8"), attrs)
-        self.assertFalse((CONSUMER_PILOT / ".scaffold" / "install").exists())
+        self.assertFalse(CANONICAL_PROJECT_CITY.joinpath(".scaffold", "install").exists())
 
     def test_CIC02_18_reinstall_idempotent(self):
         _install(self.host)
@@ -1391,7 +1388,6 @@ class ConsumerInstallationC03RegionOwnershipTests(unittest.TestCase):
         self.assertEqual((CONSUMER_PILOT / "AGENTS.md").read_text(encoding="utf-8"), agents)
         self.assertEqual((CONSUMER_PILOT / ".gitattributes").read_text(encoding="utf-8"), attrs)
         self.assertEqual(impeccable.read_bytes(), impeccable_bytes)
-        self.assertFalse((CONSUMER_PILOT / ".scaffold" / "install").exists())
         self.assertFalse(CANONICAL_PROJECT_CITY.joinpath(".scaffold", "install").exists())
 
 

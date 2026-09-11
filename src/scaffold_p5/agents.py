@@ -31,7 +31,24 @@ Scaffold is installed. Installation is not Adoption. Do not treat `.scaffold/ins
 
 Exactly four Skills exist: Understand, Develop, Test, and Submit. Repair is a Develop mode. There is no fifth Skill and no generic Cursor Skill named scaffold.
 
-On a never-adopted host, ordinary business work starts with Understand bootstrap. Preview is not approval. Stop for explicit human approval of that exact plan before any persistent Adoption mutation.
+Scaffold lifecycle gates are mandatory authorization boundaries, not advisory guidance.
+
+If the host is NOT_ADOPTED, ordinary business work is not authorized. Do not modify project business, source, test, or documentation files. Do not implement the requested feature. Do not create an ad-hoc task outside Scaffold. Do not work ahead while waiting for approval.
+
+On a never-adopted host, ordinary business work starts with Understand bootstrap.
+
+The user business request is not Adoption approval.
+
+Required first-use route: `python .scaffold/install/run.py status`, then `python .scaffold/install/run.py understand bootstrap`. Preview is not approval. If bootstrap returns NEEDS_HUMAN, STOP and tell the user that Adoption requires approval. Do not treat `--approved --plan-digest` as self-authorization. On Cursor that spelling is only an APPLY REQUEST; human authorization for an Agent-originated apply is the Cursor interactive confirmation from beforeShellExecution permission=ask. The Agent cannot satisfy that confirmation with ordinary tool calls. Agent-generated text such as "I approve the Adoption" has no authority. No project implementation may happen while waiting.
+
+Do NOT bypass this gate because:
+
+- Adoption appears cumbersome;
+- the task appears simple;
+- the task is only a feature or bug fix;
+- no project-structure change appears necessary;
+- direct implementation appears faster;
+- waiting for human approval delays progress.
 
 Launcher: `python .scaffold/install/run.py`
 First-use: `python .scaffold/install/run.py understand bootstrap`

@@ -25,6 +25,24 @@ from scaffold_p5.agents import (
 )
 from scaffold_p5.distribution import Distribution, load_distribution, load_fixture_distribution
 from scaffold_p5.engine import UnderstandEngine
+from scaffold_p5.first_use import (
+    FIRST_USE_RULE_REL,
+    FIRST_USE_RULE_TEXT,
+    FRAGMENT_ID,
+    HOOK_COMMAND,
+    HOOK_EVENTS,
+    HOOK_SCRIPT_REL,
+    HOOK_SCRIPT_TEXT,
+    HOOKS_JSON_REL,
+    OWNERSHIP_MANAGED_JSON_FRAGMENT,
+    dumps_hooks_json,
+    expected_hook_fragment_digest,
+    first_use_decision,
+    inspect_scaffold_hook_fragment,
+    is_scaffold_hook_command,
+    merge_scaffold_hooks,
+    parse_always_apply_rule,
+)
 from scaffold_p5.host_state import snapshot_host
 from scaffold_p5.inventory import project_relative_path
 from scaffold_p5.io_util import file_digest, read_text, sha256_bytes
@@ -59,6 +77,8 @@ GITATTR_INNER = """# Scaffold MANAGED consumer bytes are hash-authoritative.
 .cursor/skills/scaffold-develop/** -text
 .cursor/skills/scaffold-test/** -text
 .cursor/skills/scaffold-submit/** -text
+.cursor/rules/scaffold-first-use.mdc -text
+.cursor/hooks.json -text
 AGENTS.md -text
 .gitattributes -text
 """
@@ -68,6 +88,8 @@ GITATTR_REQUIRED_LINES = (
     ".cursor/skills/scaffold-develop/** -text",
     ".cursor/skills/scaffold-test/** -text",
     ".cursor/skills/scaffold-submit/** -text",
+    ".cursor/rules/scaffold-first-use.mdc -text",
+    ".cursor/hooks.json -text",
     "AGENTS.md -text",
     ".gitattributes -text",
 )
@@ -78,13 +100,50 @@ GITATTR_PROBE_PATHS = (
     ".scaffold/install/packages/understand/SKILL.md",
     ".scaffold/install/packages/understand/skill.yaml",
     ".scaffold/install/runtime/scaffold_p5/engine.py",
+    ".scaffold/install/cursor_first_use_hook.py",
     ".cursor/skills/scaffold-understand/SKILL.md",
     ".cursor/skills/scaffold-develop/SKILL.md",
     ".cursor/skills/scaffold-test/SKILL.md",
     ".cursor/skills/scaffold-submit/SKILL.md",
+    ".cursor/rules/scaffold-first-use.mdc",
+    ".cursor/hooks.json",
     "AGENTS.md",
     ".gitattributes",
 )
+RC2_GITATTR_INNER = """# Scaffold MANAGED consumer bytes are hash-authoritative.
+# Git must not convert EOL. VERIFY records raw SHA-256.
+.scaffold/install/** -text
+.cursor/skills/scaffold-understand/** -text
+.cursor/skills/scaffold-develop/** -text
+.cursor/skills/scaffold-test/** -text
+.cursor/skills/scaffold-submit/** -text
+AGENTS.md -text
+.gitattributes -text
+"""
+RC2_CONSUMER_AGENTS_INNER = """## Scaffold installation
+
+This managed AGENTS region is first-contact routing for a Scaffold-enabled repository.
+
+Scaffold is installed. Installation is not Adoption. Do not treat `.scaffold/install` as completed project understanding.
+
+Exactly four Skills exist: Understand, Develop, Test, and Submit. Repair is a Develop mode. There is no fifth Skill and no generic Cursor Skill named scaffold.
+
+On a never-adopted host, ordinary business work starts with Understand bootstrap. Preview is not approval. Stop for explicit human approval of that exact plan before any persistent Adoption mutation.
+
+Launcher: `python .scaffold/install/run.py`
+First-use: `python .scaffold/install/run.py understand bootstrap`
+
+Canonical Skill packages: `.scaffold/install/packages/{understand,develop,test,submit}/`
+Runtime: `.scaffold/install/runtime/`
+
+Cursor adapters exist only for those four Skills:
+`.cursor/skills/scaffold-understand/`
+`.cursor/skills/scaffold-develop/`
+`.cursor/skills/scaffold-test/`
+`.cursor/skills/scaffold-submit/`
+
+Do not clone a second Scaffold repository and do not set PYTHONPATH to a developer checkout.
+"""
 _GITATTR_MARKER = re.compile(
     r"^#\s*scaffold:managed:([a-z][a-z0-9-]*):(start|end)\s*$",
     re.MULTILINE,
@@ -94,6 +153,9 @@ OWNERSHIP_MANAGED_REGION = "MANAGED_REGION"
 REGION_HOST_PATHS = {
     AGENTS_MD: CONSUMER_INSTALL_REGION,
     GITATTRIBUTES: GITATTR_REGION,
+}
+FRAGMENT_HOST_PATHS = {
+    HOOKS_JSON_REL: FRAGMENT_ID,
 }
 
 SRC_PACKAGES = ("scaffold_p5", "scaffold_p6", "scaffold_p7", "scaffold_p8")
@@ -117,6 +179,17 @@ VERIFY_DRIFTED = "DRIFTED"
 VERIFY_INCOMPLETE = "INCOMPLETE"
 VERIFY_INCOMPATIBLE = "INCOMPATIBLE"
 VERIFY_UNKNOWN = "UNKNOWN"
+
+IMPORT_READY = "PROJECT_SCAFFOLD_READY"
+IMPORT_ALREADY_READY = "ALREADY_READY"
+IMPORT_FAILED = "PROJECT_SCAFFOLD_IMPORT_FAILED"
+IMPORT_PROBLEM_MANAGED_DRIFT = "MANAGED_DRIFT"
+IMPORT_PROBLEM_OWNERSHIP = "OWNERSHIP_CONFLICT"
+IMPORT_PROBLEM_INCOMPATIBLE = "INCOMPATIBLE_INSTALLATION"
+IMPORT_PROBLEM_UNKNOWN = "UNKNOWN_STATE"
+IMPORT_PROBLEM_INSTALL = "INSTALL_FAILURE"
+IMPORT_PROBLEM_VERIFY = "VERIFY_FAILURE"
+IMPORT_SKILL_LABELS = ("Understand", "Develop", "Test", "Submit")
 
 ABS_SCAFFOLD_CHECKOUT_RE = re.compile(
     r"(?:[A-Za-z]:[\\/]|/(?:Users|home|opt|var|tmp|NewResearch)[\\/])"
@@ -155,8 +228,9 @@ description: >-
   Scaffold Understand. Use for adopt/bootstrap, full normalize, refresh,
   compatibility, zero-context resume, and first-use on a never-adopted
   Scaffold-enabled repository. Ordinary feature work on a never-adopted host
-  starts here. Not a fifth Skill; this is a Cursor adapter to the canonical
-  understand package.
+  starts here. On NOT_ADOPTED hosts this is a mandatory authorization
+  boundary, not optional guidance. Not a fifth Skill; this is a Cursor
+  adapter to the canonical understand package.
 ---
 
 # Understand (Cursor adapter)
@@ -283,8 +357,10 @@ def is_install_managed_path(rel: str) -> bool:
     normalized = str(rel or "").replace("\\", "/").strip("/")
     if normalized == INSTALL_DIR or normalized.startswith(INSTALL_DIR + "/"):
         return True
-    if normalized in {AGENTS_MD, GITATTRIBUTES}:
+    if normalized in {AGENTS_MD, GITATTRIBUTES, HOOKS_JSON_REL}:
         return False
+    if normalized == FIRST_USE_RULE_REL:
+        return True
     if normalized.startswith(".cursor/skills/scaffold"):
         return True
     return False
@@ -445,9 +521,11 @@ def manifest_file_map(manifest: dict[str, Any] | None) -> dict[str, str]:
         if not isinstance(row, dict) or not row.get("path") or not row.get("digest"):
             continue
         rel = str(row["path"]).replace("\\", "/")
-        if rel in REGION_HOST_PATHS:
+        if rel in REGION_HOST_PATHS or rel in FRAGMENT_HOST_PATHS:
             continue
         if str(row.get("ownership") or OWNERSHIP_WHOLE_FILE) == OWNERSHIP_MANAGED_REGION:
+            continue
+        if str(row.get("ownership") or "") == OWNERSHIP_MANAGED_JSON_FRAGMENT:
             continue
         out[rel] = str(row["digest"])
     return out
@@ -476,6 +554,34 @@ def manifest_region_records(manifest: dict[str, Any] | None) -> list[dict[str, s
     return records
 
 
+def manifest_fragment_records(manifest: dict[str, Any] | None) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    if not isinstance(manifest, dict):
+        return records
+    for row in manifest.get("json_fragments") or []:
+        if not isinstance(row, dict):
+            continue
+        rel = str(row.get("path") or "").replace("\\", "/")
+        fragment_id = str(row.get("fragment_id") or "")
+        digest = str(row.get("digest") or "")
+        ownership = str(row.get("ownership") or "")
+        if (
+            rel
+            and fragment_id
+            and digest
+            and ownership == OWNERSHIP_MANAGED_JSON_FRAGMENT
+        ):
+            records.append(
+                {
+                    "path": rel,
+                    "fragment_id": fragment_id,
+                    "digest": digest,
+                    "ownership": ownership,
+                }
+            )
+    return records
+
+
 def expected_region_text(rel: str) -> str | None:
     if rel == AGENTS_MD:
         return (
@@ -493,6 +599,20 @@ def expected_region_digest(rel: str) -> str | None:
     if text is None:
         return None
     return sha256_bytes(text.encode("utf-8"))
+
+
+def predecessor_region_digests(rel: str) -> set[str]:
+    if rel == AGENTS_MD:
+        text = (
+            f"{CONSUMER_REGION_START}\n"
+            f"{RC2_CONSUMER_AGENTS_INNER.strip()}\n"
+            f"{CONSUMER_REGION_END}"
+        )
+        return {sha256_bytes(text.encode("utf-8"))}
+    if rel == GITATTRIBUTES:
+        text = f"{GITATTR_START}\n{RC2_GITATTR_INNER.strip()}\n{GITATTR_END}"
+        return {sha256_bytes(text.encode("utf-8"))}
+    return set()
 
 
 def _ownership_for_rel(rel: str) -> tuple[str, str | None]:
@@ -591,6 +711,8 @@ def plan_consumer_install(
     for adapter in CURSOR_ADAPTERS:
         rel = f".cursor/skills/{adapter}/SKILL.md"
         payloads[rel] = CURSOR_BODIES[adapter].encode("utf-8")
+    payloads[FIRST_USE_RULE_REL] = FIRST_USE_RULE_TEXT.encode("utf-8")
+    payloads[HOOK_SCRIPT_REL] = HOOK_SCRIPT_TEXT.encode("utf-8")
     agents_text, agents_issue = _planned_agents_text(host_path)
     if agents_issue:
         plan.blockers.append(agents_issue)
@@ -643,12 +765,19 @@ def plan_consumer_install(
         )
     if plan.blockers:
         return plan
+    hooks_issue = _plan_hooks_json(plan)
+    if hooks_issue:
+        plan.blockers.append(hooks_issue)
+        return plan
 
     plan.source = source_identity(dist_path)
     plan.bridges = {
         "cursor": list(CURSOR_ADAPTER_PATHS),
         "agents_md_region": CONSUMER_INSTALL_REGION if AGENTS_MD in payloads else None,
         "gitattributes_region": GITATTR_REGION if GITATTRIBUTES in payloads else None,
+        "cursor_first_use_rule": FIRST_USE_RULE_REL,
+        "cursor_hooks_fragment": FRAGMENT_ID,
+        "cursor_hook_command": HOOK_COMMAND,
     }
     manifest = _manifest_from_plan(plan)
     manifest_bytes = yaml_lite.dump(manifest).encode("utf-8")
@@ -708,6 +837,7 @@ def plan_to_public_dict(plan: InstallPlan) -> dict[str, Any]:
         "bridges": dict(plan.bridges),
         "agents_md": _agents_preservation_note(plan),
         "gitattributes": _gitattributes_preservation_note(plan),
+        "hooks_json": _hooks_json_preservation_note(plan),
         "regions": [
             {
                 "path": row.rel,
@@ -716,6 +846,15 @@ def plan_to_public_dict(plan: InstallPlan) -> dict[str, Any]:
             }
             for row in plan.files
             if row.ownership == OWNERSHIP_MANAGED_REGION
+        ],
+        "json_fragments": [
+            {
+                "path": row.rel,
+                "ownership": row.ownership,
+                "fragment_id": row.region_id,
+            }
+            for row in plan.files
+            if row.ownership == OWNERSHIP_MANAGED_JSON_FRAGMENT
         ],
         "file_count": len(plan.files),
     }
@@ -775,6 +914,10 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
     missing.extend(region_missing)
     drifted.extend(region_drifted)
     reasons.extend(region_incompat)
+    frag_missing, frag_drifted, frag_incompat = _hook_fragment_issues(root, manifest)
+    missing.extend(frag_missing)
+    drifted.extend(frag_drifted)
+    reasons.extend(frag_incompat)
     for required in (
         RUNNER_REL,
         f"{RUNTIME_DIR}/scaffold_entry.py",
@@ -785,8 +928,11 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         *(f"{PACKAGES_DIR}/{skill}/skill.yaml" for skill in CORE_SKILLS),
         *(f"{PACKAGES_DIR}/{skill}/SKILL.md" for skill in CORE_SKILLS),
         *CURSOR_ADAPTER_PATHS,
+        FIRST_USE_RULE_REL,
+        HOOK_SCRIPT_REL,
     ):
         if required not in expected:
+            missing.append(required)
             reasons.append(f"manifest omits required path {required}")
         elif not (root / required).is_file():
             missing.append(required)
@@ -808,10 +954,12 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         reasons.extend(f"unexpected extra install file {rel}" for rel in extra)
     skill_issues = _installed_skill_issues(root, manifest)
     adapter_issues = _cursor_adapter_issues(root, manifest)
+    rule_issues = _first_use_rule_issues(root)
     gitattr_missing, gitattr_incompat = _git_attr_policy_issues(root, manifest)
     abs_hits = absolute_runtime_path_hits(root, expected)
     reasons.extend(skill_issues)
     reasons.extend(adapter_issues)
+    reasons.extend(rule_issues)
     reasons.extend(gitattr_incompat)
     reasons.extend(abs_hits)
     missing.extend(gitattr_missing)
@@ -819,7 +967,7 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         status = VERIFY_INCOMPLETE
     elif drifted:
         status = VERIFY_DRIFTED
-    elif skill_issues or adapter_issues or gitattr_incompat or abs_hits or reasons:
+    elif skill_issues or adapter_issues or rule_issues or gitattr_incompat or abs_hits or reasons:
         status = VERIFY_INCOMPATIBLE
     else:
         status = VERIFY_VALID
@@ -869,18 +1017,170 @@ def absolute_runtime_path_hits(host: Path, expected: dict[str, str]) -> list[str
     return hits
 
 
+def import_project(
+    host: str | Path,
+    distribution: str | Path | None = None,
+) -> dict[str, Any]:
+    """User-facing orchestration over INSTALL / UPDATE / VERIFY / STATUS.
+
+    `--host` is an operation-time locator only. It is not durable project
+    authority. Import is not Adoption and is not a fifth Skill.
+    """
+    host_path = Path(host).expanduser().resolve()
+    dist_path = (
+        Path(distribution).expanduser().resolve()
+        if distribution is not None
+        else _default_distribution()
+    )
+    decision = classify_project_import(host_path)
+    action = decision["action"]
+    verify = decision["verify"]
+    if action is None:
+        return _import_failure(
+            host_path,
+            classification=decision["classification"],
+            problem=decision["problem"],
+            verify=verify,
+            blockers=list(decision.get("blockers") or verify.get("reasons") or []),
+        )
+    if action == "noop":
+        return _import_success(
+            host_path,
+            outcome=IMPORT_ALREADY_READY,
+            classification=decision["classification"],
+            action="noop",
+            verify=verify_consumer_install(host_path),
+        )
+    plan = plan_consumer_install(host_path, dist_path, mode=action)
+    if not plan.allowed:
+        return _import_failure(
+            host_path,
+            classification=decision["classification"],
+            problem=_import_problem(verify, plan.blockers),
+            verify=verify,
+            blockers=list(plan.blockers),
+        )
+    applied = apply_consumer_install(plan)
+    final_verify = applied.get("verify") or verify_consumer_install(host_path)
+    if applied.get("outcome") != "COMPLETED" or final_verify.get("status") != VERIFY_VALID:
+        return _import_failure(
+            host_path,
+            classification=decision["classification"],
+            problem=IMPORT_PROBLEM_VERIFY
+            if applied.get("outcome") == "COMPLETED"
+            else IMPORT_PROBLEM_INSTALL,
+            verify=final_verify if isinstance(final_verify, dict) else verify,
+            blockers=list(applied.get("blockers") or []),
+        )
+    return _import_success(
+        host_path,
+        outcome=IMPORT_READY,
+        classification=decision["classification"],
+        action=action,
+        verify=final_verify,
+    )
+
+
+def classify_project_import(host: str | Path) -> dict[str, Any]:
+    """Deterministic import action from existing VERIFY / UPDATE authority."""
+    host_path = Path(host)
+    verify = verify_consumer_install(host_path)
+    existing = current_manifest(host_path)
+    status = verify.get("status")
+    install_present = (host_path / INSTALL_DIR).exists()
+    if status == VERIFY_VALID:
+        return {
+            "classification": "CURRENT_VALID_INSTALLATION",
+            "action": "noop",
+            "problem": None,
+            "verify": verify,
+        }
+    if status == VERIFY_UNKNOWN and not install_present:
+        return {
+            "classification": "NO_SCAFFOLD_INSTALLATION",
+            "action": "install",
+            "problem": None,
+            "verify": verify,
+        }
+    if status == VERIFY_DRIFTED:
+        return {
+            "classification": "MANAGED_DRIFT",
+            "action": None,
+            "problem": IMPORT_PROBLEM_MANAGED_DRIFT,
+            "verify": verify,
+            "blockers": list(verify.get("reasons") or []),
+        }
+    if status in {VERIFY_INCOMPLETE, VERIFY_INCOMPATIBLE}:
+        if existing is not None and _status_allows_apply("update", verify, existing):
+            return {
+                "classification": "SUPPORTED_UPGRADE_STATE",
+                "action": "update",
+                "problem": None,
+                "verify": verify,
+            }
+        return {
+            "classification": "INCOMPATIBLE_INSTALLATION"
+            if status == VERIFY_INCOMPATIBLE
+            else "UNKNOWN_STATE",
+            "action": None,
+            "problem": IMPORT_PROBLEM_INCOMPATIBLE
+            if status == VERIFY_INCOMPATIBLE
+            else IMPORT_PROBLEM_UNKNOWN,
+            "verify": verify,
+            "blockers": list(verify.get("reasons") or []),
+        }
+    return {
+        "classification": "UNKNOWN_STATE",
+        "action": None,
+        "problem": IMPORT_PROBLEM_UNKNOWN,
+        "verify": verify,
+        "blockers": list(verify.get("reasons") or []),
+    }
+
+
+def format_import_report(result: dict[str, Any]) -> str:
+    outcome = str(result.get("outcome") or IMPORT_FAILED)
+    if outcome == IMPORT_FAILED:
+        problem = str(result.get("problem") or IMPORT_PROBLEM_UNKNOWN)
+        blockers = [str(item) for item in (result.get("blockers") or []) if item]
+        lines = [
+            IMPORT_FAILED,
+            "",
+            f"Problem: {problem}",
+        ]
+        if blockers:
+            lines.append(blockers[0])
+        return "\n".join(lines) + "\n"
+    lifecycle = str(result.get("lifecycle") or result.get("host_class") or "UNKNOWN")
+    return (
+        f"{outcome}\n"
+        "\n"
+        f"Scaffold installation: {result.get('installation') or VERIFY_VALID}\n"
+        f"Lifecycle: {lifecycle}\n"
+        "Skills: Understand / Develop / Test / Submit\n"
+        "\n"
+        "Next:\n"
+        "Open this project in Cursor and give the Agent your normal work request.\n"
+        "No Scaffold-specific prompt is required.\n"
+    )
+
+
 def distribution_cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scaffold project-local consumer installation (not a fifth Skill)"
     )
     parser.add_argument(
         "command",
-        choices=["install", "update", "verify", "plan"],
+        choices=["import-project", "install", "update", "verify", "plan"],
     )
     parser.add_argument("--host", required=True)
     parser.add_argument("--distribution", default=None)
     args = parser.parse_args(argv)
     dist = Path(args.distribution) if args.distribution else _default_distribution()
+    if args.command == "import-project":
+        result = import_project(args.host, dist)
+        print(format_import_report(result), end="")
+        return 0 if result.get("outcome") in {IMPORT_READY, IMPORT_ALREADY_READY} else 1
     if args.command == "verify":
         payload = verify_consumer_install(args.host)
         print(json.dumps(payload, indent=2))
@@ -915,11 +1215,14 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             "submit",
             "status",
             "enter",
+            "first-use",
         ],
     )
     parser.add_argument("mode", nargs="?", default=None)
     parser.add_argument("--host", default=str(host))
     parser.add_argument("--task-id", default=None)
+    parser.add_argument("--approved", action="store_true")
+    parser.add_argument("--plan-digest", dest="plan_digest", default=None)
     args, _rest = parser.parse_known_args(argv)
     target = Path(args.host)
     if args.command == "verify":
@@ -931,6 +1234,9 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
 
         print(json.dumps(project_status(target), indent=2, default=str))
         return 0
+    if args.command == "first-use":
+        print(json.dumps(first_use_decision(target), indent=2, default=str))
+        return 0
     if args.command == "enter":
         from scaffold_entry import enter_project
 
@@ -941,7 +1247,13 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     dist = load_installed_distribution(target)
     if args.command == "understand":
         mode = args.mode or "bootstrap"
-        result = UnderstandEngine(target, dist).run(mode)
+        opts: dict[str, Any] = {}
+        if args.approved:
+            opts["approval"] = {
+                "approved": True,
+                "plan_digest": args.plan_digest,
+            }
+        result = UnderstandEngine(target, dist).run(mode, **opts)
         print(json.dumps(result_dict(result), indent=2, default=str))
         return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
     package = target / ".scaffold" / "install" / "packages" / args.command
@@ -979,6 +1291,109 @@ def never_adopted_after_install(host: str | Path) -> dict[str, Any]:
             and not lock.is_file()
         ),
     }
+
+
+def _import_lifecycle(host: Path) -> dict[str, Any]:
+    snap = snapshot_host(host)
+    return {
+        "host_class": snap.host_class,
+        "lifecycle": snap.host_class,
+        "project_yaml": (host / ".scaffold" / "project.yaml").is_file(),
+        "skills_lock": (host / ".scaffold" / "skills.lock").is_file(),
+        "tasks": (host / ".scaffold" / "tasks").exists(),
+        "sessions": (host / ".scaffold" / "sessions").exists(),
+        "changes": (host / ".scaffold" / "changes").exists(),
+    }
+
+
+def _import_success(
+    host: Path,
+    *,
+    outcome: str,
+    classification: str,
+    action: str,
+    verify: dict[str, Any],
+) -> dict[str, Any]:
+    life = _import_lifecycle(host)
+    return {
+        "outcome": outcome,
+        "classification": classification,
+        "action": action,
+        "problem": None,
+        "installation": verify.get("status"),
+        "lifecycle": life["host_class"],
+        "host_class": life["host_class"],
+        "skills": list(IMPORT_SKILL_LABELS),
+        "verify": verify,
+        "blockers": [],
+        "project_yaml": life["project_yaml"],
+        "skills_lock": life["skills_lock"],
+        "task_book": life["tasks"],
+        "develop_session": life["sessions"],
+        "change_record": life["changes"],
+    }
+
+
+def _import_failure(
+    host: Path,
+    *,
+    classification: str,
+    problem: str,
+    verify: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    life = _import_lifecycle(host) if host.exists() else {
+        "host_class": "UNKNOWN",
+        "lifecycle": "UNKNOWN",
+        "project_yaml": False,
+        "skills_lock": False,
+        "tasks": False,
+        "sessions": False,
+        "changes": False,
+    }
+    return {
+        "outcome": IMPORT_FAILED,
+        "classification": classification,
+        "action": None,
+        "problem": problem,
+        "installation": verify.get("status"),
+        "lifecycle": life["host_class"],
+        "host_class": life["host_class"],
+        "skills": list(IMPORT_SKILL_LABELS),
+        "verify": verify,
+        "blockers": list(blockers),
+        "project_yaml": life["project_yaml"],
+        "skills_lock": life["skills_lock"],
+        "task_book": life["tasks"],
+        "develop_session": life["sessions"],
+        "change_record": life["changes"],
+    }
+
+
+def _import_problem(verify: dict[str, Any], blockers: list[str]) -> str:
+    text = " ".join(str(item) for item in blockers)
+    reasons = " ".join(str(item) for item in (verify.get("reasons") or []))
+    combined = f"{text} {reasons}".lower()
+    if verify.get("status") == VERIFY_DRIFTED or "unexpected drift" in combined:
+        return IMPORT_PROBLEM_MANAGED_DRIFT
+    if any(
+        token in combined
+        for token in (
+            "unmanaged",
+            "collision",
+            "refusing to coexist",
+            "refusing to replace",
+            "refusing to overwrite",
+        )
+    ):
+        return IMPORT_PROBLEM_OWNERSHIP
+    if verify.get("status") == VERIFY_INCOMPATIBLE:
+        return IMPORT_PROBLEM_INCOMPATIBLE
+    if verify.get("status") == VERIFY_UNKNOWN:
+        return IMPORT_PROBLEM_UNKNOWN
+    if blockers:
+        return IMPORT_PROBLEM_INSTALL
+    return IMPORT_PROBLEM_VERIFY
 
 
 def _default_distribution() -> Path:
@@ -1299,9 +1714,26 @@ def _managed_region_issues(
             continue
         rec = recorded.get((rel, region_id))
         if rec is not None and rec["digest"] != expected:
-            incompat.append(
-                f"install.yaml MANAGED_REGION digest for {rel} is not the canonical region"
-            )
+            path = host / rel
+            live_ok = False
+            if path.is_file():
+                try:
+                    text = path.read_text(encoding="utf-8")
+                    slice_text, _parse_issues = _live_region_slice(rel, text)
+                    live_digest = (
+                        sha256_bytes(slice_text.encode("utf-8")) if slice_text else None
+                    )
+                    live_ok = live_digest in {
+                        expected,
+                        rec["digest"],
+                        *predecessor_region_digests(rel),
+                    }
+                except (OSError, UnicodeError):
+                    live_ok = False
+            if not live_ok:
+                incompat.append(
+                    f"install.yaml MANAGED_REGION digest for {rel} is not the canonical region"
+                )
         path = host / rel
         if not path.is_file():
             missing.append(rel)
@@ -1319,8 +1751,18 @@ def _managed_region_issues(
         if slice_text is None:
             missing.append(rel)
             continue
-        if sha256_bytes(slice_text.encode("utf-8")) != expected:
-            drifted.append(rel)
+        live_digest = sha256_bytes(slice_text.encode("utf-8"))
+        recorded_digest = rec["digest"] if rec is not None else None
+        if live_digest == expected:
+            if recorded_digest not in {None, expected}:
+                missing.append(rel)
+            continue
+        if live_digest in predecessor_region_digests(rel) or (
+            recorded_digest is not None and live_digest == recorded_digest
+        ):
+            missing.append(rel)
+            continue
+        drifted.append(rel)
     return missing, drifted, incompat
 
 
@@ -1354,8 +1796,13 @@ def _git_attr_policy_issues(
         missing.append(GITATTRIBUTES)
         return missing, incompat
     inner = text[span[0] : span[1]]
+    slice_text, _ = _live_region_slice(GITATTRIBUTES, text)
+    stale = False
+    if slice_text:
+        live_digest = sha256_bytes(slice_text.encode("utf-8"))
+        stale = live_digest in predecessor_region_digests(GITATTRIBUTES)
     for line in GITATTR_REQUIRED_LINES:
-        if line not in inner:
+        if line not in inner and not stale:
             incompat.append(f".gitattributes managed region omits {line}")
     after = text[span[1] :]
     for raw in after.splitlines():
@@ -1433,7 +1880,7 @@ def _unmanaged_collision(
 ) -> str | None:
     if not dest.exists():
         return None
-    if rel in {AGENTS_MD, GITATTRIBUTES}:
+    if rel in {AGENTS_MD, GITATTRIBUTES, HOOKS_JSON_REL}:
         return None
     if rel == INSTALL_DIR or rel.startswith(INSTALL_DIR + "/"):
         return None
@@ -1463,6 +1910,7 @@ def _replace_or_add_file(plan: InstallPlan, rel: str, data: bytes) -> None:
 def _manifest_from_plan(plan: InstallPlan) -> dict[str, Any]:
     files = []
     regions = []
+    fragments = []
     for row in sorted(plan.files, key=lambda item: item.rel):
         if row.ownership == OWNERSHIP_MANAGED_REGION and row.region_id:
             digest = expected_region_digest(row.rel)
@@ -1474,6 +1922,18 @@ def _manifest_from_plan(plan: InstallPlan) -> dict[str, Any]:
                     "ownership": OWNERSHIP_MANAGED_REGION,
                     "region_id": row.region_id,
                     "digest": digest,
+                }
+            )
+            continue
+        if row.ownership == OWNERSHIP_MANAGED_JSON_FRAGMENT and row.region_id:
+            fragments.append(
+                {
+                    "path": row.rel,
+                    "ownership": OWNERSHIP_MANAGED_JSON_FRAGMENT,
+                    "fragment_id": row.region_id,
+                    "digest": expected_hook_fragment_digest(),
+                    "command": HOOK_COMMAND,
+                    "events": list(HOOK_EVENTS),
                 }
             )
             continue
@@ -1495,6 +1955,7 @@ def _manifest_from_plan(plan: InstallPlan) -> dict[str, Any]:
         "skills": dict(plan.skills),
         "bridges": dict(plan.bridges),
         "regions": regions,
+        "json_fragments": fragments,
         "skills_lock_relationship": (
             "install.yaml is pre-Adoption product provenance; "
             "skills.lock is Adoption-time expected-identity authority"
@@ -1586,8 +2047,15 @@ def _agents_preservation_note(plan: InstallPlan) -> dict[str, Any]:
         if issues:
             preserved_body = False
         else:
-            start = new_spans.get(CONSUMER_INSTALL_REGION, (len(new_text), len(new_text)))[0]
-            preserved_body = original.rstrip("\n") in new_text[:start] or original in new_text
+            old_spans, old_issues = parse_managed_regions(original)
+            new_start = new_spans.get(CONSUMER_INSTALL_REGION, (len(new_text), len(new_text)))[0]
+            if not old_issues and CONSUMER_INSTALL_REGION in old_spans:
+                old_start, old_end = old_spans[CONSUMER_INSTALL_REGION]
+                human = original[:old_start] + original[old_end:]
+                new_human = new_text[:new_start] + new_text[new_spans[CONSUMER_INSTALL_REGION][1]:]
+                preserved_body = human.strip() == new_human.strip() or not human.strip()
+            else:
+                preserved_body = original.rstrip("\n") in new_text[:new_start] or original in new_text
     return {
         "action": "create" if AGENTS_MD in plan.added else (
             "managed-region" if AGENTS_MD in plan.modified else "unchanged"
@@ -1634,4 +2102,127 @@ def _gitattributes_preservation_note(plan: InstallPlan) -> dict[str, Any]:
         "human_body_preserved": preserved_body,
         "region": GITATTR_REGION if has_gitattributes_region(new_text or original) else None,
         "whole_file_replace": False,
+    }
+
+
+def _plan_hooks_json(plan: InstallPlan) -> str | None:
+    path = plan.host / HOOKS_JSON_REL
+    existing: Any = None
+    if path.exists():
+        if not path.is_file():
+            return ".cursor/hooks.json exists and is not a file"
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            return ".cursor/hooks.json is not valid JSON; refusing to overwrite"
+    try:
+        merged = merge_scaffold_hooks(existing)
+    except ValueError as exc:
+        return str(exc)
+    _replace_or_add_file(plan, HOOKS_JSON_REL, dumps_hooks_json(merged).encode("utf-8"))
+    for row in plan.files:
+        if row.rel == HOOKS_JSON_REL:
+            row.ownership = OWNERSHIP_MANAGED_JSON_FRAGMENT
+            row.region_id = FRAGMENT_ID
+    return None
+
+
+def _hook_fragment_issues(
+    host: Path, manifest: dict[str, Any]
+) -> tuple[list[str], list[str], list[str]]:
+    missing: list[str] = []
+    drifted: list[str] = []
+    incompat: list[str] = []
+    recorded = {
+        (row["path"], row["fragment_id"]): row
+        for row in manifest_fragment_records(manifest)
+    }
+    rec = recorded.get((HOOKS_JSON_REL, FRAGMENT_ID))
+    expected = expected_hook_fragment_digest()
+    path = host / HOOKS_JSON_REL
+    if rec is not None and rec["digest"] != expected:
+        missing.append(HOOKS_JSON_REL)
+    if not path.is_file():
+        missing.append(HOOKS_JSON_REL)
+        return sorted(set(missing)), drifted, incompat
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        incompat.append(".cursor/hooks.json is malformed")
+        return missing, drifted, incompat
+    fragment, frag_missing, frag_drifted, frag_incompat = inspect_scaffold_hook_fragment(
+        data
+    )
+    missing.extend(frag_missing)
+    drifted.extend(frag_drifted)
+    incompat.extend(frag_incompat)
+    if rec is None:
+        missing.append(HOOKS_JSON_REL)
+    if fragment is not None:
+        live = json.dumps(
+            fragment, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        )
+        if sha256_bytes(live.encode("utf-8")) != expected:
+            drifted.append(HOOKS_JSON_REL)
+    return sorted(set(missing)), sorted(set(drifted)), incompat
+
+
+def _first_use_rule_issues(host: Path) -> list[str]:
+    path = host / FIRST_USE_RULE_REL
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ["Cursor first-use rule is unreadable"]
+    meta = parse_always_apply_rule(text)
+    issues: list[str] = []
+    if not meta.get("alwaysApply"):
+        issues.append("Cursor first-use rule is not represented as alwaysApply: true")
+    if meta.get("is_skill"):
+        issues.append("Cursor first-use rule must not be a Skill")
+    if "alwaysApply: true" not in text:
+        issues.append("Cursor first-use rule metadata omits alwaysApply: true")
+    return issues
+
+
+def _hooks_json_preservation_note(plan: InstallPlan) -> dict[str, Any]:
+    original = ""
+    path = plan.host / HOOKS_JSON_REL
+    if path.is_file():
+        try:
+            original = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            original = ""
+    new_text = ""
+    for row in plan.files:
+        if row.rel == HOOKS_JSON_REL:
+            new_text = row.data.decode("utf-8")
+            break
+    preserved = True
+    if original:
+        try:
+            old = json.loads(original)
+            new = json.loads(new_text) if new_text else {}
+            old_hooks = old.get("hooks") if isinstance(old.get("hooks"), dict) else {}
+            new_hooks = new.get("hooks") if isinstance(new.get("hooks"), dict) else {}
+            for event, items in old_hooks.items():
+                if not isinstance(items, list):
+                    continue
+                human = [item for item in items if not is_scaffold_hook_command(item)]
+                live = new_hooks.get(event) if isinstance(new_hooks.get(event), list) else []
+                live_human = [item for item in live if not is_scaffold_hook_command(item)]
+                if human != live_human:
+                    preserved = False
+                    break
+        except (json.JSONDecodeError, TypeError, ValueError):
+            preserved = False
+    return {
+        "action": "create" if HOOKS_JSON_REL in plan.added else (
+            "managed-fragment" if HOOKS_JSON_REL in plan.modified else "unchanged"
+        ),
+        "unrelated_hooks_preserved": preserved,
+        "fragment_id": FRAGMENT_ID,
+        "whole_file_replace": False,
+        "ownership": OWNERSHIP_MANAGED_JSON_FRAGMENT,
     }

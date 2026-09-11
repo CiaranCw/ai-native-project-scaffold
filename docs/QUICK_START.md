@@ -1,15 +1,25 @@
 # Internal Pilot Quick Start
 
-Install Scaffold into an existing project with the project-local consumer
-installer, then open that **host** repository. After install, teammates do
-not need a second Scaffold checkout, `PYTHONPATH` to SOURCE, or an absolute
-Distribution path. See [CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md).
-
-From a Scaffold Distribution checkout (install/update time only):
+Clone this Scaffold repository, import it into an existing project, then open
+that **host** repository. After import, teammates do not need a second Scaffold
+checkout, `PYTHONPATH` to SOURCE, or an absolute Distribution path. See
+[CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md).
 
 ```text
-python src/scaffold_consumer.py install --host <project-root>
+git clone <Scaffold repository>
+cd <Scaffold repository>
+python src/scaffold_consumer.py import-project --host <project>
 ```
+
+`--host .` is also supported. Import is the normal onboarding command. It
+reuses INSTALL / UPDATE / VERIFY / STATUS. It does not adopt the project.
+
+On a never-adopted host, ordinary business work is **not authorized** until
+Understand bootstrap and explicit human approval of that exact Adoption Plan
+complete. The user request is not that approval. On Cursor, Trusted-workspace
+project hooks enforce this as a client adapter. See
+[CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md) and
+[implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](implementation/FIRST_USE_ENFORCEMENT_DESIGN.md).
 
 Open the project and speak naturally:
 
@@ -52,6 +62,6 @@ apply.
 When stopped, the Agent should explain what it observed, why it stopped, what
 you need to decide, what approval would do, and what remains unchanged.
 
-Current product path: install the project-local consumer bundle into the host,
-then a fresh Agent discovers Skills from repository-local adapters. The
-operator provides the Distribution checkout only at install/update time.
+Current product path: import Scaffold into the host with one command, then a
+fresh Agent discovers Skills from repository-local adapters. The
+Distribution checkout is needed only at import/install/update time.

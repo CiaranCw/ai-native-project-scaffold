@@ -35,6 +35,7 @@ This distribution repository does **not** contain a live host tree.
 │   ├── install/                  MANAGED project-local consumer installation
 │   │   ├── install.yaml          pre-Adoption product provenance
 │   │   ├── run.py                local runtime launcher
+│   │   ├── cursor_first_use_hook.py Cursor first-use adapter
 │   │   ├── runtime/              vendored P5–P8 + scaffold_entry
 │   │   ├── packages/             understand / develop / test / submit
 │   │   └── releases/installed.yaml
@@ -50,6 +51,8 @@ This distribution repository does **not** contain a live host tree.
 ├── .cursor/skills/scaffold-develop/      exactly four; AGENTS.md routes first contact
 ├── .cursor/skills/scaffold-test/
 ├── .cursor/skills/scaffold-submit/
+├── .cursor/rules/scaffold-first-use.mdc  Always Apply first-use rule (MANAGED)
+├── .cursor/hooks.json                    mixed-ownership; Scaffold fragment only
 ├── .gitattributes                human rules preserved; MANAGED_REGION last
 │                                 (not whole-file Scaffold-owned)
 │                                 `.scaffold/install/**` and four adapters `-text`

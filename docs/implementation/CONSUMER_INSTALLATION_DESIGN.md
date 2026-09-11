@@ -42,11 +42,17 @@ This is a defined product surface, not a dump of the Scaffold repository.
   .cursor/skills/scaffold-test/SKILL.md
   .cursor/skills/scaffold-submit/SKILL.md
   (exactly four Cursor adapters; AGENTS.md is first-contact routing)
+  .cursor/rules/scaffold-first-use.mdc
+                                     Always Apply Cursor first-use rule
+                                     (MANAGED; not a Skill)
+  .cursor/hooks.json                 mixed-ownership; Scaffold owns only
+                                     the scaffold-first-use fragment
   .agents/skills/<unrelated>/        NEVER owned or overwritten
   .scaffold/install/                 MANAGED consumer plane
     install.yaml                     pre-Adoption provenance
     .gitignore                       ignore pyc/cache only
     run.py                           local launcher
+    cursor_first_use_hook.py         Cursor first-use adapter
     runtime/                         copy of Distribution src/*.py
       scaffold_p5/ … scaffold_p8/
       scaffold_entry.py
@@ -69,8 +75,9 @@ raw SHA-256, traceable to a Scaffold release/commit:
 
 - `.scaffold/install/**`
 - `.cursor/skills/scaffold-understand|develop|test|submit/**`
+- `.cursor/rules/scaffold-first-use.mdc`
 
-Mixed-ownership host files are **MANAGED_REGION** only:
+Mixed-ownership host files are **MANAGED_REGION** or **MANAGED_JSON_FRAGMENT**:
 
 `AGENTS.md`: insert or replace only the `scaffold-consumer` managed region.
 Human text and an existing `agents-router` region are preserved. Whole-file
@@ -80,7 +87,12 @@ replace is forbidden. Human edits outside the region are not install drift.
 and keep it last so `-text` wins over host `text=auto` / `eol=lf` rules.
 Human Git attribute lines stay. Whole-file replace is forbidden. Git `-text`
 may govern checkout of the whole host file; Scaffold integrity authority
-covers only the managed region.
+covers only the managed region. The region also marks
+`.cursor/rules/scaffold-first-use.mdc` and `.cursor/hooks.json` as `-text`.
+
+`.cursor/hooks.json`: merge only the Scaffold `preToolUse` /
+`beforeShellExecution` / `subagentStart` / `beforeMCPExecution` entries
+identified as `fragment_id: scaffold-first-use`. Do not claim unrelated JSON.
 
 `.agents/skills/impeccable` and any other non-scaffold client skill: preserve.
 
@@ -100,11 +112,17 @@ From a Scaffold Distribution checkout (operator may know this path **only at
 install/update time**):
 
 ```text
+python src/scaffold_consumer.py import-project --host <project-root>
 python src/scaffold_consumer.py install --host <project-root>
 python src/scaffold_consumer.py update --host <project-root>
 python src/scaffold_consumer.py verify --host <project-root>
 python src/scaffold_consumer.py plan --host <project-root>
 ```
+
+`import-project` is the ordinary teammate entry. It classifies the host and
+reuses INSTALL / UPDATE / VERIFY / STATUS. It is not a fifth Skill and not
+Adoption. `--host` is an operation-time locator only; it is not durable
+project authority. A current VALID installation is `ALREADY_READY`.
 
 `--distribution` defaults to the Distribution repository that contains the
 invoked `src/scaffold_consumer.py`.
@@ -115,6 +133,15 @@ After installation, teammates run:
 python .scaffold/install/run.py verify
 python .scaffold/install/run.py understand bootstrap
 ```
+
+Approved Adoption apply uses the same launcher with `--approved --plan-digest <hex>`.
+That flag is an APPLY REQUEST, not human provenance. The business-task text
+is not that approval. On Cursor, Agent-originated apply is authorized only
+by `beforeShellExecution` `permission=ask`. Other clients need an equivalent
+adapter to claim hard enforcement.
+
+First-use Cursor enforcement is documented in
+[FIRST_USE_ENFORCEMENT_DESIGN.md](FIRST_USE_ENFORCEMENT_DESIGN.md).
 
 ## Update
 
@@ -145,7 +172,9 @@ digests for fully managed paths, managed-region digests for `AGENTS.md` and
 effective, manifest consistency, no operational absolute Distribution path.
 An invalid managed adapter set is `INCOMPATIBLE` (fail closed).
 A missing Git-attributes or AGENTS managed region is `INCOMPLETE` so UPDATE
-can repair it. Human edits outside those regions are not `DRIFTED`. A later
+can repair it. Missing first-use rule/hook/fragment is `INCOMPLETE` so an RC2
+host can UPDATE. Human edits outside those regions, and unrelated hook
+entries, are not `DRIFTED`. A later
 human Git rule after the clone-stability region is `INCOMPATIBLE`; UPDATE
 may move the intact region last without deleting the human rule.
 

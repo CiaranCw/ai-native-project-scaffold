@@ -1,0 +1,91 @@
+{
+  "freeze": "FIRST_USE_ENFORCEMENT_C04_HUMAN_APPROVAL",
+  "supersedes": "FIRST_USE_ENFORCEMENT_PC_CONSUMER_001",
+  "finding": "PC-CONSUMER-001-B2 human approval provenance bypass; digest-bound Adoption apply is an APPLY REQUEST; Cursor beforeShellExecution permission=ask / FORCE_PROMPT is the Agent-originated human confirmation surface",
+  "created_at": "2026-09-11T07:50:59Z",
+  "base_head": "ee8a7eb9eca2b82a519ba9172bef358dedb64364",
+  "base_tree": "480331e5a36d281177325a860d73b754d8953765",
+  "focused_gate": {
+    "tests": "test_first_use_enforcement + test_consumer_installation + P5Understand A/B/K",
+    "ran": 136,
+    "fail": 0,
+    "error": 0,
+    "unexpected_skip": 0,
+    "result": "PASS",
+    "first_use_enforcement": {
+      "ran": 56,
+      "result": "OK"
+    },
+    "consumer_and_p5": {
+      "ran": 80,
+      "result": "OK"
+    }
+  },
+  "files": [
+    {
+      "path": "docs/CONSUMER_INSTALLATION.md",
+      "sha256": "8f893de6b5016a404423f52d2a3d818e5a7c0ad6d1be34efc4ad1495fec36fe8",
+      "size": 7907
+    },
+    {
+      "path": "docs/QUICK_START.md",
+      "sha256": "0de28f76e0cb4e1c66b0ce5462945bf1bf02fd7757610a0e500e73594240691f",
+      "size": 3279
+    },
+    {
+      "path": "docs/architecture/ADOPTION_FLOW.md",
+      "sha256": "b8d3c13ce94c0a9781ab0bee4105931780d637416809565abf5e1c49c419ed3c",
+      "size": 8381
+    },
+    {
+      "path": "docs/architecture/PROJECT_LAYOUT.md",
+      "sha256": "670e9457244229569cb6338c297e7ff80bcd765671a5cef2ed72ed687c0a0052",
+      "size": 9702
+    },
+    {
+      "path": "docs/implementation/CONSUMER_INSTALLATION_DESIGN.md",
+      "sha256": "bb37794c18e6d32939c81c1c2d66552b930fba70229ea8b412d327c0ddbe9145",
+      "size": 8715
+    },
+    {
+      "path": "docs/implementation/FIRST_USE_ENFORCEMENT_DESIGN.md",
+      "sha256": "1aeaca93292b77e9a8d94d2d6d92e784e62b751ffb0c059c40069c0e1593182d",
+      "size": 4590
+    },
+    {
+      "path": "docs/implementation/FIRST_USE_WALKTHROUGH.md",
+      "sha256": "c15080f7972761f172ce9071f3c78c3da19295fd5ba5c0ca08ff7341d2fab5f2",
+      "size": 4473
+    },
+    {
+      "path": "docs/implementation/SAME_ROOT_CAUSE_REVIEW.md",
+      "sha256": "e375a3fbe0f88a77addff3d4ae421b9b9534b8c7cb10159f076d72005699cf5d",
+      "size": 3645
+    },
+    {
+      "path": "src/scaffold_p5/agents.py",
+      "sha256": "ccbc55c124627e10b6486f15ae7ec822da17961aff67488f84c7e5f5117840bb",
+      "size": 14666
+    },
+    {
+      "path": "src/scaffold_p5/consumer_install.py",
+      "sha256": "6e82148d3ac16c3807c2ee5489df12861ee50e0e351540753a87fd740902feaf",
+      "size": 71075
+    },
+    {
+      "path": "src/scaffold_p5/first_use.py",
+      "sha256": "9ffccb11edfea8a6f40d6d140e7781e817f4ae396ac7655095d48b70ef2d5ff8",
+      "size": 26218
+    },
+    {
+      "path": "tests/test_consumer_installation.py",
+      "sha256": "f40f9f92fb3ed52d3913add09760871171db147a8f184c28633f71da2cbec871",
+      "size": 62006
+    },
+    {
+      "path": "tests/test_first_use_enforcement.py",
+      "sha256": "1fd228494efb46510742c344a4319b7b33a374a54212112cb85a1be8ba9c5713",
+      "size": 44128
+    }
+  ]
+}

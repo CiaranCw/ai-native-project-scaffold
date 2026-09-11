@@ -17,6 +17,15 @@ Understand
 Develop / Test / Submit stay independent.
 ```
 
+Normative lifecycle gates are mandatory authorization boundaries, not
+advisory guidance. `NOT_ADOPTED` forbids ordinary project mutation until
+Understand bootstrap and explicit human Plan approval complete. On Cursor,
+`--approved --plan-digest` is an APPLY REQUEST; Agent-originated apply is
+authorized only by `beforeShellExecution` `permission=ask`. Cursor project
+hooks are a client enforcement adapter for that boundary. They are not a
+fifth Skill. Other clients need an equivalent adapter to claim hard
+enforcement.
+
 ---
 
 ## Two layers
