@@ -1,11 +1,25 @@
 # AI-Native Project Scaffold
 
-Portable project-development scaffold for AI-collaborative work. Import it into an existing project so a new Agent can **understand, develop, test, submit, and hand off** without depending on chat history.
+Portable project-development scaffold for AI-collaborative work. Import it into
+an existing project so a new Agent can **understand, develop, test, submit, and
+hand off** without depending on chat history.
 
-This is **not** a game-test framework. Game projects are the primary research subject. The top-level architecture MUST NOT bind to a game engine, SCM, IDE, Agent client, or model vendor.
+This is **not** a game-test framework. Game projects are the primary research
+subject. The Core architecture is **not** bound to a game engine, SCM, IDE,
+Agent client, or model vendor.
 
-Internal real-project entry: [docs/QUICK_START.md](docs/QUICK_START.md) and
-project-local installation: [docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md).
+Cursor is currently a **supported project-local client adapter**. Project Import
+installs Cursor Skill adapters plus first-use rule/hook enforcement into the
+**host** project. Those adapters are not canonical top-level Skills. Clients
+without an equivalent enforcement adapter do not have the same hard first-use
+enforcement.
+
+This Distribution checkout has no live consumer installation and no live
+adopted-host `.scaffold/project.yaml` or `.scaffold/skills.lock` at the
+repository root. That is a Distribution/host distinction, not a claim that the
+product has no Cursor integration.
+
+## Quick Start
 
 ```text
 git clone <Scaffold repository>
@@ -14,89 +28,68 @@ python src/scaffold_consumer.py import-project --host <project>
 ```
 
 Then open the imported project in Cursor and give the Agent a normal business
-task. No Scaffold-specific prompt is required.
+request. No Scaffold-specific task prompt is required.
 
-## Status
+`--host .` is supported. Details:
+[docs/QUICK_START.md](docs/QUICK_START.md) and
+[docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md).
 
-**P0 — CLOSED / BASELINED** at `6ea16e343fdd4324983786186b17b2d59b059fb7`.
+## First use: import is not Adoption
 
-**P1 — CLOSED / BASELINED** at `3944e932c9a1d40a78402fc1d244c6a3d99e09f9`.
+`import-project` installs the project-local Scaffold surface. It does **not**
+Adopt the project.
 
-**P2 — CLOSED / BASELINED** at `59d0765de9552569d6aa92e58517b32143c27289`.
+For a fresh project, successful import leaves the host **NOT_ADOPTED**.
 
-**P3 — CLOSED / BASELINED** at `6a0091de9c4575e607bd8687744ee154cea7226c`.
+On first normal work:
 
-**P4 — CLOSED / BASELINED** at `56c7bdb3fa1e193b6fc54693ca635fa3c86e5f77`.
+1. the Agent discovers Scaffold;
+2. Understand bootstrap runs;
+3. **NEEDS_HUMAN** when approval is required;
+4. the human approves the exact Adoption Plan;
+5. Adoption completes;
+6. ordinary Develop / Test / Submit work can proceed.
 
-**FA-1 — PASS / CLOSED** at `2bf5a9a96acca45ccc919dd542bc914420674316`. Independent re-audit of the current P0–P4 Foundation passed. All blocking findings are closed.
+The user's ordinary business request is **not** Adoption approval.
 
-**P5 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Understand implementation passed final design, source, and local test review. Git history and `origin/main` are authoritative for the exact P5 baseline commit identity.
+See [docs/architecture/ADOPTION_FLOW.md](docs/architecture/ADOPTION_FLOW.md),
+[docs/contracts/ADOPTION_CONTRACT.md](docs/contracts/ADOPTION_CONTRACT.md),
+and [docs/implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](docs/implementation/FIRST_USE_ENFORCEMENT_DESIGN.md).
 
-**P6 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Test implementation passed final design, source, and local test review. Git history and `origin/main` are authoritative for the exact P6 baseline commit identity.
+## Current status
 
-**P7 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Develop implementation passed final design, source, and local test review. Git history and `origin/main` are authoritative for the exact P7 baseline commit identity.
+Published GitHub `main` RC:
+`80c421e56bb1d6ef3239d5186957a6c66a411db9`.
 
-**P8 — CLOSED / BASELINED / REMOTELY PUBLISHED.** Submit implementation passed final source and test review. Git history and `origin/main` are authoritative for the exact P8 baseline commit identity.
+Current `main` contains an **RC-level installable/importable product**. This
+repository does **not** claim a formal v2.0 release. There is no formal release
+tag.
 
-This tree is not an installable product release. FA-2 is independently
-PASS / CLOSED. P9 Repair/Migration is PASS / CLOSED. P10 Incremental
-Understanding / Multi-Agent is PASS / CLOSED. Post-P10 real-pilot corrections
-are in [docs/implementation/DIVE_PILOT_CORRECTION_01.md](docs/implementation/DIVE_PILOT_CORRECTION_01.md).
-DIVE Day-1 is not closed. This tree is not a v2.0 release.
+| Work | Current state |
+| --- | --- |
+| P0–P4 Foundation | CLOSED / BASELINED |
+| FA-1 | PASS / CLOSED |
+| P5 Understand, P6 Test, P7 Develop, P8 Submit | CLOSED / BASELINED / REMOTELY PUBLISHED |
+| FA-2 | PASS / CLOSED |
+| P9 Repair/Migration | PASS / CLOSED |
+| P10 Incremental Understanding / Multi-Agent | PASS / CLOSED |
+| DIVE | PASS / CLOSED |
+| Consumer Installation | PASS / CLOSED |
+| PC-CONSUMER-001 first-use lifecycle enforcement | PASS / CLOSED |
+| Project Import / Team Onboarding | PASS / CLOSED |
+| Agent3 / fresh Consumer behavioral pilot | **NOT STARTED** |
 
-## Authority
+## Current product surface
 
-Read in this order:
+- **Understand / Develop / Test / Submit** — exactly four canonical Skills
+- **project-local Consumer Installation** — managed runtime and packages in the host
+- **one-command Project Import** — `import-project`; not a Skill
+- **first-use lifecycle enforcement** — Cursor rule/hook adapter; not a Skill
+- **Repair/Migration** — Develop mode; not a fifth Skill
+- **Incremental Understanding / Multi-Agent**
+- **no auto-commit / no auto-push**
 
-1. This README (entry only)
-2. [docs/contracts/CONSTITUTION.md](docs/contracts/CONSTITUTION.md) — highest in-repo rules
-3. [docs/architecture/V2_ARCHITECTURE.md](docs/architecture/V2_ARCHITECTURE.md) — v2 structure and data flow
-4. [docs/contracts/ADOPTION_CONTRACT.md](docs/contracts/ADOPTION_CONTRACT.md) — first-attach contract (P1)
-5. [docs/architecture/ADOPTION_FLOW.md](docs/architecture/ADOPTION_FLOW.md) — first-attach flow (P1)
-6. [docs/contracts/PROJECT_CONTRACT.md](docs/contracts/PROJECT_CONTRACT.md) — active host structure (P2)
-7. [docs/architecture/PROJECT_LAYOUT.md](docs/architecture/PROJECT_LAYOUT.md) — active host layout (P2)
-8. [docs/contracts/RECORDS_CONTRACT.md](docs/contracts/RECORDS_CONTRACT.md) — development records (P3)
-9. [docs/architecture/RECORD_LIFECYCLES.md](docs/architecture/RECORD_LIFECYCLES.md) — record lifecycles (P3)
-10. [docs/contracts/SKILL_CONTRACT.md](docs/contracts/SKILL_CONTRACT.md) — Skill packages, lock, compatibility (P4)
-11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
-12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
-13. [docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md) — project-local consumer installation
-
-If these documents conflict, **Constitution wins**. P5 implementation notes: [docs/implementation/P5_UNDERSTAND.md](docs/implementation/P5_UNDERSTAND.md). P6 implementation notes: [docs/implementation/P6_TEST.md](docs/implementation/P6_TEST.md). P7 implementation notes: [docs/implementation/P7_DEVELOP.md](docs/implementation/P7_DEVELOP.md). P8 implementation notes: [docs/implementation/P8_SUBMIT.md](docs/implementation/P8_SUBMIT.md). P9 implementation notes: [docs/implementation/P9_REPAIR_MIGRATION.md](docs/implementation/P9_REPAIR_MIGRATION.md). P10 implementation notes: [docs/implementation/P10_INCREMENTAL_MULTIAGENT.md](docs/implementation/P10_INCREMENTAL_MULTIAGENT.md). Post-P10 real-pilot corrections: [docs/implementation/DIVE_PILOT_CORRECTION_01.md](docs/implementation/DIVE_PILOT_CORRECTION_01.md). This distribution repository must not contain a live adopted-host `.scaffold/project.yaml` or `.scaffold/skills.lock`.
-
-## Historical v1
-
-`ai-native-game-scaffold` **v1.0.1** is **FROZEN, READ-ONLY REFERENCE**.
-
-- v1 is a Game Legibility / Test Runtime historical baseline.
-- v2 does **not** continue that repository.
-- Do **not** copy the v1 tree into v2.
-- Later phases MAY selectively reuse qualified v1 capabilities after inspect → qualify → map → migrate → revalidate. See Architecture.
-
-## Current
-
-P0–P4 Foundation is independently audited and closed. P5 Understand, P6 Test, P7 Develop, and P8 Submit implementation phases are **CLOSED / BASELINED / REMOTELY PUBLISHED**; later FA-2 corrections were applied in the current unreleased candidate. FA-2 is independently PASS / CLOSED. P9 Repair/Migration is PASS / CLOSED. P10 Incremental Understanding / Multi-Agent is PASS / CLOSED. Post-P10 real-pilot corrections are in [docs/implementation/DIVE_PILOT_CORRECTION_01.md](docs/implementation/DIVE_PILOT_CORRECTION_01.md). DIVE Day-1 is not closed.
-
-Current tree (unreleased candidate, not a v2.0 release):
-
-- Understand package at `skills/understand/`
-- Test package at `skills/test/`
-- Develop package at `skills/develop/`
-- Submit package at `skills/submit/`
-- P5 runtime at `src/scaffold_p5/`
-- P6 runtime at `src/scaffold_p6/`
-- P7 runtime at `src/scaffold_p7/`
-- P8 runtime at `src/scaffold_p8/`
-- P9 Repair/Migration supporting runtime in `src/scaffold_p7/` plus `tests/test_p9_repair_migration.py`
-- P10 incremental understanding / zero-context resume in `src/scaffold_p5/` plus `tests/test_p10_incremental_multiagent.py`
-- ordinary local P5/P6/P7/P8 tests and non-authoritative fixtures at `tests/`
-- project-local consumer installer at `src/scaffold_consumer.py` / `src/scaffold_p5/consumer_install.py`
-- no live adopted-host `.scaffold/` lock/project state at the distribution repository root
-- no Claude / Cursor / Codex client configs in this Distribution tree
-- no v1 source tree and no fifth top-level Skill
-- no auto-commit or auto-push
-
-## Four Skills (names only)
+## Four Skills
 
 | Skill | Question it answers |
 | --- | --- |
@@ -105,9 +98,56 @@ Current tree (unreleased candidate, not a v2.0 release):
 | **Test** | What was actually verified for the given scope, and with what result? |
 | **Submit** | Does the **real** working tree meet submission conditions? |
 
-Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Structural Review are **not** top-level Skills. Their homes are defined in the Constitution.
+Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation,
+Structural Review, Project Import, and the first-use hook/rule are **not**
+top-level Skills. Their homes are defined in the Constitution.
 
-## Phase map
+## Authority
+
+Read in this order:
+
+1. This README (entry only)
+2. [docs/contracts/CONSTITUTION.md](docs/contracts/CONSTITUTION.md) — highest in-repo rules
+3. [docs/architecture/V2_ARCHITECTURE.md](docs/architecture/V2_ARCHITECTURE.md) — v2 structure and data flow
+4. [docs/QUICK_START.md](docs/QUICK_START.md) — onboarding
+5. [docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md) — project-local installation and import
+6. [docs/contracts/ADOPTION_CONTRACT.md](docs/contracts/ADOPTION_CONTRACT.md) — first-attach contract
+7. [docs/architecture/ADOPTION_FLOW.md](docs/architecture/ADOPTION_FLOW.md) — first-attach flow
+8. [docs/implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](docs/implementation/FIRST_USE_ENFORCEMENT_DESIGN.md) — first-use enforcement
+9. [docs/contracts/PROJECT_CONTRACT.md](docs/contracts/PROJECT_CONTRACT.md) — active host structure
+10. [docs/contracts/SKILL_CONTRACT.md](docs/contracts/SKILL_CONTRACT.md) — Skill packages, lock, compatibility
+
+Further layout, records, routing, and implementation notes:
+
+- [docs/architecture/PROJECT_LAYOUT.md](docs/architecture/PROJECT_LAYOUT.md)
+- [docs/contracts/RECORDS_CONTRACT.md](docs/contracts/RECORDS_CONTRACT.md)
+- [docs/architecture/RECORD_LIFECYCLES.md](docs/architecture/RECORD_LIFECYCLES.md)
+- [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md)
+- [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md)
+- [docs/implementation/FIRST_USE_WALKTHROUGH.md](docs/implementation/FIRST_USE_WALKTHROUGH.md)
+- [docs/implementation/CONSUMER_INSTALLATION_DESIGN.md](docs/implementation/CONSUMER_INSTALLATION_DESIGN.md)
+- [docs/implementation/P5_UNDERSTAND.md](docs/implementation/P5_UNDERSTAND.md)
+- [docs/implementation/P6_TEST.md](docs/implementation/P6_TEST.md)
+- [docs/implementation/P7_DEVELOP.md](docs/implementation/P7_DEVELOP.md)
+- [docs/implementation/P8_SUBMIT.md](docs/implementation/P8_SUBMIT.md)
+- [docs/implementation/P9_REPAIR_MIGRATION.md](docs/implementation/P9_REPAIR_MIGRATION.md)
+- [docs/implementation/P10_INCREMENTAL_MULTIAGENT.md](docs/implementation/P10_INCREMENTAL_MULTIAGENT.md)
+
+If these documents conflict, **Constitution wins**.
+
+## Historical context
+
+`ai-native-game-scaffold` **v1.0.1** is **FROZEN, READ-ONLY REFERENCE**.
+
+- v1 is a Game Legibility / Test Runtime historical baseline.
+- v2 does **not** continue that repository.
+- Do **not** copy the v1 tree into v2.
+- Later phases MAY selectively reuse qualified v1 capabilities after
+  inspect → qualify → map → migrate → revalidate. See Architecture.
+
+Historical DIVE Day-1 correction notes:
+[docs/implementation/DIVE_PILOT_CORRECTION_01.md](docs/implementation/DIVE_PILOT_CORRECTION_01.md).
+Those notes are not current status. DIVE is PASS / CLOSED.
 
 | Phase | Focus |
 | --- | --- |
@@ -128,9 +168,11 @@ Bootstrap / Adoption, Refresh, Compatibility, Repair, Stage Validation, and Stru
 
 ## Next
 
-P10 Incremental Understanding / Multi-Agent is PASS / CLOSED. Post-P10
-real-pilot corrections are recorded in
-[docs/implementation/DIVE_PILOT_CORRECTION_01.md](docs/implementation/DIVE_PILOT_CORRECTION_01.md).
-DIVE Day-1 is not closed.
+Published RC3, Project Import, and first-use enforcement already exist on
+`main`.
 
-This repository does **not** claim v2.0 release.
+The next real validation is a **new** fresh Consumer workspace and an Agent3
+behavioral pilot.
+
+Agent3 has **not** started. This repository does **not** claim v2.0 released,
+production/general availability, or a formal release tag.
