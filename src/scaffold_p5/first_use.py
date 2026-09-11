@@ -53,8 +53,43 @@ READ_ONLY_TOOLS = frozenset(
         "SwitchMode",
         "list_dir",
         "ListDir",
+        "TabRead",
+        "ReadFile",
     }
 )
+READ_EVENTS = frozenset({"beforeReadFile", "beforeTabFileRead"})
+SHELL_EVENTS = frozenset({"beforeShellExecution"})
+TOOL_ALIASES = {
+    "read": "Read",
+    "readfile": "Read",
+    "tabread": "Read",
+    "grep": "Grep",
+    "glob": "Glob",
+    "semanticsearch": "SemanticSearch",
+    "codebasesearch": "codebase_search",
+    "websearch": "WebSearch",
+    "webfetch": "WebFetch",
+    "readlints": "ReadLints",
+    "listdir": "ListDir",
+    "shell": "Shell",
+    "bash": "Shell",
+    "terminal": "Shell",
+    "write": "Write",
+    "writefile": "Write",
+    "delete": "Delete",
+    "deletefile": "Delete",
+    "strreplace": "StrReplace",
+    "applypatch": "ApplyPatch",
+    "edit": "Edit",
+    "editfile": "EditFile",
+    "editnotebook": "EditNotebook",
+    "notebookedit": "NotebookEdit",
+    "task": "Task",
+    "callmcptool": "CallMcpTool",
+    "fetchmcpresource": "FetchMcpResource",
+}
+CMD_NAMES = frozenset({"cmd", "cmd.exe"})
+MUTATION_EVENTS = frozenset({"afterFileEdit", "afterTabFileEdit"})
 MUTATION_TOOLS = frozenset(
     {
         "Write",
@@ -64,6 +99,7 @@ MUTATION_TOOLS = frozenset(
         "EditNotebook",
         "DeleteFile",
         "WriteFile",
+        "EditFile",
         "Task",
         "CallMcpTool",
         "FetchMcpResource",
@@ -294,7 +330,9 @@ def evaluate_cursor_hook(
     data = payload if isinstance(payload, dict) else {}
     event = _hook_event(data)
     tool_name = _tool_name(data, event)
-    if _is_read_only_action(event, tool_name, data):
+    if not _is_mutation_operation(event, tool_name, data) and _is_read_only_action(
+        event, tool_name, data
+    ):
         return _allow("read-only first-use inspection")
     host_root = resolve_hook_host(data, host)
     if host_root is None:
@@ -312,7 +350,7 @@ def evaluate_cursor_hook(
             authority.get("agent_message") or AGENT_DENY_MESSAGE,
             reason="unknown MCP/external tool is fail-closed before Adoption",
         )
-    if event == "beforeShellExecution" or tool_name == "Shell":
+    if _is_shell_action(event, tool_name, data):
         command = _shell_command(data)
         kind, detail = classify_first_use_shell(command, host_root)
         if kind == SHELL_ASK_APPLY:
@@ -347,14 +385,16 @@ def classify_first_use_shell(
     must reach beforeShellExecution permission=ask.
     """
     raw = str(command or "").strip()
+    if raw.startswith("& "):
+        raw = raw[2:].strip()
     if not raw:
         return SHELL_DENY, "empty shell command is not a first-use lifecycle command"
     if SHELL_METACHAR_RE.search(raw):
         return SHELL_DENY, "shell metacharacters are not allowed before Adoption"
-    try:
-        argv = shlex.split(raw, posix=True)
-    except ValueError:
+    argv = _split_shell_argv(raw)
+    if argv is None:
         return SHELL_DENY, "shell command could not be parsed exactly"
+    argv = _unwrap_cmd_prefix(argv)
     if len(argv) < 2:
         return SHELL_DENY, "shell command is not an official Scaffold launcher invocation"
     if not _is_python_token(argv[0]):
@@ -396,15 +436,19 @@ def resolve_hook_host(
     if explicit is not None:
         candidates.append(Path(explicit))
     cwd = payload.get("cwd")
+    tool_input = _tool_input_object(payload)
     if not cwd:
-        tool_input = payload.get("tool_input")
-        if isinstance(tool_input, dict):
-            cwd = tool_input.get("working_directory")
+        cwd = tool_input.get("working_directory")
     if cwd:
         candidates.append(Path(str(cwd)))
     for root in payload.get("workspace_roots") or []:
         if root:
             candidates.append(Path(str(root)))
+    file_path = payload.get("file_path") or tool_input.get("file_path") or tool_input.get(
+        "path"
+    ) or tool_input.get("target_file")
+    if file_path:
+        candidates.append(Path(str(file_path)))
     seen: set[Path] = set()
     for start in candidates:
         try:
@@ -420,6 +464,27 @@ def resolve_hook_host(
     return None
 
 
+def decode_hook_stdin(stdin) -> str:
+    """Decode Cursor hook stdin. Windows may prefix UTF-8 JSON with a BOM."""
+    buffer = getattr(stdin, "buffer", None)
+    raw: bytes | str
+    if buffer is not None:
+        try:
+            raw = buffer.read()
+        except (OSError, ValueError, AttributeError):
+            raw = stdin.read() if hasattr(stdin, "read") else ""
+    elif hasattr(stdin, "read"):
+        raw = stdin.read()
+    else:
+        raw = ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8-sig")
+    text = str(raw or "")
+    if text.startswith("\ufeff"):
+        return text[1:]
+    return text
+
+
 def hook_main(
     argv: list[str] | None = None,
     stdin=None,
@@ -429,7 +494,7 @@ def hook_main(
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     try:
-        raw = stdin.read() if hasattr(stdin, "read") else ""
+        raw = decode_hook_stdin(stdin)
         payload = json.loads(raw or "{}")
         if not isinstance(payload, dict):
             raise ValueError("hook payload is not an object")
@@ -619,23 +684,38 @@ def _hook_event(payload: dict[str, Any]) -> str:
         return "subagentStart"
     if payload.get("mcp_server_name") is not None:
         return "beforeMCPExecution"
-    if "tool_name" in payload:
+    if "tool_name" in payload or "tool" in payload:
         return "preToolUse"
     if "command" in payload:
         return "beforeShellExecution"
     return "unknown"
 
 
+def _canonical_tool_name(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    if raw.lower().startswith("mcp:"):
+        rest = raw.split(":", 1)[1].strip()
+        return "MCP:" + (rest or "unknown")
+    compact = raw.replace("_", "").replace("-", "").replace(" ", "").lower()
+    return TOOL_ALIASES.get(compact, raw)
+
+
 def _tool_name(payload: dict[str, Any], event: str) -> str:
     if event == "subagentStart":
         return "Task"
-    name = str(payload.get("tool_name") or "").strip()
+    name = _canonical_tool_name(
+        str(payload.get("tool_name") or payload.get("tool") or "").strip()
+    )
     if name:
         return name
-    if event == "beforeShellExecution":
+    if event in SHELL_EVENTS:
         return "Shell"
     if event == "beforeMCPExecution":
         return "MCP:" + str(payload.get("tool_name") or "unknown")
+    if event in READ_EVENTS:
+        return "Read"
     return ""
 
 
@@ -651,23 +731,85 @@ def _is_mcp_action(event: str, tool_name: str, payload: dict[str, Any]) -> bool:
     return False
 
 
+def _is_mutation_operation(event: str, tool_name: str, payload: dict[str, Any]) -> bool:
+    if event in READ_EVENTS:
+        return False
+    if event in MUTATION_EVENTS or event == "subagentStart":
+        return True
+    if _is_mcp_action(event, tool_name, payload):
+        return True
+    if tool_name in MUTATION_TOOLS or tool_name == "Task":
+        return True
+    return False
+
+
 def _is_read_only_action(event: str, tool_name: str, payload: dict[str, Any]) -> bool:
+    if _is_mutation_operation(event, tool_name, payload):
+        return False
     if event in {"subagentStart", "beforeMCPExecution"}:
         return False
     if _is_mcp_action(event, tool_name, payload):
         return False
-    if tool_name == "Shell" or event == "beforeShellExecution":
+    if _is_shell_action(event, tool_name, payload):
         return False
+    if event in READ_EVENTS:
+        return True
     if tool_name in READ_ONLY_TOOLS:
         return True
     return False
 
 
+def _is_shell_action(event: str, tool_name: str, payload: dict[str, Any]) -> bool:
+    if _is_mcp_action(event, tool_name, payload):
+        return False
+    if event in SHELL_EVENTS or tool_name == "Shell":
+        return True
+    return bool(_shell_command(payload))
+
+
+def _tool_input_object(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("tool_input")
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
 def _shell_command(payload: dict[str, Any]) -> str:
-    tool_input = payload.get("tool_input")
-    if isinstance(tool_input, dict) and tool_input.get("command") is not None:
+    tool_input = _tool_input_object(payload)
+    if tool_input.get("command") is not None:
         return str(tool_input.get("command") or "")
-    return str(payload.get("command") or "")
+    if payload.get("command") is not None and payload.get("mcp_server_name") is None:
+        return str(payload.get("command") or "")
+    return ""
+
+
+def _split_shell_argv(raw: str) -> list[str] | None:
+    posix = "\\" not in raw
+    try:
+        argv = shlex.split(raw, posix=posix)
+    except ValueError:
+        if posix:
+            try:
+                argv = shlex.split(raw, posix=False)
+            except ValueError:
+                return None
+        else:
+            return None
+    return argv
+
+
+def _unwrap_cmd_prefix(argv: list[str]) -> list[str]:
+    if len(argv) >= 3 and Path(argv[0]).name.lower() in CMD_NAMES:
+        if argv[1].lower() in {"/c", "/k"}:
+            return argv[2:]
+    return argv
 
 
 def _is_python_token(token: str) -> bool:

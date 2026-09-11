@@ -44,7 +44,9 @@ clone host
        (run.py inserts .scaffold/install/runtime onto sys.path)
   → host is NOT_ADOPTED (no project.yaml / skills.lock)
   → ordinary feature request is NOT Adoption approval
-  → Cursor first-use hook denies project mutation
+  → Read / status / plain Understand bootstrap are allowed
+  → Cursor first-use hook denies actual project mutation
+    (operation identity, not path shape, determines Read authorization)
   → Agent must run Understand bootstrap
   → preview Adoption Plan; NEEDS_HUMAN means STOP
   → Agent may issue the digest-bound apply command only as an APPLY REQUEST

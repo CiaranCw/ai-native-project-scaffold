@@ -1,0 +1,52 @@
+{
+  "freeze": "FIRST_USE_PC_CONSUMER_002",
+  "finding": "PC-CONSUMER-002-B2 nameless file_path inferred as Read",
+  "supersedes": "FIRST_USE_PC_CONSUMER_002-B1 candidate that inferred beforeReadFile from nameless top-level file_path",
+  "created_at": "2026-09-11T11:40:00Z",
+  "base_head": "fbbc03aae6dc7e2998c45f1cc6238a0cea8d5d4f",
+  "policy": "operation identity, not path shape, determines Read authorization",
+  "focused_gate": {
+    "tests": "B2-01..B2-05, B2 bootstrap hook smoke, B1-01 Delete, B1-05 unknown path-only, B1-08 beforeReadFile, B1-09 ReadFile alias",
+    "ran": 10,
+    "fail": 0,
+    "error": 0,
+    "unexpected_skip": 0,
+    "result": "PASS"
+  },
+  "c04_ask_nonregression": true,
+  "b1_mutator_path_shape": "DENY",
+  "b2_nameless_file_path": "DENY",
+  "b2_explicit_before_read_file": "ALLOW",
+  "b2_recognized_readfile": "ALLOW",
+  "b2_delete_path_only": "DENY",
+  "b2_exact_apply": "ASK",
+  "plain_bootstrap_hook": "ALLOW",
+  "four_skills": ["understand", "develop", "test", "submit"],
+  "files": [
+    {
+      "path": "docs/implementation/FIRST_USE_ENFORCEMENT_DESIGN.md",
+      "sha256": "6a854e0a594715ada008d066a8e67275b2f2798a1a1b3f90a3ccc249305234c4",
+      "size": 5323
+    },
+    {
+      "path": "docs/implementation/FIRST_USE_WALKTHROUGH.md",
+      "sha256": "9ecf986e3549597ee7e84895a9ab122d725ff1657675e19b17582a2ee8322cf3",
+      "size": 4613
+    },
+    {
+      "path": "docs/implementation/SAME_ROOT_CAUSE_REVIEW.md",
+      "sha256": "6c4b428f5337c1749bc4c5aa9ac5d777716713e63db7d5dc91e293485eec3769",
+      "size": 3986
+    },
+    {
+      "path": "src/scaffold_p5/first_use.py",
+      "sha256": "91bca50abe22ac3c083397ab37ca54411a001450b3c03345d28c120b1691d46a",
+      "size": 30471
+    },
+    {
+      "path": "tests/test_pc_consumer_002.py",
+      "sha256": "60b990480de247a05c2d36ab6a9c42e7ca2beb9939ddc32994cba72ef468ecb2",
+      "size": 16997
+    }
+  ]
+}

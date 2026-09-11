@@ -57,7 +57,18 @@ After valid Adoption, this first-use gate no longer blocks solely because of
 
 While `NOT_ADOPTED`:
 
-- Allow read-only inspection (`Read` / `Grep` / `Glob` and equivalents).
+- Classify Cursor hook payloads by **known operation identity**, then
+  payload shape. A path-like field (`path` / `file_path` / `target_file`)
+  is not evidence that the operation is a Read. Known mutators
+  (`Write` / `Delete` / `EditNotebook` and aliases) are denied before any
+  read-only check. Unknown tools fail closed, including path-only and
+  path+content shapes. Windows hook stdin may include a UTF-8 BOM;
+  documented `beforeReadFile` event plus `file_path`, aliased Read
+  names, JSON-string `tool_input`, `cmd /c` wrappers, and Windows path
+  separators remain the same operations after identity is established.
+- Allow read-only inspection (`Read` / `Grep` / `Glob` / `beforeReadFile`
+  and equivalents). Do not require human approval to inspect the project or
+  generate an Adoption Plan.
 - Allow exact official first-use launcher commands:
   `python .scaffold/install/run.py` `verify` | `status` | `first-use` |
   `understand` | `understand bootstrap` (preview). Preview is not approval.

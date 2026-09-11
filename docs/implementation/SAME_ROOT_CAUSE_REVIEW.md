@@ -5,7 +5,8 @@ No product patch after freeze.
 
 | Failure mode | Status | Evidence |
 | --- | --- | --- |
-| Agent can discover Scaffold and still mutate a NOT_ADOPTED host | Closed | Client-neutral `BLOCK_PROJECT_MUTATION`; Cursor Always Apply rule + `failClosed` pre-tool hooks deny Write/Delete/Shell/Task/MCP before execution; FU01–FU30 |
+| Agent can discover Scaffold and still mutate a NOT_ADOPTED host | Closed | Client-neutral `BLOCK_PROJECT_MUTATION`; Cursor Always Apply rule + `failClosed` pre-tool hooks deny Write/Delete/arbitrary mutating Shell/Task/MCP before execution; FU01–FU30 |
+| First-use gate overblocks Read / status / plain bootstrap (PC-CONSUMER-002) | Closed after B2 | Operation identity, not path shape, determines Read authorization. Explicit `beforeReadFile`/Read/ReadFile ALLOW. Nameless `file_path` DENY. Path-shaped Delete/unknown DENY. Status/preview bootstrap ALLOW. Exact apply ASK |
 | Agent self-approves Adoption via `--approved --plan-digest` after reading the digest | Closed | That spelling is an APPLY REQUEST. `beforeShellExecution` returns `ask` / FORCE_PROMPT; no-user path leaves the host NOT_ADOPTED (PC-CONSUMER-001-B2; FU31–FU39) |
 | Soft AGENTS wording treated as optional | Closed | Normative first-use region plus structural hook; anti-rationalization language; ordinary user task is not approval |
 | Agent deletes/rewrites hook/rule/AGENTS to bypass first-use | Closed | Those mutation tools are themselves denied while NOT_ADOPTED (FU16–FU18) |
