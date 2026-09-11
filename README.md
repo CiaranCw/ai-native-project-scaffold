@@ -4,9 +4,8 @@ Portable project-development scaffold for AI-collaborative work. Import it into 
 
 This is **not** a game-test framework. Game projects are the primary research subject. The top-level architecture MUST NOT bind to a game engine, SCM, IDE, Agent client, or model vendor.
 
-Internal real-project pilot entry: [docs/QUICK_START.md](docs/QUICK_START.md).
-It explains the current local-Distribution requirement, natural-language
-entry, human gates, and why `.scaffold` normally should not be hand-edited.
+Internal real-project entry: [docs/QUICK_START.md](docs/QUICK_START.md) and
+project-local installation: [docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md).
 
 ## Status
 
@@ -52,6 +51,7 @@ Read in this order:
 10. [docs/contracts/SKILL_CONTRACT.md](docs/contracts/SKILL_CONTRACT.md) — Skill packages, lock, compatibility (P4)
 11. [docs/architecture/SKILL_ROUTING_AND_VERSIONING.md](docs/architecture/SKILL_ROUTING_AND_VERSIONING.md) — routing and versioning (P4)
 12. [docs/decisions/0001-v2-clean-restart.md](docs/decisions/0001-v2-clean-restart.md) — why v2 is a clean restart
+13. [docs/CONSUMER_INSTALLATION.md](docs/CONSUMER_INSTALLATION.md) — project-local consumer installation
 
 If these documents conflict, **Constitution wins**. P5 implementation notes: [docs/implementation/P5_UNDERSTAND.md](docs/implementation/P5_UNDERSTAND.md). P6 implementation notes: [docs/implementation/P6_TEST.md](docs/implementation/P6_TEST.md). P7 implementation notes: [docs/implementation/P7_DEVELOP.md](docs/implementation/P7_DEVELOP.md). P8 implementation notes: [docs/implementation/P8_SUBMIT.md](docs/implementation/P8_SUBMIT.md). P9 implementation notes: [docs/implementation/P9_REPAIR_MIGRATION.md](docs/implementation/P9_REPAIR_MIGRATION.md). P10 implementation notes: [docs/implementation/P10_INCREMENTAL_MULTIAGENT.md](docs/implementation/P10_INCREMENTAL_MULTIAGENT.md). Post-P10 real-pilot corrections: [docs/implementation/DIVE_PILOT_CORRECTION_01.md](docs/implementation/DIVE_PILOT_CORRECTION_01.md). This distribution repository must not contain a live adopted-host `.scaffold/project.yaml` or `.scaffold/skills.lock`.
 
@@ -81,8 +81,9 @@ Current tree (unreleased candidate, not a v2.0 release):
 - P9 Repair/Migration supporting runtime in `src/scaffold_p7/` plus `tests/test_p9_repair_migration.py`
 - P10 incremental understanding / zero-context resume in `src/scaffold_p5/` plus `tests/test_p10_incremental_multiagent.py`
 - ordinary local P5/P6/P7/P8 tests and non-authoritative fixtures at `tests/`
+- project-local consumer installer at `src/scaffold_consumer.py` / `src/scaffold_p5/consumer_install.py`
 - no live adopted-host `.scaffold/` lock/project state at the distribution repository root
-- no Claude / Cursor / Codex client configs
+- no Claude / Cursor / Codex client configs in this Distribution tree
 - no v1 source tree and no fifth top-level Skill
 - no auto-commit or auto-push
 

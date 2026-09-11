@@ -1,0 +1,92 @@
+{
+  "freeze": "CONSUMER_INSTALLATION",
+  "superseded_by": "CONSUMER_INSTALLATION_C01",
+  "created_at": "2026-09-11T02:20:29Z",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "25a2bc99b35860a0662c78535432b1068c46a9fe972297b653e26b7534f5a7d6",
+      "size": 8423
+    },
+    {
+      "path": "docs/CONSUMER_INSTALLATION.md",
+      "sha256": "45d628b54ae4358bf7d4053e3c18c166f38ce9a8a6f58d3565350be727649812",
+      "size": 4863
+    },
+    {
+      "path": "docs/QUICK_START.md",
+      "sha256": "9cb96e6c84679264f043b575a92d59b61a005b6e98e3d68c4012e534b8e8fbea",
+      "size": 2833
+    },
+    {
+      "path": "docs/architecture/ADOPTION_FLOW.md",
+      "sha256": "1b9eede418e10f721574cb94fe6d9a7400e1bb49c2a79eea9472df30ac668a53",
+      "size": 7850
+    },
+    {
+      "path": "docs/architecture/PROJECT_LAYOUT.md",
+      "sha256": "f8d3bee1797a3eeac2ee30d0a0e6d1e0556f5f66205e9a500cbca56515f5f1a0",
+      "size": 9223
+    },
+    {
+      "path": "docs/contracts/ADOPTION_CONTRACT.md",
+      "sha256": "d5abdbc2a1643df1eb23aa8df5fda8c22a80158bb22c03d52ba2de009d1c8d05",
+      "size": 27282
+    },
+    {
+      "path": "docs/contracts/PROJECT_CONTRACT.md",
+      "sha256": "a30647a7eac171ac3ed4776bcccae989c2a3feae3fa3ab783e5c94614c1d3e69",
+      "size": 36526
+    },
+    {
+      "path": "docs/contracts/SKILL_CONTRACT.md",
+      "sha256": "d7af7d6bb3aed16085597269c6d098f17363ad350411f4c36b8f532794527f58",
+      "size": 84916
+    },
+    {
+      "path": "docs/implementation/CONSUMER_INSTALLATION_DESIGN.md",
+      "sha256": "161b3390002e82526e953ef8baab798d9d5c36144be124c4121565528ef7f44d",
+      "size": 5589
+    },
+    {
+      "path": "docs/implementation/FIRST_USE_WALKTHROUGH.md",
+      "sha256": "352f29a31771c3d540c10f756939908609accceeeb65352a23d45888bfdb6097",
+      "size": 3548
+    },
+    {
+      "path": "docs/implementation/SAME_ROOT_CAUSE_REVIEW.md",
+      "sha256": "1921804923a113623debc943c47ec3035d222d3c50edde91a0263337706e7272",
+      "size": 2103
+    },
+    {
+      "path": "src/scaffold_consumer.py",
+      "sha256": "a20652935583abb0a09a1815685fd288cbbee2876fd5e2747c3973e80d542ea0",
+      "size": 411
+    },
+    {
+      "path": "src/scaffold_p5/adoption.py",
+      "sha256": "0ac20fd1e9f5f4a89034552e1825c3ba20f6496b4212a0931d91911c28612028",
+      "size": 35743
+    },
+    {
+      "path": "src/scaffold_p5/agents.py",
+      "sha256": "cc81a1f563e6beaaeeae36239f745c76e76e687decd42156cdd3c413555bad22",
+      "size": 13400
+    },
+    {
+      "path": "src/scaffold_p5/consumer_install.py",
+      "sha256": "23f5e4ed23da91a8900d6a4d7728a89b3504f875cfbd207e3c271275dc4444d1",
+      "size": 40806
+    },
+    {
+      "path": "src/scaffold_p5/full.py",
+      "sha256": "351244050117b101a6255d0266b944ee98e06e80e498454e01f83dcf4d06610b",
+      "size": 20627
+    },
+    {
+      "path": "tests/test_consumer_installation.py",
+      "sha256": "ae03916d5690828fbe367141f693a3015183897fa9c11fd134d974723a71f2c9",
+      "size": 28548
+    }
+  ]
+}

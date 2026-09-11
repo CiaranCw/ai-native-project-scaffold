@@ -34,7 +34,7 @@ Understand
 | Term | Meaning |
 | --- | --- |
 | **Host project** | The ordinary project being attached. |
-| **Distribution** | This scaffold product (Skills, contracts, later runtime). MUST NOT be copied wholesale into the host. |
+| **Distribution** | Canonical Scaffold product source/release. MUST NOT be copied wholesale (docs, tests, research, caches) into the host. A bounded project-local consumer installation of runtime + four Skill packages is the supported product subset. |
 | **Adoption Baseline** | Evidence of the host’s real state **before** Scaffold mutation. |
 | **Adoption Plan** | Explicit, reviewable description of intended first-attach mutations and preservations. |
 | **Adoption Session** | Temporary resume/recovery artifact. **Not** a canonical development record. |

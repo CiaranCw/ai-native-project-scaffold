@@ -1,0 +1,39 @@
+{
+  "freeze": "CONSUMER_INSTALLATION_C03",
+  "supersedes": "CONSUMER_INSTALLATION_C02",
+  "finding": "Region-scoped ownership for AGENTS.md and .gitattributes; whole-file MANAGED only for fully managed consumer artifacts",
+  "created_at": "2026-09-11T03:39:40Z",
+  "base_head": "d12a4cd84b615617f6de5a33f51889e5507b3807",
+  "files": [
+    {
+      "path": "docs/CONSUMER_INSTALLATION.md",
+      "sha256": "fe8c4f2e8e99ea693725386fc49bb77edbd963fbe32374114413a847819b0b39",
+      "size": 5922
+    },
+    {
+      "path": "docs/architecture/PROJECT_LAYOUT.md",
+      "sha256": "2bf298a164ced89eaf6af40330aedef25bd136c0f022e85b6c42b638cf9cb193",
+      "size": 9456
+    },
+    {
+      "path": "docs/implementation/CONSUMER_INSTALLATION_DESIGN.md",
+      "sha256": "72cfc78a5711c55ed7ff0af1b35a0c1890b4f28bff7d76312a5a9f166fd3541b",
+      "size": 7391
+    },
+    {
+      "path": "docs/implementation/SAME_ROOT_CAUSE_REVIEW.md",
+      "sha256": "86ed31dfc23059505b377897451ae2e4557627f9cc1d80d5e74f861c69954727",
+      "size": 2699
+    },
+    {
+      "path": "src/scaffold_p5/consumer_install.py",
+      "sha256": "0bf5fbbbfd74305889063e01711d4a35fe76b6b3b203be8a5aa7c4123e25cc79",
+      "size": 58252
+    },
+    {
+      "path": "tests/test_consumer_installation.py",
+      "sha256": "cb10308c14019004f8a98d5666289b84faeb64485f5c442b11b619dee338d1c5",
+      "size": 62310
+    }
+  ]
+}

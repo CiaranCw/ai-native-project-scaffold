@@ -65,6 +65,7 @@ P2 **accepts** this core layout. Do not add unnamespaced files at `.scaffold/` r
 ├── commands.yaml     named operations
 ├── tests.yaml        testing index / contract
 ├── skills.lock       expected Scaffold/Skill versions (contents: P4)
+├── install/          MANAGED project-local consumer installation (not Adoption)
 ├── tasks/            Task Books (schema: P3)
 ├── changes/          Change Records (schema: P3)
 ├── runtime/          local temporary state (not project knowledge)

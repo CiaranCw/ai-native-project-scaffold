@@ -7,9 +7,11 @@ from scaffold_p5 import yaml_lite
 from scaffold_p5.adoption import default_ownership, lock_data, write_lock, write_text
 from scaffold_p5.agents import (
     AGENTS_ROUTER_REGION,
+    CONSUMER_INSTALL_REGION,
     GENERATED_AGENTS,
     integrated_agents_text,
     managed_regions_from_actions,
+    parse_managed_regions,
 )
 from scaffold_p5.discovery import discover, project_display_name
 from scaffold_p5.host_state import (
@@ -449,6 +451,19 @@ def _project_data(
         "clients": _client_index(plan),
     }
     regions = managed_regions_from_actions(plan.actions)
+    if ownership.get(AGENTS_MD) == "MANAGED":
+        agents_path = root / AGENTS_MD
+        if agents_path.is_file():
+            try:
+                text = agents_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                text = ""
+            spans, issues = parse_managed_regions(text)
+            if not issues and CONSUMER_INSTALL_REGION in spans:
+                current = list(regions.get(AGENTS_MD) or [])
+                if CONSUMER_INSTALL_REGION not in current:
+                    current.append(CONSUMER_INSTALL_REGION)
+                regions[AGENTS_MD] = current
     if regions:
         data["managed_regions"] = regions
     return data

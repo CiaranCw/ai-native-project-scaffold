@@ -551,7 +551,7 @@ Host skills.lock
 
 This is the normal **Host Compatibility Preflight** model after host lock authority exists. Legitimate first attachment before `project.yaml` / `skills.lock` exists uses §27 **Pre-Adoption Bootstrap Preflight**, not a fabricated host lock.
 
-Exact local installation mechanism is later implementation.
+Project-local installation is documented in [../CONSUMER_INSTALLATION.md](../CONSUMER_INSTALLATION.md). `.scaffold/install/install.yaml` is pre-Adoption product provenance and MUST NOT replace `skills.lock`.
 
 ### 19.2 Minimum lock model
 

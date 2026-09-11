@@ -13,8 +13,40 @@ from scaffold_p5.models import DiscoveryFact, PlanAction
 
 
 AGENTS_ROUTER_REGION = "agents-router"
+CONSUMER_INSTALL_REGION = "scaffold-consumer"
 REGION_START = f"<!-- scaffold:managed:{AGENTS_ROUTER_REGION}:start -->"
 REGION_END = f"<!-- scaffold:managed:{AGENTS_ROUTER_REGION}:end -->"
+CONSUMER_REGION_START = (
+    f"<!-- scaffold:managed:{CONSUMER_INSTALL_REGION}:start -->"
+)
+CONSUMER_REGION_END = f"<!-- scaffold:managed:{CONSUMER_INSTALL_REGION}:end -->"
+ALLOWED_AGENTS_REGIONS = frozenset(
+    {AGENTS_ROUTER_REGION, CONSUMER_INSTALL_REGION}
+)
+CONSUMER_AGENTS_INNER = """## Scaffold installation
+
+This managed AGENTS region is first-contact routing for a Scaffold-enabled repository.
+
+Scaffold is installed. Installation is not Adoption. Do not treat `.scaffold/install` as completed project understanding.
+
+Exactly four Skills exist: Understand, Develop, Test, and Submit. Repair is a Develop mode. There is no fifth Skill and no generic Cursor Skill named scaffold.
+
+On a never-adopted host, ordinary business work starts with Understand bootstrap. Preview is not approval. Stop for explicit human approval of that exact plan before any persistent Adoption mutation.
+
+Launcher: `python .scaffold/install/run.py`
+First-use: `python .scaffold/install/run.py understand bootstrap`
+
+Canonical Skill packages: `.scaffold/install/packages/{understand,develop,test,submit}/`
+Runtime: `.scaffold/install/runtime/`
+
+Cursor adapters exist only for those four Skills:
+`.cursor/skills/scaffold-understand/`
+`.cursor/skills/scaffold-develop/`
+`.cursor/skills/scaffold-test/`
+`.cursor/skills/scaffold-submit/`
+
+Do not clone a second Scaffold repository and do not set PYTHONPATH to a developer checkout.
+"""
 _MARKER = re.compile(
     r"<!--\s*scaffold:managed:([a-z][a-z0-9-]*):(start|end)\s*-->"
 )
@@ -73,7 +105,7 @@ def classify_agents_text(text: str | None) -> str:
     spans, issues = parse_managed_regions(text)
     if issues:
         return UNSAFE
-    if any(region_id != AGENTS_ROUTER_REGION for region_id in spans):
+    if any(region_id not in ALLOWED_AGENTS_REGIONS for region_id in spans):
         return UNSAFE
     if _anti_integration(_human_surface(text, spans)):
         return UNSAFE
@@ -111,11 +143,13 @@ def agents_bridge_fact(
             return DiscoveryFact("agents_scaffold_bridge", False, "CONFLICTING", True)
         if _anti_integration(_human_surface(text, spans)):
             return DiscoveryFact("agents_scaffold_bridge", False, "CONFLICTING", True)
-        inner = _region_inner(text, spans.get(AGENTS_ROUTER_REGION))
+        inner = _region_inner(
+            text, spans.get(AGENTS_ROUTER_REGION), AGENTS_ROUTER_REGION
+        )
         if inner is not None and _bridge_ok(inner):
             return DiscoveryFact("agents_scaffold_bridge", True, "VERIFIED", True)
         return DiscoveryFact("agents_scaffold_bridge", False, "CONFLICTING", True)
-    if any(region_id != AGENTS_ROUTER_REGION for region_id in spans):
+    if any(region_id not in ALLOWED_AGENTS_REGIONS for region_id in spans):
         return DiscoveryFact("agents_scaffold_bridge", False, "CONFLICTING", True)
     if _anti_integration(_human_surface(text, spans)):
         return DiscoveryFact("agents_scaffold_bridge", False, "CONFLICTING", True)
@@ -137,7 +171,7 @@ def integrated_agents_text(
     if issues:
         return None
     authorized = region_id
-    if any(existing != authorized for existing in spans):
+    if any(existing not in ALLOWED_AGENTS_REGIONS for existing in spans):
         return None
     if _anti_integration(_human_surface(original, spans)):
         return None
@@ -157,6 +191,37 @@ def integrated_agents_text(
 def has_managed_router_region(text: str) -> bool:
     spans, issues = parse_managed_regions(text)
     return not issues and AGENTS_ROUTER_REGION in spans
+
+
+def has_consumer_install_region(text: str) -> bool:
+    spans, issues = parse_managed_regions(text)
+    return not issues and CONSUMER_INSTALL_REGION in spans
+
+
+def apply_consumer_install_region(text: str) -> str | None:
+    """Insert or replace the scaffold-consumer region. Preserve all other text."""
+    spans, issues = parse_managed_regions(text)
+    if issues:
+        return None
+    if any(region_id not in ALLOWED_AGENTS_REGIONS for region_id in spans):
+        return None
+    if _anti_integration(_human_surface(text, spans)):
+        return None
+    block = (
+        f"{CONSUMER_REGION_START}\n"
+        f"{CONSUMER_AGENTS_INNER.strip()}\n"
+        f"{CONSUMER_REGION_END}"
+    )
+    span = spans.get(CONSUMER_INSTALL_REGION)
+    if span is not None:
+        start, end = span
+        return text[:start] + block + text[end:]
+    prefix = text
+    if prefix and not prefix.endswith("\n"):
+        prefix += "\n"
+    if prefix and not prefix.endswith("\n\n"):
+        prefix += "\n"
+    return prefix + block + "\n"
 
 
 def human_forbids_agents_integration(text: str) -> bool:
@@ -269,12 +334,18 @@ def _router_text(text: str, spans: dict[str, tuple[int, int]] | None = None) -> 
     return inner if inner is not None else text
 
 
-def _region_inner(text: str, span: tuple[int, int] | None) -> str | None:
+def _region_inner(
+    text: str,
+    span: tuple[int, int] | None,
+    region_id: str = AGENTS_ROUTER_REGION,
+) -> str | None:
     if span is None:
         return None
     start, end = span
-    inner_start = start + len(REGION_START)
-    end_token_start = end - len(REGION_END)
+    start_marker = f"<!-- scaffold:managed:{region_id}:start -->"
+    end_marker = f"<!-- scaffold:managed:{region_id}:end -->"
+    inner_start = start + len(start_marker)
+    end_token_start = end - len(end_marker)
     return text[inner_start:end_token_start]
 
 

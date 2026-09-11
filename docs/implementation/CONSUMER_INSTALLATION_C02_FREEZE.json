@@ -1,0 +1,39 @@
+{
+  "freeze": "CONSUMER_INSTALLATION_C02",
+  "supersedes": "CONSUMER_INSTALLATION_C01",
+  "finding": "BLOCKING-1 Git clone/EOL byte-stability of MANAGED consumer artifacts",
+  "created_at": "2026-09-11T03:09:40Z",
+  "base_head": "d12a4cd84b615617f6de5a33f51889e5507b3807",
+  "files": [
+    {
+      "path": "docs/CONSUMER_INSTALLATION.md",
+      "sha256": "44dffdfa76939723f74308d2db1702f532ed866d1f5be07beb975ccf65a6006f",
+      "size": 5377
+    },
+    {
+      "path": "docs/architecture/PROJECT_LAYOUT.md",
+      "sha256": "b4df91f7bc7305266405fe896cfb9d42e662fd1b1ce325861f77ee583de89c5c",
+      "size": 9391
+    },
+    {
+      "path": "docs/implementation/CONSUMER_INSTALLATION_DESIGN.md",
+      "sha256": "dc3beae602fd9bfe5eca26c87e8a0d8e71118f6c4a49fd66045dfb44c26830f4",
+      "size": 6252
+    },
+    {
+      "path": "docs/implementation/SAME_ROOT_CAUSE_REVIEW.md",
+      "sha256": "a995df5fd4d3f9923a783ff257a1c467a3c1d0bc39c0e79e49c2cbf77ced87dd",
+      "size": 2352
+    },
+    {
+      "path": "src/scaffold_p5/consumer_install.py",
+      "sha256": "f33aefd6e3a46bcf49f7cd3bf5899ebe0f633910a987de02973ab741e721f782",
+      "size": 50720
+    },
+    {
+      "path": "tests/test_consumer_installation.py",
+      "sha256": "a11f65f743cba3a7a79e53411932fb2f9cff128fd29d49c7a266c7ea046e104d",
+      "size": 43130
+    }
+  ]
+}

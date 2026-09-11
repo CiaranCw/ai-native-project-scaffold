@@ -15,7 +15,7 @@ This distribution repository does **not** contain a live host tree.
 │
 ├── AGENTS.md                     Layer 1 — thin router
 │                                 GENERATED | MANAGED | HUMAN_OWNED
-│                                 (bridge is a separate strategy/artifact)
+│                                 consumer install: MANAGED_REGION only
 │
 ├── docs/project/                 Layer 2 — canonical knowledge entries
 │   ├── overview.md               REQUIRED
@@ -32,6 +32,12 @@ This distribution repository does **not** contain a live host tree.
 │   ├── skills.lock               contents: P4
 │   ├── tasks/                    schema: P3
 │   ├── changes/                  schema: P3
+│   ├── install/                  MANAGED project-local consumer installation
+│   │   ├── install.yaml          pre-Adoption product provenance
+│   │   ├── run.py                local runtime launcher
+│   │   ├── runtime/              vendored P5–P8 + scaffold_entry
+│   │   ├── packages/             understand / develop / test / submit
+│   │   └── releases/installed.yaml
 │   ├── runtime/                  LOCAL / TEMPORARY / ignored
 │   │   ├── local/                machine paths only; not secrets
 │   │   ├── repair-state/         supporting Repair recovery (P9)
@@ -40,7 +46,13 @@ This distribution repository does **not** contain a live host tree.
 │   │   └── understand-currentness/  supporting incremental understanding
 │   └── ext/<namespace>/          OPTIONAL domain extras
 │
-├── CLAUDE.md / Cursor rules / …  thin bridges only
+├── .cursor/skills/scaffold-understand/   Cursor adapters (MANAGED)
+├── .cursor/skills/scaffold-develop/      exactly four; AGENTS.md routes first contact
+├── .cursor/skills/scaffold-test/
+├── .cursor/skills/scaffold-submit/
+├── .gitattributes                human rules preserved; MANAGED_REGION last
+│                                 (not whole-file Scaffold-owned)
+│                                 `.scaffold/install/**` and four adapters `-text`
 │
 └── existing project files…       unchanged unless an approved Plan says so
 ```

@@ -269,6 +269,7 @@ def build_adoption_plan(
                 "not copied into shared knowledge",
             )
         )
+    actions.extend(_consumer_install_preserve_actions(root))
     envelope = [a.target for a in actions if a.action_class in {"CREATE", "MANAGED_UPDATE"}]
     coverage: dict[str, Any] = {}
     baseline["inventory"] = durable_inventory(
@@ -427,8 +428,12 @@ def rebuild_adoption_plan(
             )
 
     known = {action.target for action in actions}
+    actions.extend(_consumer_install_preserve_actions(root))
+    known = {action.target for action in actions}
     for path, row in durable_inventory(root).items():
         if path.startswith(".scaffold/runtime/") or path in known:
+            continue
+        if _is_consumer_install_path(path):
             continue
         if not isinstance(row, dict) or row.get("type") != "file":
             continue
@@ -834,6 +839,48 @@ def _activation_blockers(
             continue
         blockers.append(f"{fact.name}:{fact.confidence}")
     return blockers
+
+
+def _consumer_install_preserve_actions(root: Path) -> list[PlanAction]:
+    if not (root / ".scaffold" / "install" / "install.yaml").is_file():
+        return []
+    actions = [
+        PlanAction(
+            "PRESERVE",
+            ".scaffold/install/",
+            "MANAGED",
+            "Project-local Scaffold installation is managed product bytes, not Adoption",
+            "installation bytes unchanged during Adoption",
+        )
+    ]
+    for name in (
+        "scaffold-understand",
+        "scaffold-develop",
+        "scaffold-test",
+        "scaffold-submit",
+    ):
+        rel = f".cursor/skills/{name}/SKILL.md"
+        if (root / rel).is_file():
+            actions.append(
+                PlanAction(
+                    "PRESERVE",
+                    rel,
+                    "MANAGED",
+                    "Cursor discovery adapter is managed installation, not a fifth Skill",
+                    "bytes unchanged",
+                    "THIN_BRIDGE",
+                )
+            )
+    return actions
+
+
+def _is_consumer_install_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").strip("/")
+    return (
+        normalized == ".scaffold/install"
+        or normalized.startswith(".scaffold/install/")
+        or normalized.startswith(".cursor/skills/scaffold")
+    )
 
 
 def _create_or_preserve(

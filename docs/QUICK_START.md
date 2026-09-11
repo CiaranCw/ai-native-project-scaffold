@@ -1,9 +1,15 @@
 # Internal Pilot Quick Start
 
-Make this local Scaffold Distribution checkout available to the Agent together
-with the project (for example, both workspace roots are visible and the
-Distribution `src/` and `skills/` are loadable). There is not yet a one-click
-installer or automatic client discovery.
+Install Scaffold into an existing project with the project-local consumer
+installer, then open that **host** repository. After install, teammates do
+not need a second Scaffold checkout, `PYTHONPATH` to SOURCE, or an absolute
+Distribution path. See [CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md).
+
+From a Scaffold Distribution checkout (install/update time only):
+
+```text
+python src/scaffold_consumer.py install --host <project-root>
+```
 
 Open the project and speak naturally:
 
@@ -46,7 +52,6 @@ apply.
 When stopped, the Agent should explain what it observed, why it stopped, what
 you need to decide, what approval would do, and what remains unchanged.
 
-Current internal-Pilot requirement: the operator must provide the known local
-Distribution checkout/package path to the Agent. Cursor/Claude/Codex installers,
-automatic Distribution discovery, and one-click teammate setup remain later
-client/deployment work.
+Current product path: install the project-local consumer bundle into the host,
+then a fresh Agent discovers Skills from repository-local adapters. The
+operator provides the Distribution checkout only at install/update time.

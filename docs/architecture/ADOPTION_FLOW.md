@@ -25,7 +25,9 @@ Develop / Test / Submit stay independent.
 ┌──────────────────────────────────────────────────────────┐
 │  Scaffold Distribution                                   │
 │  Skills, contracts, later runtime, migrations, tools     │
-│  MUST NOT be vendored wholesale into each host           │
+│  MUST NOT be vendored wholesale into each host.          │
+│  A bounded project-local consumer installation           │
+│  (runtime + four Skill packages) is supported.           │
 └────────────────────────────┬─────────────────────────────┘
                              │ adopt
                              ▼
