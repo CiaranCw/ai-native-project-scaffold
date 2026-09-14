@@ -67,8 +67,44 @@ def _scalar(value: Any) -> str:
         return "false"
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return str(value)
-    text = str(value)
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return '"' + _escape_quoted(str(value)) + '"'
+
+
+def _escape_quoted(text: str) -> str:
+    # Encode line breaks so quoted scalars stay on one physical line.
+    return (
+        text.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
+
+
+def _unescape_quoted(text: str) -> str:
+    # Scan escapes; do not sequential-replace \\ then \n.
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch != "\\" or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        nxt = text[i + 1]
+        if nxt == "n":
+            out.append("\n")
+        elif nxt == "r":
+            out.append("\r")
+        elif nxt == '"':
+            out.append('"')
+        elif nxt == "\\":
+            out.append("\\")
+        else:
+            out.append("\\")
+            out.append(nxt)
+        i += 2
+    return "".join(out)
 
 
 def _parse_block(lines: list[str], i: int, indent: int) -> tuple[Any, int]:
@@ -175,7 +211,7 @@ def _parse_scalar(text: str) -> Any:
     if text == "false":
         return False
     if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
-        return text[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        return _unescape_quoted(text[1:-1])
     try:
         if "." in text:
             return float(text)
