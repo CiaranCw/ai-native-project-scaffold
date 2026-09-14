@@ -54,8 +54,13 @@ MANAGED consumer artifacts:
 - `.cursor/rules/scaffold-first-use.mdc` — Always Apply Cursor first-use rule
   (whole-file MANAGED; not a Skill)
 - a Scaffold-owned fragment in `.cursor/hooks.json` — Cursor `preToolUse`,
-  `beforeShellExecution`, `subagentStart`, and `beforeMCPExecution`
-  enforcement adapter; unrelated host hooks are preserved
+  `postToolUse`, `postToolUseFailure`, `beforeShellExecution`,
+  `subagentStart`, `beforeMCPExecution`, `afterFileEdit`, and
+  `afterTabFileEdit` adapter events; unrelated host hooks are preserved.
+  Live mutation enforcement is validated for that supported Cursor hook
+  surface. Environments that do not run the required mutation hooks cannot
+  claim the same live guarantee; unrecorded changes still fail closed at
+  Develop seal.
 - `.scaffold/install/cursor_first_use_hook.py` — hook executable under the
   managed install tree
 

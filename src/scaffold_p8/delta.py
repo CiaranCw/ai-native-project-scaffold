@@ -13,7 +13,12 @@ from scaffold_p6.candidate import RUNTIME_PREFIX
 from scaffold_p7.schemas import validate_develop_session, validate_files_yaml
 
 from scaffold_p8.noscms import observe_noscms_diff
-from scaffold_p8.models import PROVENANCE_CLASSES, SESSIONS_DIR
+from scaffold_p8.models import PROVENANCE_CLASSES, SESSIONS_DIR, TASK_DELTA_ROLES
+from scaffold_p8.task_authority import (
+    path_in_resolved_scope,
+    path_in_supporting_scope,
+    resolve_task_scope,
+)
 
 
 def observe_real_paths(root: Path) -> list[str]:
@@ -70,6 +75,7 @@ def classify_delta(
     real_paths: list[str],
     sessions: list[dict[str, Any]],
     entries: list[dict[str, Any]] | None = None,
+    task: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     classes: dict[str, str] = {}
     for path in real_paths:
@@ -77,11 +83,20 @@ def classify_delta(
     counts = {name: 0 for name in PROVENANCE_CLASSES}
     for label in classes.values():
         counts[label] = counts.get(label, 0) + 1
+    task_delta_classes = {
+        path: _task_delta_role(root, path, provenance, task)
+        for path, provenance in classes.items()
+    }
+    task_delta_counts = {name: 0 for name in TASK_DELTA_ROLES}
+    for label in task_delta_classes.values():
+        task_delta_counts[label] = task_delta_counts.get(label, 0) + 1
     return {
         "paths": real_paths,
         "entries": list(entries or []),
         "classes": classes,
         "counts": counts,
+        "task_delta_classes": task_delta_classes,
+        "task_delta_counts": task_delta_counts,
         "session_memory_overridden": _session_overridden(real_paths, sessions),
         "attribution_complete": all(
             label != "UNATTRIBUTED" for label in classes.values()
@@ -140,15 +155,16 @@ def _classify_path(
     if not sessions:
         return "UNATTRIBUTED"
     observed = _path_state(root, path)
-    touched = [
+    remembered = [
         item
         for row in sessions
         for item in row.get("files") or []
         if isinstance(item, dict) and item.get("path") == path
     ]
+    if any(item.get("was_preexisting_dirty") is True for item in remembered):
+        return "MIXED_CHANGE"
+    touched = [item for item in remembered if _successful_develop_touch(item)]
     if touched:
-        if any(item.get("was_preexisting_dirty") is True for item in touched):
-            return "MIXED_CHANGE"
         if not _continuous_touched_chain(touched):
             return "MIXED_CHANGE"
         latest = _manifest_after_state(touched[-1])
@@ -161,6 +177,24 @@ def _classify_path(
     if _proven_post_develop(path, sessions):
         return "POST_DEVELOP_ADDITIONAL"
     return "UNATTRIBUTED"
+
+
+def _task_delta_role(
+    root: Path,
+    path: str,
+    provenance: str,
+    task: dict[str, Any] | None,
+) -> str:
+    if provenance in {"PREEXISTING_CHANGE", "MIXED_CHANGE"}:
+        return "inherited_baseline"
+    if not isinstance(task, dict):
+        return "unrelated_delta"
+    resolution = resolve_task_scope(root, task)
+    if path_in_supporting_scope(path, resolution):
+        return "task_supporting_delta"
+    if path_in_resolved_scope(path, resolution):
+        return "task_product_delta"
+    return "unrelated_delta"
 
 
 def _session_overridden(real_paths: list[str], sessions: list[dict[str, Any]]) -> bool:
@@ -272,6 +306,20 @@ def path_digest(root: Path, rel: str) -> str:
     if not path.is_file():
         return ""
     return file_digest(path)
+
+
+def _successful_develop_touch(item: dict[str, Any]) -> bool:
+    """Only successful observed Develop mutations are DEVELOP_KNOWN-eligible."""
+    state = str(item.get("mutation_state") or "").strip()
+    if state in {"authorized_pending", "failed", "cancelled"}:
+        return False
+    if state == "observed_success":
+        return True
+    if item.get("change_kind") == "deleted":
+        return True
+    if item.get("after_kind") == "missing" and not item.get("after_digest"):
+        return False
+    return isinstance(item.get("after_digest"), str) and bool(item.get("after_digest"))
 
 
 def _path_state(root: Path, rel: str) -> tuple[str, str | None]:

@@ -218,7 +218,7 @@ def _scope_issues(scope: Any) -> list[str]:
     if not isinstance(scope, dict):
         return ["Task Book scope must be a mapping"]
     issues: list[str] = []
-    for field in ("paths", "modules", "exclude"):
+    for field in ("paths", "modules", "exclude", "supporting_paths"):
         if field not in scope:
             continue
         issues.extend(_string_list_issues(scope.get(field), f"scope.{field}"))

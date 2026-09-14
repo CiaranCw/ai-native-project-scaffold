@@ -60,7 +60,8 @@ grounding for every material field, project/Rule/ownership/currentness
 authority, and no uncertainty or inferred governance/product decision. A
 grounded planning proposal may publish as `DRAFT`; ambiguity produces
 `NEEDS_HUMAN` without a Task. Intake creates no Develop Session and performs no
-source, Test, Submit, Commit, or Push operation.
+source, Test, Submit, Commit, or Push operation. Intake does not transition
+Stage merely to manufacture editor mutation authority.
 
 Initial revision 1 is published atomically only if its identity is absent.
 Matching Tasks are status-aware: `IN_PROGRESS` is reused; `DRAFT` activation
@@ -73,10 +74,66 @@ Version `2.1.0` is a MINOR additive capability. The existing generic
 against a `2.0.0` lock while surfacing actual `2.1.0` and leaving the lock
 unchanged. No version-number-only compatibility rule is used.
 
+Installed structured intake transport:
+
+```text
+python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>
+python .scaffold/install/run.py develop intake --intake-json-b64 <envelope>
+```
+
+`--intake-json` is also accepted. These flags are valid only on those two
+positionals.
+
+## Develop execution window
+
+After Task Intake, editor mutation still requires an explicit execution
+Session. This remains Develop; it is not a fifth Skill.
+
+```text
+python .scaffold/install/run.py develop session --task-id <task-id>
+python .scaffold/install/run.py develop seal --task-id <task-id>
+python .scaffold/install/run.py develop abort --task-id <task-id>
+```
+
+Canonical sequence:
+
+```text
+business request
+→ Develop intake (Task Book created / continued; no Session)
+→ develop session (OPEN Session + mutable Stage)
+→ in-scope editor mutation under current execution authority
+→ develop seal or develop abort
+→ no mutation authority remains
+```
+
+The current execution is identified by runtime control-plane binding
+`.scaffold/runtime/develop-execution.yaml`. Multiple durable `IN_PROGRESS`
+Tasks are legal. Unique current editor authority is that pointer, not a
+raw OPEN Session and not Task count. A missing pointer, a pointer to a
+missing/invalid/SEALED/ABORTED Session, or any number of pointerless OPEN
+Sessions all DENY ordinary editor mutation. Deleting the pointer cannot
+resurrect authority from leftover OPEN history. Explicit `develop session`
+is the canonical rebind. `DevelopEngine.run` reuses that current OPEN
+Session when present and seals it on successful completion; it does not
+leak a second OPEN Session.
+
 ## Flow
 
 ```text
-intake (DevelopEngine.run)
+intake (DevelopEngine.intake)
+→ Task Book created / continued
+→ NO Develop Session
+→ develop session (DevelopEngine.open_develop_session)
+→ bind current execution pointer
+→ first PENDING Stage becomes IN_PROGRESS
+→ editor mutation uses authorize_path_mutation
+→ develop seal / abort OR DevelopEngine.run completion seals
+```
+
+Ordinary `DevelopEngine.run` after a Task already exists:
+
+```text
+intake (if needed)
 → mode gate (normal_task | repair only)
 → inspect_host_project
 → host lifecycle / maintenance gate
@@ -85,7 +142,7 @@ intake (DevelopEngine.run)
 → D1 resolve SCM truth and configured-upstream currentness
 → repair binding (task + current candidate + failure/blocker)
 → authorize writes (schema-validated scope + ownership + core artifacts)
-→ bind or create Develop Session
+→ bind or reuse the current OPEN Develop Session
 → first expected-revision Task publication (session link + optional first-stage progress)
 → apply ownership-scoped source mutations only after that publication succeeds
 → optional Test authority via TestEngine.run **or** independently loaded published `report_id` (mutually exclusive; caller dicts are not authority)
@@ -150,9 +207,19 @@ Local, temporary, advisory. Session states: `OPEN` → `SEALED` or `OPEN` → `A
 
 IDs use the P3 family: `dev-<UTC compact>-<8 hex>`.
 
-Session-S0/S1 overlays are compact dirty-path observations where the host can honestly observe them. `files.yaml` records only Develop-touched paths. Repository / candidate truth overrides Session memory.
+Session-S0/S1 overlays are compact dirty-path observations where the host can honestly observe them. `files.yaml` records Develop-authorized mutations for the current execution (engine writes and client-authorized editor events). Repository / candidate truth overrides Session memory.
 
-P3 does not define an elaborate Develop Session recovery lifecycle. Loading an existing Session fail-closes unless `session.yaml` carries usable task, mode, project, baseline, Session-S0 overlay, and observed candidate binding, and unless `files.yaml` exists and is structurally valid. An OPEN Session bound to candidate A cannot resume on a materially different candidate B. Unsuccessful started Sessions terminate as `ABORTED`. It does not invent extra session states.
+Loading an existing Session fail-closes unless `session.yaml` carries usable task, mode, project, baseline, Session-S0 overlay, and observed candidate binding, and unless `files.yaml` exists and is structurally valid. Raw `status == OPEN` plus a matching `task_id` is not sufficient current editor authority. Hand-written partial Session files do not grant authority.
+
+Editor mutation authority requires an explicit current execution pointer. A raw OPEN Session is durable history/recovery evidence, not a mutation grant. The execution also freezes `open-inventory.yaml` at bind time. Task scope says WHERE a Task may change; `files.yaml` records successful observed mutations and `mutation-attempts.yaml` records pending/failed authorizations. Scope is not provenance. In-scope editor evolution remains valid only when the path has successful observed provenance from the current execution. New product-scope or supporting-scope paths without an observed mutation, and outside-scope drift, fail closed. Inherited dirty files that are unchanged since open remain distinct and do not false-fail.
+
+Client recording model: Cursor `preToolUse` authorizes a mutation attempt and writes a durable pending transaction (`authorized_pending` in `mutation-attempts.yaml`). That row is not mutation provenance: it does not explain the path, does not let seal stamp live bytes as execution-produced, and does not make P8 `DEVELOP_KNOWN`. Successful `postToolUse` observes the actual filesystem post-state (digest or absence) and records `observed_success` into `files.yaml`. `postToolUseFailure` fails/cancels the pending row and leaves no whitelist. `afterFileEdit` / `afterTabFileEdit` may complete a unique pending authorization that belongs to the **current** Develop execution and the same normalized path; they must not attach a replayed/late event to whichever Session happens to be current, and an ambiguous match is ignored as provenance. Delete success is source-absent. Move/Rename success is source-absent plus destination observed. Unresolved pending rows fail closed at seal; they are never upgraded by hashing whatever bytes exist at seal time. Same-path rewrite after a successful observation is out-of-band drift. Same-path rewrite after failure or with no terminal event is unexplained / unresolved, never `DEVELOP_KNOWN`. After seal the pointer is removed and no editor authority remains. Submit reviews the sealed historical delta without reopening execution.
+
+Hard live mutation enforcement is validated for the supported Cursor hook surface registered in the Scaffold fragment (`preToolUse`, `postToolUse`, `postToolUseFailure`, `afterFileEdit`, `afterTabFileEdit`, plus the existing shell/subagent/MCP gates). Cursor environments do not all expose identical hook coverage; cloud-agent / early read-only surfaces may omit some hooks. Those environments cannot claim the same live mutation-enforcement guarantee. Unrecorded changes still fail closed at Develop seal where provenance reconciliation observes them. This is input to a later Client Adapter Capability Matrix; this package does not implement multi-client or Cursor-cloud portability.
+
+`DevelopEngine.run` still requires exact candidate match when resuming a Session by `session_id` without the current execution pointer.
+
+Unsuccessful started Sessions terminate as `ABORTED`. It does not invent extra session states.
 
 ## Mutation authority
 
@@ -174,6 +241,53 @@ conflicting applicable Rule blocks before any source write. Rules constrain
 existing authority; they cannot grant mutation or submission permissions.
 
 There is no “Develop can write any project file” escape hatch.
+
+P7 `authorize_writes`, the Cursor first-use mutation gate, and Submit S3
+structural ownership review share one path-authorization function:
+`authorize_path_mutation`. Task affiliation AND path authority. Supporting
+declaration is not an ownership override.
+
+Task `scope.supporting_paths` is first-class supporting-delta affiliation. It
+lets a Task declare bounded tests/tools/evidence (or other non-product
+prefixes) that belong to the current candidate without becoming
+`project.yaml` product/module ownership. Supporting prefixes are explicit,
+non-wildcard, capped at 32, grounded in an existing path, a bounded new
+child under an existing parent, or discovered tests.yaml/commands.yaml
+facts, and cannot name `.scaffold` / `.cursor` governance. An arbitrary
+invented nested prefix is not grounded merely because a top-level directory
+such as `tests/` exists. Inherited dirty baseline remains distinct from Task
+supporting delta.
+
+Declared supporting UNKNOWN test/tool/evidence may be eligible. Explicit
+MANAGED or HUMAN_OWNED authority is not downgraded by supporting
+affiliation. Protected Scaffold governance is always denied.
+
+Submit S2 records `task_delta_classes` in parallel with provenance classes:
+`inherited_baseline`, `task_product_delta`, `task_supporting_delta`,
+`unrelated_delta`. S3 uses the same path-authority model as Develop:
+legitimate UNKNOWN supporting does not false-fail; MANAGED / protected /
+disallowed HUMAN_OWNED smuggled as supporting fails closed; unrelated delta
+fails closed.
+
+P6 may ingest/reference evidence whose source file is inside the current
+Task's declared supporting scope. Runtime callers pass canonical `task_id`
+(installed `run.py test --task-id`, Develop handoff, Submit completeness).
+`task_book` is only an already-loaded mapping, not a string identifier.
+SAV supplied-evidence compilation uses the same host_root + Task supporting
+check. Candidate binding remains authoritative. Supporting-path membership
+never manufactures `TEST_PASS` or `TEST_COMPLETE`. Requirement → Test still
+requires explicit `execution_binding`. P6 remains the sole Test/Evidence
+authority. A missing project-local `file_artifact` locator fails closed.
+Opaque Human/CI/External locators that are not host files keep existing
+P6 semantics.
+
+Installed Consumer first-Task creation uses
+`python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>`
+(or `develop intake`). Intake creates no Develop Session. Execution uses
+`develop session --task-id`, then Cursor mutation checks the current
+execution Session, Task, mutable Stage, and shared path authority. Close
+with `develop seal` or `develop abort`. An OPEN Session is not a
+repository-global capability.
 
 ## Handoffs
 

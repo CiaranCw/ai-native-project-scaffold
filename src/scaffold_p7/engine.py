@@ -13,13 +13,23 @@ from scaffold_p5.ownership import (
     path_covered,
     resolve_ownership,
 )
-from scaffold_p5.packages import load_package
+from scaffold_p5.packages import load_package, resolve_skill_package
 from scaffold_p5.result import skill_result
 from scaffold_p5.rules import resolve_project_rules, rule_test_ids
 from scaffold_p5.scm import DIVERGED, STALE, observe_upstream_currentness
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
 from scaffold_p6.candidate import observe_candidate, report_usable_for
 
+from scaffold_p7.develop_authority import (
+    bind_open_execution,
+    clear_current_execution,
+    execution_provenance_issues,
+    list_canonical_open_sessions,
+    load_canonical_open_session,
+    load_execution_pointer,
+    mutable_stage_ids,
+    raw_open_sessions_for_task,
+)
 from scaffold_p7.handoff import (
     build_develop_to_test,
     build_submit_route,
@@ -52,8 +62,15 @@ from scaffold_p7.repair_state import (
     persist_repair_state,
     reconstruct_repair_view,
 )
-from scaffold_p7.models import DEVELOP_MODES, PROVIDES, REQUIRES, SKILL_ID
-from scaffold_p7.mutation import MutationPlan, apply_writes, authorize_writes, overlay_path_set
+from scaffold_p7.models import DEVELOP_MODES, PROVIDES, REQUIRES, SESSIONS_DIR, SKILL_ID
+from scaffold_p7.mutation import (
+    MutationPlan,
+    apply_writes,
+    authorize_writes,
+    overlay_path_set,
+    supporting_path_declaration_issues,
+    supporting_path_grounding_issues,
+)
 from scaffold_p7.preflight import (
     DevelopPreflight,
     evaluate_develop_preflight,
@@ -83,7 +100,7 @@ class DevelopEngine:
     def __init__(self, host_root: str | Path, package_root: str | Path | None = None):
         self.root = Path(host_root)
         self.package_root = (
-            Path(package_root) if package_root else default_develop_package()
+            Path(package_root) if package_root else default_develop_package(self.root)
         )
         self.skill_version = ""
         self.package_validity = "UNRESOLVED"
@@ -103,8 +120,9 @@ class DevelopEngine:
     ):
         """Publish bounded Task authority as the Develop normal_task prelude.
 
-        Does not start implementation: no Session, source mutation, Test,
-        Commit, Push, or Submit authorization.
+        Does not write project source, invoke Test, Commit, Push, or grant
+        Submit. Intake creates no Develop Session and does not transition
+        Stage merely to manufacture editor mutation authority.
         """
         self.d1_currentness = None
         project_status, _project_reasons, project = inspect_host_project(self.root)
@@ -241,7 +259,7 @@ class DevelopEngine:
             if decision.task and decision.task.get("status") == "IN_PROGRESS"
             else ("human" if decision.outcome == "NEEDS_HUMAN" else "stop")
         )
-        return self._intake_result(
+        result = self._intake_result(
             outcome=decision.outcome,
             blockers=list(decision.blockers),
             route=route,
@@ -252,6 +270,403 @@ class DevelopEngine:
             grounding=grounding_result,
             project_rules=project_rules,
             human_gate=decision.human_gate,
+        )
+        return result
+
+    def open_develop_session(self, *, task_id: str | None = None, mode: str = "normal_task"):
+        """Open or reuse an OPEN Develop execution Session for an IN_PROGRESS Task.
+
+        Does not write project source. Marks the first PENDING Stage
+        IN_PROGRESS so mutation authority has a current mutable Stage.
+        Intake must not call this.
+        """
+        chosen_mode = mode if mode in DEVELOP_MODES else "normal_task"
+        project_status, _project_reasons, project = inspect_host_project(self.root)
+        self.preflight = evaluate_develop_preflight(
+            self.root,
+            package_root=self.package_root,
+            project=project,
+            project_status=project_status,
+        )
+        self.skill_version = self.preflight.skill_version or self.skill_version
+        candidate = observe_candidate(self.root)
+        if not self.preflight.allowed:
+            return self._blocked(
+                chosen_mode,
+                list(self.preflight.blockers),
+                self.preflight.route or "understand.compatibility",
+                candidate=candidate,
+                project=project,
+            )
+        if not candidate.usable:
+            return self._blocked(
+                chosen_mode,
+                list(candidate.data.get("blockers") or [
+                    "candidate SCM observation is unresolved"
+                ]),
+                "stop",
+                candidate=candidate,
+                project=project,
+            )
+        resolved = resolve_task(self.root, task_id=task_id)
+        if not resolved.ok or resolved.task is None or resolved.path is None:
+            return self._blocked(
+                chosen_mode,
+                resolved.blockers,
+                resolved.route or "stop",
+                candidate=candidate,
+                project=project,
+            )
+        task = resolved.task
+        if task.get("status") != "IN_PROGRESS":
+            return self._blocked(
+                chosen_mode,
+                [
+                    f"Task status {task.get('status')} cannot open a Develop Session"
+                ],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+            )
+        pointer, pointer_error = load_execution_pointer(self.root)
+        if pointer_error:
+            return self._blocked(
+                chosen_mode,
+                [pointer_error],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+            )
+        session = None
+        if pointer:
+            current, _directory, current_issues = load_canonical_open_session(
+                self.root, str(pointer.get("session_id") or "")
+            )
+            if current is not None:
+                if str(current.get("task_id") or "") != str(task["record_id"]):
+                    return self._blocked(
+                        chosen_mode,
+                        [
+                            "another Develop execution is OPEN; seal or abort it "
+                            "before starting a new Session"
+                        ],
+                        "stop",
+                        candidate=candidate,
+                        project=project,
+                        task=task,
+                        session=current,
+                    )
+                session = current
+        existing = raw_open_sessions_for_task(self.root, str(task["record_id"]))
+        if len(existing) > 1:
+            return self._blocked(
+                chosen_mode,
+                ["multiple OPEN Develop Sessions are bound to the current Task"],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+            )
+        if session is None and existing:
+            loaded, _directory, load_issues = load_canonical_open_session(
+                self.root, str(existing[0].get("record_id") or "")
+            )
+            if loaded is None:
+                return self._blocked(
+                    chosen_mode,
+                    load_issues
+                    or ["existing OPEN Develop Session is not canonical"],
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                )
+            session = loaded
+        other_open = [
+            item
+            for item, _directory in list_canonical_open_sessions(self.root)
+            if str(item.get("task_id") or "") != str(task["record_id"])
+        ]
+        if other_open and (
+            session is None
+            or str(other_open[0].get("record_id") or "")
+            != str(session.get("record_id") or "")
+        ):
+            return self._blocked(
+                chosen_mode,
+                [
+                    "another Task already has an OPEN Develop execution; "
+                    "seal or abort it first"
+                ],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+            )
+        if session is None:
+            bound = create_session(
+                self.root,
+                task_id=str(task["record_id"]),
+                mode=chosen_mode,
+                project_name=operational_project_name(project, self.root),
+                candidate_digest=candidate.digest,
+            )
+            if not bound.ok or bound.session is None:
+                return self._blocked(
+                    chosen_mode,
+                    bound.blockers,
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                )
+            session = bound.session
+        expected = task_revision(task)
+        if expected is None:
+            return self._blocked(
+                chosen_mode,
+                ["Task Book record_revision is UNKNOWN"],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                session=session,
+            )
+        prepared = apply_session_progress(
+            task, str(session["record_id"]), mode="normal_task"
+        )
+        changed = (
+            list(prepared.get("develop_session_ids") or [])
+            != list(task.get("develop_session_ids") or [])
+            or prepared.get("stages") != task.get("stages")
+        )
+        if changed:
+            published = publish_task(
+                resolved.path, prepared, expected_revision=expected
+            )
+            if not published.ok or published.task is None:
+                return self._blocked(
+                    chosen_mode,
+                    published.blockers,
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=published.task or task,
+                    session=session,
+                )
+            task = published.task
+        directory = self.root / SESSIONS_DIR / str(session["record_id"])
+        bind_open_execution(
+            self.root,
+            session_id=str(session["record_id"]),
+            task_id=str(task["record_id"]),
+            directory=directory,
+            opened_candidate_digest=str(
+                session.get("observed_candidate_digest") or candidate.digest
+            ),
+        )
+        extras = {
+            "operation": "develop_session",
+            "session": {
+                "record_id": session.get("record_id"),
+                "status": session.get("status"),
+                "task_id": session.get("task_id"),
+            },
+            "task": {
+                "record_id": task.get("record_id"),
+                "record_revision": task.get("record_revision"),
+                "status": task.get("status"),
+            },
+            "mutable_stage_ids": mutable_stage_ids(task),
+            "submit_authorized": False,
+            "capabilities": {
+                "source_write": False,
+                "commit": False,
+                "push": False,
+                "submit_authorized": False,
+            },
+        }
+        return skill_result(
+            skill_id=SKILL_ID,
+            skill_version=self.skill_version,
+            mode=chosen_mode,
+            outcome="COMPLETED",
+            baseline=candidate.data,
+            mutations="task_book" if changed else "none",
+            artifacts=[],
+            blockers=[],
+            next_route="develop.normal_task",
+            compatibility=self.preflight.compatibility if self.preflight else None,
+            extras=extras,
+        )
+
+    def seal_develop_execution(self, *, task_id: str | None = None, mode: str = "normal_task"):
+        """Seal the current OPEN Develop execution. Closes editor mutation authority."""
+        return self._close_develop_execution(
+            task_id=task_id, mode=mode, action="seal"
+        )
+
+    def abort_develop_execution(self, *, task_id: str | None = None, mode: str = "normal_task"):
+        """Abort the current OPEN Develop execution. Closes editor mutation authority."""
+        return self._close_develop_execution(
+            task_id=task_id, mode=mode, action="abort"
+        )
+
+    def _close_develop_execution(
+        self,
+        *,
+        task_id: str | None,
+        mode: str,
+        action: str,
+    ):
+        chosen_mode = mode if mode in DEVELOP_MODES else "normal_task"
+        project_status, _project_reasons, project = inspect_host_project(self.root)
+        candidate = observe_candidate(self.root)
+        pointer, pointer_error = load_execution_pointer(self.root)
+        if pointer_error and action == "seal":
+            return self._blocked(
+                chosen_mode,
+                [pointer_error],
+                "stop",
+                candidate=candidate,
+                project=project,
+            )
+        session_id = ""
+        wanted_task = str(task_id or "").strip()
+        if wanted_task:
+            existing = raw_open_sessions_for_task(self.root, wanted_task)
+            if existing:
+                session_id = str(existing[0].get("record_id") or "")
+        if not session_id and pointer:
+            if wanted_task and str(pointer.get("task_id") or "") != wanted_task:
+                return self._blocked(
+                    chosen_mode,
+                    ["requested Task is not the current Develop execution"],
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                )
+            session_id = str(pointer.get("session_id") or "")
+        if not session_id:
+            return self._blocked(
+                chosen_mode,
+                ["no OPEN Develop execution Session is available to close"],
+                "stop",
+                candidate=candidate,
+                project=project,
+            )
+        directory = self.root / SESSIONS_DIR / session_id
+        path = directory / "session.yaml"
+        if not path.is_file():
+            clear_current_execution(self.root, session_id=session_id)
+            return self._blocked(
+                chosen_mode,
+                ["Develop Session is missing or orphaned"],
+                "stop",
+                candidate=candidate,
+                project=project,
+            )
+        if action == "seal":
+            session, loaded, issues = load_canonical_open_session(self.root, session_id)
+            if session is None or loaded is None:
+                return self._blocked(
+                    chosen_mode,
+                    issues or ["Develop Session is not valid for sealing"],
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                )
+            resolved = resolve_task(self.root, task_id=str(session.get("task_id") or ""))
+            task = resolved.task if resolved.ok else None
+            if task is None:
+                return self._blocked(
+                    chosen_mode,
+                    resolved.blockers,
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    session=session,
+                    session_directory=loaded,
+                )
+            pointer_issues = execution_provenance_issues(
+                self.root,
+                task=task,
+                session=session,
+                directory=loaded,
+                for_seal=True,
+            )
+            if pointer_issues:
+                return self._blocked(
+                    chosen_mode,
+                    pointer_issues,
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                    session=session,
+                    session_directory=loaded,
+                )
+            session = seal_session(self.root, loaded, session)
+            session["sealed_candidate_digest"] = candidate.digest
+            persist_session(loaded, session)
+            clear_current_execution(self.root, session_id=session_id)
+            operation = "develop_seal"
+        else:
+            try:
+                session = read_yaml(path)
+            except (OSError, ValueError, TypeError, UnicodeError):
+                session = None
+            if not isinstance(session, dict):
+                clear_current_execution(self.root, session_id=session_id)
+                return self._blocked(
+                    chosen_mode,
+                    ["Develop Session is malformed or unreadable"],
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                )
+            if session.get("status") == "OPEN":
+                session = abort_session(directory, session)
+            clear_current_execution(self.root, session_id=session_id)
+            operation = "develop_abort"
+            resolved = resolve_task(
+                self.root, task_id=str(session.get("task_id") or wanted_task or "")
+            )
+            task = resolved.task if resolved.ok else None
+        extras = {
+            "operation": operation,
+            "session": {
+                "record_id": session.get("record_id"),
+                "status": session.get("status"),
+                "task_id": session.get("task_id"),
+            },
+            "submit_authorized": False,
+            "capabilities": {
+                "source_write": False,
+                "commit": False,
+                "push": False,
+                "submit_authorized": False,
+            },
+        }
+        if isinstance(task, dict):
+            extras["task"] = {
+                "record_id": task.get("record_id"),
+                "record_revision": task.get("record_revision"),
+                "status": task.get("status"),
+            }
+        return skill_result(
+            skill_id=SKILL_ID,
+            skill_version=self.skill_version,
+            mode=chosen_mode,
+            outcome="COMPLETED",
+            baseline=candidate.data,
+            mutations="none",
+            artifacts=[],
+            blockers=[],
+            next_route="stop",
+            extras=extras,
         )
 
     def run(self, mode: str = "normal_task", **opts: Any):
@@ -535,7 +950,7 @@ class DevelopEngine:
         test_package = (
             Path(opts["test_package"])
             if opts.get("test_package")
-            else default_test_package()
+            else default_test_package(self.root)
         )
         if (
             published_id
@@ -730,6 +1145,39 @@ class DevelopEngine:
 
         project_name = operational_project_name(project, self.root)
         session_id = opts.get("session_id")
+        require_candidate_match = True
+        pointer, pointer_error = load_execution_pointer(self.root)
+        if pointer_error:
+            return self._blocked(
+                mode,
+                [pointer_error],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+            )
+        if pointer:
+            ptr_task = str(pointer.get("task_id") or "")
+            ptr_session = str(pointer.get("session_id") or "")
+            current, _directory, _issues = load_canonical_open_session(
+                self.root, ptr_session
+            )
+            if current is not None and ptr_task != str(task["record_id"]):
+                return self._blocked(
+                    mode,
+                    [
+                        "another Develop execution is OPEN; seal or abort it "
+                        "before starting a new Session"
+                    ],
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                    session=current,
+                )
+            if not session_id and current is not None and ptr_task == str(task["record_id"]):
+                session_id = ptr_session
+                require_candidate_match = False
         if session_id:
             bound = load_session(
                 self.root,
@@ -738,7 +1186,31 @@ class DevelopEngine:
                 mode=mode,
                 project_name=project_name,
                 current_candidate_digest=candidate.digest,
+                require_candidate_match=require_candidate_match,
             )
+            if (
+                bound.ok
+                and not require_candidate_match
+                and bound.directory is not None
+                and bound.session is not None
+            ):
+                provenance = execution_provenance_issues(
+                    self.root,
+                    task=task,
+                    session=bound.session,
+                    directory=bound.directory,
+                )
+                if provenance:
+                    return self._blocked(
+                        mode,
+                        provenance,
+                        "stop",
+                        candidate=candidate,
+                        project=project,
+                        task=task,
+                        session=bound.session,
+                        session_directory=bound.directory,
+                    )
         else:
             bound = create_session(
                 self.root,
@@ -757,6 +1229,15 @@ class DevelopEngine:
                 task=task,
             )
         session = bound.session
+        bind_open_execution(
+            self.root,
+            session_id=str(session["record_id"]),
+            task_id=str(task["record_id"]),
+            directory=bound.directory,
+            opened_candidate_digest=str(
+                session.get("observed_candidate_digest") or candidate.digest
+            ),
+        )
         expected = task_revision(task)
         if expected is None:
             return self._blocked(
@@ -1280,7 +1761,32 @@ class DevelopEngine:
             else:
                 next_route = "human"
 
+        provenance = execution_provenance_issues(
+            self.root,
+            task=task,
+            session=session,
+            directory=bound.directory,
+            for_seal=True,
+        )
+        if provenance:
+            return self._blocked(
+                mode,
+                provenance,
+                "stop",
+                candidate=after,
+                project=project,
+                task=task,
+                session=session,
+                session_directory=bound.directory,
+                writes_applied=applied,
+                task_mutated=task_mutated,
+            )
         session = seal_session(self.root, bound.directory, session)
+        session["sealed_candidate_digest"] = after.digest
+        persist_session(bound.directory, session)
+        clear_current_execution(
+            self.root, session_id=str(session.get("record_id") or "")
+        )
         extras = self._result_extras(
             task=task,
             session=session,
@@ -1394,7 +1900,7 @@ class DevelopEngine:
         test_package = (
             Path(opts["test_package"])
             if opts.get("test_package")
-            else default_test_package()
+            else default_test_package(self.root)
         )
         test_result = consume_published_test_report(
             self.root,
@@ -1777,6 +2283,9 @@ class DevelopEngine:
             and session.get("status") == "OPEN"
         ):
             session = abort_session(session_directory, session)
+            clear_current_execution(
+                self.root, session_id=str(session.get("record_id") or "")
+            )
         payload = self._result_extras(
             task=task,
             session=session,
@@ -1897,8 +2406,8 @@ class DevelopEngine:
         }
 
 
-def default_develop_package() -> Path:
-    return Path(__file__).resolve().parents[2] / "skills" / "develop"
+def default_develop_package(host: str | Path | None = None) -> Path:
+    return resolve_skill_package("develop", host=host, runtime_file=Path(__file__))
 
 
 def _intake_scope_issues(
@@ -1931,6 +2440,27 @@ def _intake_scope_issues(
                 f"Task proposal path is not grounded in current project knowledge: {path}"
             )
 
+    supporting = [
+        normalize_project_path(raw, area=False)
+        for raw in (scope.get("supporting_paths") or [])
+    ]
+    issues.extend(
+        supporting_path_declaration_issues(
+            [item for item in supporting if item],
+            list(scope.get("paths") or []),
+        )
+    )
+    tests = _read_rows(root / ".scaffold/tests.yaml", "profiles", issues)
+    commands = _optional_index_rows(root / ".scaffold/commands.yaml", "commands")
+    issues.extend(
+        supporting_path_grounding_issues(
+            root,
+            [item for item in supporting if item],
+            tests_rows=tests,
+            commands_rows=commands,
+        )
+    )
+
     modules = _read_rows(root / ".scaffold/modules.yaml", "modules", issues)
     known_modules = {
         str(row.get("id") or row.get("name") or "")
@@ -1943,7 +2473,6 @@ def _intake_scope_issues(
                 f"Task proposal module is not grounded in modules.yaml: {module}"
             )
 
-    tests = _read_rows(root / ".scaffold/tests.yaml", "profiles", issues)
     known_tests = {
         str(row.get("id") or "")
         for row in tests
@@ -1976,6 +2505,19 @@ def _read_rows(
         issues.append(f"required project knowledge is malformed: {path.name}#{field}")
         return []
     return list(rows)
+
+
+def _optional_index_rows(path: Path, field: str) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    try:
+        data = read_yaml(path)
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return []
+    rows = data.get(field) if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
 
 
 def _requests_satisfied_completion(opts: dict[str, Any]) -> bool:
@@ -2035,8 +2577,8 @@ def _intake_gate(
     }
 
 
-def default_test_package() -> Path:
-    return Path(__file__).resolve().parents[2] / "skills" / "test"
+def default_test_package(host: str | Path | None = None) -> Path:
+    return resolve_skill_package("test", host=host, runtime_file=Path(__file__))
 
 
 def _candidate_after_publication(root: Path, publication, previous):

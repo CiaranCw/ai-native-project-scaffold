@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +14,7 @@ from typing import Any
 from scaffold_p5 import yaml_lite
 from scaffold_p5.io_util import sha256_text
 from scaffold_p5.ownership import normalize_project_path
+from scaffold_p7.mutation import supporting_path_declaration_issues
 from scaffold_p7.schemas import execution_binding_issues, validate_task_book
 from scaffold_p7.tasks import (
     allocate_task_id,
@@ -170,6 +175,9 @@ def task_proposal(task: dict[str, Any]) -> dict[str, Any]:
             "paths": _semantic_paths((task.get("scope") or {}).get("paths")),
             "modules": sorted(_string_set((task.get("scope") or {}).get("modules"))),
             "exclude": _semantic_paths((task.get("scope") or {}).get("exclude")),
+            "supporting_paths": _semantic_paths(
+                (task.get("scope") or {}).get("supporting_paths")
+            ),
         },
         "stages": stages,
         "final_tests": _semantic_tests(task.get("final_tests")),
@@ -480,7 +488,7 @@ def _scope(value: Any) -> tuple[dict[str, list[str]] | None, list[str]]:
         return None, ["Task proposal scope must be a mapping"]
     issues: list[str] = []
     out: dict[str, list[str]] = {}
-    for field in ("paths", "modules", "exclude"):
+    for field in ("paths", "modules", "exclude", "supporting_paths"):
         raw = value.get(field, [])
         if not isinstance(raw, list) or any(not _text(item) for item in raw):
             issues.append(f"Task proposal scope.{field} must be a string list")
@@ -502,6 +510,12 @@ def _scope(value: Any) -> tuple[dict[str, list[str]] | None, list[str]]:
     overlap = sorted(set(out["paths"]).intersection(out["exclude"]))
     if overlap:
         issues.append("Task proposal scope includes and excludes: " + ", ".join(overlap))
+    issues.extend(
+        supporting_path_declaration_issues(
+            out.get("supporting_paths") or [],
+            out.get("paths") or [],
+        )
+    )
     return out, issues
 
 
@@ -689,3 +703,57 @@ def _text(value: Any) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+INTAKE_B64_RE = re.compile(r"^[A-Za-z0-9+/_-]+=*$")
+
+
+def load_intake_envelope_flags(
+    json_text: str | None,
+    b64_text: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse installed-CLI intake flags. Missing flags return (None, None)."""
+    json_raw = (json_text or "").strip() or None
+    b64_raw = (b64_text or "").strip() or None
+    if json_raw and b64_raw:
+        return None, "provide only one of --intake-json or --intake-json-b64"
+    if not json_raw and not b64_raw:
+        return None, None
+    if b64_raw:
+        if not INTAKE_B64_RE.fullmatch(b64_raw):
+            return None, "intake JSON base64 is malformed"
+        padded = b64_raw + ("=" * ((4 - len(b64_raw) % 4) % 4))
+        try:
+            decoded = base64.b64decode(padded, validate=False)
+            json_raw = decoded.decode("utf-8")
+        except (ValueError, UnicodeDecodeError, binascii.Error):
+            try:
+                json_raw = base64.urlsafe_b64decode(padded).decode("utf-8")
+            except (ValueError, UnicodeDecodeError, binascii.Error):
+                return None, "intake JSON base64 could not be decoded"
+    try:
+        payload = json.loads(json_raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None, "intake JSON is not parseable"
+    return parse_intake_envelope(payload)
+
+
+def parse_intake_envelope(payload: Any) -> tuple[dict[str, Any] | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, "Develop intake envelope must be a JSON object"
+    structured_intent = payload.get("structured_intent")
+    proposal = payload.get("proposal")
+    grounding = payload.get("grounding")
+    if not isinstance(structured_intent, dict):
+        return None, "Develop intake structured_intent must be a mapping"
+    if structured_intent.get("kind") != "develop":
+        return None, "Develop intake structured_intent.kind must be develop"
+    if not isinstance(proposal, dict):
+        return None, "Develop intake proposal must be a mapping"
+    if not isinstance(grounding, dict):
+        return None, "Develop intake grounding must be a mapping"
+    return {
+        "structured_intent": structured_intent,
+        "proposal": proposal,
+        "grounding": grounding,
+    }, None

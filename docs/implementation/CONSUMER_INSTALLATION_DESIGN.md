@@ -91,8 +91,11 @@ covers only the managed region. The region also marks
 `.cursor/rules/scaffold-first-use.mdc` and `.cursor/hooks.json` as `-text`.
 
 `.cursor/hooks.json`: merge only the Scaffold `preToolUse` /
-`beforeShellExecution` / `subagentStart` / `beforeMCPExecution` entries
-identified as `fragment_id: scaffold-first-use`. Do not claim unrelated JSON.
+`postToolUse` / `postToolUseFailure` / `beforeShellExecution` /
+`subagentStart` / `beforeMCPExecution` / `afterFileEdit` /
+`afterTabFileEdit` entries identified as `fragment_id: scaffold-first-use`.
+Do not claim unrelated JSON. Do not claim live mutation enforcement on
+Cursor surfaces that omit those mutation hooks.
 
 `.agents/skills/impeccable` and any other non-scaffold client skill: preserve.
 

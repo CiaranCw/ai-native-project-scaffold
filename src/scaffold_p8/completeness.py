@@ -31,6 +31,8 @@ def evaluate_completeness(
     candidate = observe_candidate(root)
     engine = TestEngine(root, test_package)
     used_report: dict[str, Any] | None = None
+    diagnostic_report_id: str | None = None
+    consumption_stale = False
     invoked = None
     trust_blockers: list[str] = []
     if report is not None:
@@ -50,21 +52,37 @@ def evaluate_completeness(
         invoked = engine.run(
             "scoped_verification",
             selected=selected or project_required_ids,
-            task_book=task_payload.get("record_id"),
+            task_id=task_payload.get("record_id"),
             scope_paths=list((task_payload.get("scope") or {}).get("paths") or []),
             scope_modules=list((task_payload.get("scope") or {}).get("modules") or []),
         )
         extras = getattr(invoked, "extras", {}) or {}
         invoked_id = extras.get("report_id") if isinstance(extras, dict) else None
         if isinstance(invoked_id, str) and invoked_id:
-            used_report = engine.load_report(invoked_id)
-        if used_report is None:
+            consumed = _consume_published_report_for_task(
+                engine,
+                invoked_id,
+                task_payload,
+                trust_blockers,
+            )
+            used_report = consumed["authorized"]
+            diagnostic_report_id = consumed.get("report_id")
+            consumption_stale = bool(consumed.get("stale"))
+        if used_report is None and not trust_blockers:
             trust_blockers.append(
                 "invoked Test did not yield a validated published completed report"
             )
     elif report_id:
-        used_report = engine.load_report(str(report_id))
-        if used_report is None:
+        consumed = _consume_published_report_for_task(
+            engine,
+            str(report_id),
+            task_payload,
+            trust_blockers,
+        )
+        used_report = consumed["authorized"]
+        diagnostic_report_id = consumed.get("report_id")
+        consumption_stale = bool(consumed.get("stale"))
+        if used_report is None and not trust_blockers:
             trust_blockers.append(
                 "completed Test report identity is missing, incomplete, or invalid"
             )
@@ -74,9 +92,7 @@ def evaluate_completeness(
     if not isinstance(completeness, dict):
         completeness = {}
 
-    stale = bool(used_report) and not usable
-    if stale:
-        trust_blockers.append("completed Test report is stale for the current candidate")
+    stale = bool(consumption_stale or (used_report is not None and not usable))
     test_pass = bool(usable and completeness.get("test_pass") is True)
     report_required_fail = (
         int(completeness.get("required_fail") or 0) if usable else 0
@@ -172,7 +188,7 @@ def evaluate_completeness(
         "usable": usable,
         "zero_required": zero_required,
         "report": used_report,
-        "report_id": (used_report or {}).get("report_id"),
+        "report_id": diagnostic_report_id or (used_report or {}).get("report_id"),
         "evidence_refs": evidence_refs,
         "invoke_result": invoked,
         "route": route,
@@ -186,6 +202,39 @@ def evaluate_completeness(
         "required_fail_ids": required_fail_ids,
         "required_fail_profile_ids": sorted(fail_profile_ids),
         "blockers": sorted(set(trust_blockers + coverage_blockers)),
+    }
+
+
+def _consume_published_report_for_task(
+    engine: TestEngine,
+    report_id: str,
+    task: dict[str, Any],
+    trust_blockers: list[str],
+) -> dict[str, Any]:
+    """Canonical P6 consumption: authority verdict plus diagnostic identity.
+
+    Possession of a published report object is not Task authority.
+    """
+    live = task if str((task or {}).get("record_id") or "").strip() else None
+    consumed = engine.consume_published_report(report_id, task=live)
+    blockers = [str(item) for item in (consumed.get("blockers") or []) if item]
+    diagnostic = consumed.get("report") if isinstance(consumed.get("report"), dict) else None
+    authorized = diagnostic if consumed.get("ok") is True and diagnostic is not None else None
+    if authorized is None:
+        trust_blockers.extend(blockers)
+    diagnostic_id = consumed.get("report_id")
+    if not diagnostic_id and diagnostic is not None:
+        diagnostic_id = diagnostic.get("report_id")
+    stale = bool(
+        diagnostic is not None
+        and authorized is None
+        and any("stale for the current candidate" in item for item in blockers)
+    )
+    return {
+        "authorized": authorized,
+        "diagnostic": diagnostic,
+        "report_id": diagnostic_id,
+        "stale": stale,
     }
 
 

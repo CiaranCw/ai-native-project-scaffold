@@ -23,6 +23,7 @@ from scaffold_p5.io_util import sha256_bytes
 DECISION_BLOCK = "BLOCK_PROJECT_MUTATION"
 DECISION_ALLOW = "ALLOW_PROJECT_MUTATION"
 REQUIRED_ROUTE_BOOTSTRAP = "understand.bootstrap"
+REQUIRED_ROUTE_DEVELOP = "develop"
 FRAGMENT_ID = "scaffold-first-use"
 HOOKS_JSON_REL = ".cursor/hooks.json"
 FIRST_USE_RULE_REL = ".cursor/rules/scaffold-first-use.mdc"
@@ -33,9 +34,13 @@ HOOK_SCHEMA_VERSION = 1
 HOOK_TIMEOUT_SECONDS = 60
 HOOK_EVENTS = (
     "preToolUse",
+    "postToolUse",
+    "postToolUseFailure",
     "beforeShellExecution",
     "subagentStart",
     "beforeMCPExecution",
+    "afterFileEdit",
+    "afterTabFileEdit",
 )
 OWNERSHIP_MANAGED_JSON_FRAGMENT = "MANAGED_JSON_FRAGMENT"
 
@@ -84,12 +89,16 @@ TOOL_ALIASES = {
     "editfile": "EditFile",
     "editnotebook": "EditNotebook",
     "notebookedit": "NotebookEdit",
+    "move": "Move",
+    "rename": "Rename",
+    "multiedit": "MultiEdit",
     "task": "Task",
     "callmcptool": "CallMcpTool",
     "fetchmcpresource": "FetchMcpResource",
 }
 CMD_NAMES = frozenset({"cmd", "cmd.exe"})
 MUTATION_EVENTS = frozenset({"afterFileEdit", "afterTabFileEdit"})
+TERMINAL_EVENTS = frozenset({"postToolUse", "postToolUseFailure"})
 MUTATION_TOOLS = frozenset(
     {
         "Write",
@@ -106,11 +115,53 @@ MUTATION_TOOLS = frozenset(
         "GenerateImage",
         "Edit",
         "NotebookEdit",
+        "Move",
+        "Rename",
+        "MultiEdit",
     }
 )
+NON_EDITOR_MUTATION_TOOLS = frozenset(
+    {
+        "Task",
+        "CallMcpTool",
+        "FetchMcpResource",
+        "GenerateImage",
+    }
+)
+EDITOR_MUTATION_TOOLS = MUTATION_TOOLS - NON_EDITOR_MUTATION_TOOLS
 PYTHON_NAMES = frozenset({"python", "python.exe", "python3", "python3.exe"})
 PLAN_DIGEST_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+INTAKE_B64_RE = re.compile(r"^[A-Za-z0-9+/_-]+=*$")
 SHELL_METACHAR_RE = re.compile(r"""[;&|`$<>\n\r()]|&&|\|\|""")
+PATCH_FILE_RE = re.compile(
+    r"^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$",
+    re.MULTILINE,
+)
+MUTATION_PATH_KEYS = (
+    "path",
+    "file_path",
+    "target_file",
+    "target_notebook",
+    "old_path",
+    "new_path",
+    "destination",
+    "src",
+    "dest",
+)
+KNOWN_HOST_CLASSES = frozenset(
+    {
+        "NOT_ADOPTED",
+        "ESTABLISHED_HOST",
+        "ESTABLISHED_HOST_CONSISTENCY",
+        "PRIOR_FOOTPRINT",
+        "INTERRUPTED_INITIAL_ADOPTION",
+    }
+)
+GATE_BOOTSTRAP = "bootstrap"
+GATE_DEVELOP = "develop"
+GATE_RECOVERY = "recovery"
+GATE_FAIL_CLOSED = "fail_closed"
+REQUIRED_ROUTE_RECOVERY = "understand.compatibility"
 ALLOWED_RUN_ARGV = {
     (): "verify",
     ("verify",): "verify",
@@ -121,6 +172,39 @@ ALLOWED_RUN_ARGV = {
     ("understand",): "understand.bootstrap",
     ("understand", "bootstrap"): "understand.bootstrap",
 }
+POST_ADOPTION_RUN_ARGV = {
+    **ALLOWED_RUN_ARGV,
+    ("understand", "full"): "understand.full",
+    ("understand", "refresh"): "understand.refresh",
+    ("understand", "compatibility"): "understand.compatibility",
+    ("develop",): "develop",
+    ("develop", "normal_task"): "develop",
+    ("develop", "repair"): "develop",
+    ("test",): "test",
+    ("test", "scoped_verification"): "test",
+    ("submit",): "submit",
+    ("enter", "develop"): "enter",
+    ("enter", "understand"): "enter",
+    ("enter", "test"): "enter",
+    ("enter", "submit"): "enter",
+    ("develop", "intake"): "develop",
+    ("develop", "session"): "develop",
+    ("develop", "seal"): "develop",
+    ("develop", "abort"): "develop",
+}
+RECOVERY_RUN_ARGV = {
+    **ALLOWED_RUN_ARGV,
+    ("understand", "refresh"): "understand.refresh",
+    ("understand", "compatibility"): "understand.compatibility",
+    ("enter", "understand"): "enter",
+}
+FAIL_CLOSED_RUN_ARGV = {
+    (): "verify",
+    ("verify",): "verify",
+    ("status",): "status",
+    ("first-use",): "first-use",
+}
+INTAKE_POSITIONALS = frozenset({("enter", "develop"), ("develop", "intake")})
 
 SHELL_ALLOW = "allow"
 SHELL_DENY = "deny"
@@ -171,6 +255,36 @@ USER_DENY_MESSAGE = (
     "Scaffold first-use gate blocked a project mutation on a host that is "
     "not yet adopted."
 )
+DEVELOP_DENY_MESSAGE = (
+    "Project mutation is blocked because this ACTIVE host has no current "
+    "Develop authority (IN_PROGRESS Task Book, mutable Stage, and OPEN "
+    "Develop Session bound to that Task). "
+    "Run `python .scaffold/install/run.py enter develop --intake-json-b64 "
+    "<envelope>` to publish a bounded Task proposal through Develop intake. "
+    "Continue an existing Task with `python .scaffold/install/run.py develop "
+    "session --task-id <task-id>`. "
+    "Successful Adoption is not permission to edit HUMAN_OWNED project source. "
+    "Do not implement the business task outside Develop, and do not write "
+    ".scaffold/tasks/ directly."
+)
+DEVELOP_USER_DENY_MESSAGE = (
+    "Scaffold Develop gate blocked a project mutation that is outside the "
+    "current Task product or supporting scope, or that has no current "
+    "Develop Task, mutable Stage, and OPEN Session."
+)
+RECOVERY_DENY_MESSAGE = (
+    "Project mutation is blocked because this adopted host is degraded or "
+    "unresolved. Ordinary Develop mutation is not authorized. "
+    "Run `python .scaffold/install/run.py status`, then "
+    "`python .scaffold/install/run.py understand compatibility` or "
+    "`python .scaffold/install/run.py understand refresh` as required. "
+    "Do not implement the business task until the host is a healthy ACTIVE "
+    "ESTABLISHED_HOST."
+)
+RECOVERY_USER_DENY_MESSAGE = (
+    "Scaffold blocked a project mutation on a degraded or unresolved adopted "
+    "host. Recover the host before ordinary Develop work."
+)
 
 FIRST_USE_RULE_TEXT = """---
 description: Scaffold first-use authorization boundary. Always apply.
@@ -185,6 +299,23 @@ authority remains `python .scaffold/install/run.py status`.
 If the host is NOT_ADOPTED, ordinary project mutation is not authorized.
 
 Required route: `python .scaffold/install/run.py understand bootstrap`.
+
+If the host is ACTIVE / ESTABLISHED_HOST, ordinary HUMAN_OWNED business
+mutation is not authorized until Develop has a current IN_PROGRESS Task
+Book, a mutable Stage, and an OPEN Develop Session bound to that Task.
+Mutation is then authorized only inside that Task's product or supporting
+scope. An OPEN Session is not a repository-global unlock.
+
+Required route: `python .scaffold/install/run.py enter develop
+--intake-json-b64 <envelope>`, then continue with
+`python .scaffold/install/run.py develop session --task-id <task-id>`.
+
+Degraded adopted hosts (consistency, prior footprint, unresolved recovery)
+deny ordinary mutation. Recover with status / verify / understand
+compatibility or refresh.
+
+Successful Adoption is not permission to edit project source. Repair
+remains a Develop mode. There is no fifth Skill.
 
 NEEDS_HUMAN means STOP. Tell the user that Adoption requires approval.
 Do not implement the user task while waiting.
@@ -299,6 +430,8 @@ def first_use_decision(host: str | Path) -> dict[str, Any]:
             known=False,
             reason=reason,
             message=UNKNOWN_DENY_MESSAGE,
+            required_route=None,
+            gate_policy=GATE_FAIL_CLOSED,
         )
     if host_class == "NOT_ADOPTED":
         return _block_decision(
@@ -308,17 +441,63 @@ def first_use_decision(host: str | Path) -> dict[str, Any]:
             message=AGENT_DENY_MESSAGE,
             required_route=REQUIRED_ROUTE_BOOTSTRAP,
             snapshot=snapshot,
+            gate_policy=GATE_BOOTSTRAP,
+        )
+    policy = _mutation_gate_policy(snapshot)
+    if policy == GATE_FAIL_CLOSED:
+        return _block_decision(
+            host_class=host_class or "UNKNOWN",
+            known=False,
+            reason=reason if not known else f"unrecognized host class {host_class}",
+            message=UNKNOWN_DENY_MESSAGE,
+            required_route=None,
+            snapshot=snapshot,
+            gate_policy=GATE_FAIL_CLOSED,
+            user_message=USER_DENY_MESSAGE,
+        )
+    if policy == GATE_RECOVERY:
+        return _block_decision(
+            host_class=host_class,
+            known=True,
+            reason="adopted host requires recovery before ordinary mutation",
+            message=RECOVERY_DENY_MESSAGE,
+            required_route=REQUIRED_ROUTE_RECOVERY,
+            snapshot=snapshot,
+            gate_policy=GATE_RECOVERY,
+            user_message=RECOVERY_USER_DENY_MESSAGE,
+        )
+    from scaffold_p7.develop_authority import resolve_current_develop_authority
+
+    authority = resolve_current_develop_authority(Path(host))
+    if not authority.ok:
+        return _block_decision(
+            host_class=host_class,
+            known=True,
+            reason=authority.reason,
+            message=DEVELOP_DENY_MESSAGE,
+            required_route=REQUIRED_ROUTE_DEVELOP,
+            snapshot=snapshot,
+            gate_policy=GATE_DEVELOP,
+            user_message=DEVELOP_USER_DENY_MESSAGE,
         )
     return {
-        "decision": DECISION_ALLOW,
+        "decision": DECISION_BLOCK,
         "host_class": host_class,
         "required_route": None,
-        "project_mutation_allowed": True,
+        "project_mutation_allowed": False,
         "lifecycle_known": True,
-        "first_use_gate_active": False,
-        "reason": reason,
-        "agent_message": None,
+        "first_use_gate_active": True,
+        "gate_policy": GATE_DEVELOP,
+        "reason": authority.reason,
+        "agent_message": DEVELOP_DENY_MESSAGE,
+        "user_message": DEVELOP_USER_DENY_MESSAGE,
         "preflight_context": getattr(snapshot, "preflight_context", None),
+        "develop_authority": {
+            "ok": True,
+            "task_id": authority.task_id,
+            "session_id": authority.session_id,
+            "mutable_stage_ids": list(authority.mutable_stage_ids),
+        },
     }
 
 
@@ -338,26 +517,42 @@ def evaluate_cursor_hook(
     if host_root is None:
         return _deny(UNKNOWN_DENY_MESSAGE, reason="host root could not be resolved")
     authority = first_use_decision(host_root)
-    if authority.get("project_mutation_allowed"):
-        return _allow("first-use NOT_ADOPTED gate is not active")
+    policy = str(authority.get("gate_policy") or GATE_FAIL_CLOSED)
+    deny_message = authority.get("agent_message") or AGENT_DENY_MESSAGE
+    deny_user = authority.get("user_message") or USER_DENY_MESSAGE
+    if policy == GATE_DEVELOP:
+        deny_when = "outside current Develop Task/Stage/Session scope"
+    elif policy == GATE_RECOVERY:
+        deny_when = "before host recovery"
+    elif policy == GATE_FAIL_CLOSED:
+        deny_when = "because host state is unrecognized"
+    else:
+        deny_when = "before Adoption"
     if event in {"subagentStart"} or tool_name == "Task":
         return _deny(
-            authority.get("agent_message") or AGENT_DENY_MESSAGE,
-            reason="subagent/Task bypass is not authorized before Adoption",
+            deny_message,
+            reason=f"subagent/Task bypass is not authorized {deny_when}",
+            user_message=deny_user,
         )
     if _is_mcp_action(event, tool_name, data):
         return _deny(
-            authority.get("agent_message") or AGENT_DENY_MESSAGE,
-            reason="unknown MCP/external tool is fail-closed before Adoption",
+            deny_message,
+            reason=f"unknown MCP/external tool is fail-closed {deny_when}",
+            user_message=deny_user,
         )
     if _is_shell_action(event, tool_name, data):
         command = _shell_command(data)
-        kind, detail = classify_first_use_shell(command, host_root)
+        kind, detail = classify_first_use_shell(
+            command,
+            host_root,
+            policy=policy,
+        )
         if kind == SHELL_ASK_APPLY:
             if authority.get("host_class") != "NOT_ADOPTED":
                 return _deny(
-                    authority.get("agent_message") or UNKNOWN_DENY_MESSAGE,
+                    deny_message,
                     reason=detail,
+                    user_message=deny_user,
                 )
             if event == "beforeShellExecution":
                 return _ask(reason=detail)
@@ -365,66 +560,187 @@ def evaluate_cursor_hook(
         if kind == SHELL_ALLOW:
             return _allow(detail)
         return _deny(
-            authority.get("agent_message") or AGENT_DENY_MESSAGE,
+            deny_message,
             reason=detail,
+            user_message=deny_user,
         )
-    return _deny(
-        authority.get("agent_message") or AGENT_DENY_MESSAGE,
-        reason=f"{tool_name or event or 'tool'} is not authorized before Adoption",
+    if event in TERMINAL_EVENTS or event in MUTATION_EVENTS:
+        return _handle_mutation_terminal(
+            host_root,
+            data,
+            event,
+            tool_name,
+            policy=policy,
+        )
+    if policy != GATE_DEVELOP:
+        return _deny(
+            deny_message,
+            reason=f"{tool_name or event or 'tool'} is not authorized {deny_when}",
+            user_message=deny_user,
+        )
+    if tool_name not in EDITOR_MUTATION_TOOLS:
+        return _deny(
+            deny_message,
+            reason=f"{tool_name or event or 'tool'} is not authorized {deny_when}",
+            user_message=deny_user,
+        )
+    paths, path_error = _mutation_target_paths(data, host_root)
+    if path_error:
+        return _deny(deny_message, reason=path_error, user_message=deny_user)
+    from scaffold_p7.develop_authority import (
+        authorize_mutation_paths,
+        record_pending_mutation,
     )
+
+    allowed, detail = authorize_mutation_paths(host_root, paths)
+    if allowed:
+        record_pending_mutation(
+            host_root,
+            paths,
+            tool_name=tool_name,
+            tool_use_id=_tool_use_id(data),
+        )
+        return _allow(detail)
+    return _deny(deny_message, reason=detail, user_message=deny_user)
+
+
+def _handle_mutation_terminal(
+    host_root: Path,
+    data: dict[str, Any],
+    event: str,
+    tool_name: str,
+    *,
+    policy: str,
+) -> dict[str, Any]:
+    """Record terminal/after-file observations. Never manufacture provenance."""
+    if policy != GATE_DEVELOP:
+        return _allow("terminal mutation observation without current Develop authority")
+    if tool_name and tool_name not in EDITOR_MUTATION_TOOLS and event in TERMINAL_EVENTS:
+        return _allow("non-editor-mutation terminal event")
+    from scaffold_p7.develop_authority import (
+        fail_authorized_mutation,
+        observe_authorized_mutation,
+    )
+    from scaffold_p7.session import MUTATION_CANCELLED, MUTATION_FAILED
+
+    paths, path_error = _mutation_target_paths(data, host_root)
+    tool_use_id = _tool_use_id(data)
+    if event == "postToolUseFailure":
+        if path_error:
+            paths = []
+        failure_type = str(data.get("failure_type") or "").strip()
+        state = (
+            MUTATION_CANCELLED
+            if data.get("is_interrupt") is True or failure_type == "permission_denied"
+            else MUTATION_FAILED
+        )
+        fail_authorized_mutation(
+            host_root,
+            paths,
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            state=state,
+        )
+        return _allow("mutation attempt failed; no execution provenance")
+    if path_error:
+        if event != "postToolUse" or not tool_use_id:
+            return _allow(
+                "after-file event has no compatible current pending authorization"
+            )
+        paths = []
+    _recorded, detail = observe_authorized_mutation(
+        host_root,
+        paths,
+        tool_name=tool_name,
+        tool_use_id=tool_use_id,
+        event=event,
+    )
+    return _allow(detail)
+
+
+def _tool_use_id(payload: dict[str, Any]) -> str:
+    for key in ("tool_use_id", "toolCallId", "tool_call_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    tool_input = _tool_input_object(payload)
+    for key in ("tool_use_id", "toolCallId", "tool_call_id"):
+        value = str(tool_input.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def classify_first_use_shell(
     command: str | None,
     host: str | Path,
+    *,
+    adopted: bool = False,
+    policy: str | None = None,
 ) -> tuple[str, str]:
-    """Classify a Shell command while NOT_ADOPTED.
+    """Classify a Shell command while a mutation gate is active.
 
     Preview/status/verify remain allow. The digest-bound Adoption apply
     request is not execution authorization; it is an APPLY REQUEST that
-    must reach beforeShellExecution permission=ask.
+    must reach beforeShellExecution permission=ask. After Adoption the
+    official Develop/Test/Submit launcher commands are also allow so the
+    Agent can establish Task and Session authority. An OPEN Develop
+    Session is not a blanket mutating-shell permission.
     """
     raw = str(command or "").strip()
     if raw.startswith("& "):
         raw = raw[2:].strip()
     if not raw:
         return SHELL_DENY, "empty shell command is not a first-use lifecycle command"
-    if SHELL_METACHAR_RE.search(raw):
-        return SHELL_DENY, "shell metacharacters are not allowed before Adoption"
+    if "--intake-json" not in raw and SHELL_METACHAR_RE.search(raw):
+        return SHELL_DENY, "shell metacharacters are not allowed by the mutation gate"
     argv = _split_shell_argv(raw)
     if argv is None:
         return SHELL_DENY, "shell command could not be parsed exactly"
     argv = _unwrap_cmd_prefix(argv)
-    if len(argv) < 2:
-        return SHELL_DENY, "shell command is not an official Scaffold launcher invocation"
-    if not _is_python_token(argv[0]):
-        return SHELL_DENY, "shell interpreter is not the official python launcher"
-    runner = _official_runner_path(argv[1], host)
-    if runner is None:
-        return SHELL_DENY, "shell command is not python .scaffold/install/run.py"
-    rest = argv[2:]
-    positional, flags, flag_error = _split_runner_flags(rest)
-    if flag_error:
-        return SHELL_DENY, flag_error
-    host_flag = flags.get("host")
-    if host_flag is not None and not _same_host(host_flag, host):
-        return SHELL_DENY, "shell --host does not resolve to this project"
-    if positional not in ALLOWED_RUN_ARGV:
-        return SHELL_DENY, "shell command is not a first-use Scaffold lifecycle command"
-    if flags.get("approved") and positional not in BOOTSTRAP_ARGV:
-        return SHELL_DENY, "approval flags are only valid on Understand bootstrap"
-    if flags.get("plan_digest") and not flags.get("approved"):
-        return SHELL_DENY, "plan digest without --approved is not an official apply command"
-    if flags.get("approved") and flags.get("plan_digest"):
-        return SHELL_ASK_APPLY, ASK_APPLY_REASON
-    return SHELL_ALLOW, "official first-use Scaffold lifecycle command"
+    gate = policy or (GATE_DEVELOP if adopted else GATE_BOOTSTRAP)
+    if len(argv) >= 2 and _is_python_token(argv[0]):
+        runner = _official_runner_path(argv[1], host)
+        if runner is not None:
+            rest = argv[2:]
+            positional, flags, flag_error = _split_runner_flags(rest)
+            if flag_error:
+                return SHELL_DENY, flag_error
+            host_flag = flags.get("host")
+            if host_flag is not None and not _same_host(host_flag, host):
+                return SHELL_DENY, "shell --host does not resolve to this project"
+            allowed = _runner_argv_for_policy(gate)
+            if positional not in allowed:
+                return SHELL_DENY, "shell command is not a first-use Scaffold lifecycle command"
+            if flags.get("intake_json") or flags.get("intake_json_b64"):
+                if positional not in INTAKE_POSITIONALS:
+                    return (
+                        SHELL_DENY,
+                        "intake JSON flags are only valid on enter develop or develop intake",
+                    )
+                intake_error = _intake_flag_error(flags)
+                if intake_error:
+                    return SHELL_DENY, intake_error
+            if flags.get("approved") and positional not in BOOTSTRAP_ARGV:
+                return SHELL_DENY, "approval flags are only valid on Understand bootstrap"
+            if flags.get("plan_digest") and not flags.get("approved"):
+                return SHELL_DENY, "plan digest without --approved is not an official apply command"
+            if flags.get("approved") and flags.get("plan_digest"):
+                return SHELL_ASK_APPLY, ASK_APPLY_REASON
+            return SHELL_ALLOW, "official first-use Scaffold lifecycle command"
+    return SHELL_DENY, "shell command is not an official Scaffold launcher invocation"
 
 
 def first_use_shell_allowed(
     command: str | None,
     host: str | Path,
+    *,
+    adopted: bool = False,
+    policy: str | None = None,
 ) -> tuple[bool, str]:
-    kind, detail = classify_first_use_shell(command, host)
+    kind, detail = classify_first_use_shell(
+        command, host, adopted=adopted, policy=policy
+    )
     return kind == SHELL_ALLOW, detail
 
 
@@ -635,6 +951,8 @@ def _block_decision(
     message: str,
     required_route: str | None = REQUIRED_ROUTE_BOOTSTRAP,
     snapshot: Any = None,
+    gate_policy: str = GATE_BOOTSTRAP,
+    user_message: str | None = None,
 ) -> dict[str, Any]:
     return {
         "decision": DECISION_BLOCK,
@@ -643,8 +961,10 @@ def _block_decision(
         "project_mutation_allowed": False,
         "lifecycle_known": known,
         "first_use_gate_active": True,
+        "gate_policy": gate_policy,
         "reason": reason,
         "agent_message": message,
+        "user_message": user_message,
         "preflight_context": getattr(snapshot, "preflight_context", None),
     }
 
@@ -662,11 +982,16 @@ def _ask(*, reason: str) -> dict[str, Any]:
     }
 
 
-def _deny(agent_message: str, *, reason: str) -> dict[str, Any]:
+def _deny(
+    agent_message: str,
+    *,
+    reason: str,
+    user_message: str | None = None,
+) -> dict[str, Any]:
     return {
         "permission": "deny",
         "agent_message": agent_message,
-        "user_message": USER_DENY_MESSAGE,
+        "user_message": user_message or USER_DENY_MESSAGE,
         "reason": reason,
     }
 
@@ -734,7 +1059,7 @@ def _is_mcp_action(event: str, tool_name: str, payload: dict[str, Any]) -> bool:
 def _is_mutation_operation(event: str, tool_name: str, payload: dict[str, Any]) -> bool:
     if event in READ_EVENTS:
         return False
-    if event in MUTATION_EVENTS or event == "subagentStart":
+    if event in MUTATION_EVENTS or event in TERMINAL_EVENTS or event == "subagentStart":
         return True
     if _is_mcp_action(event, tool_name, payload):
         return True
@@ -870,11 +1195,150 @@ def _split_runner_flags(
             flags["host"] = rest[i + 1]
             i += 2
             continue
+        if token == "--task-id":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--task-id requires a Task Book identity"
+            flags["task_id"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--intake-json":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--intake-json requires a JSON object"
+            flags["intake_json"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--intake-json-b64":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--intake-json-b64 requires a base64 payload"
+            flags["intake_json_b64"] = rest[i + 1]
+            i += 2
+            continue
         if token.startswith("-"):
             return tuple(), flags, f"unsupported launcher flag {token}"
         positional.append(token)
         i += 1
     return tuple(positional), flags, None
+
+
+def _runner_argv_for_policy(policy: str) -> dict[tuple[str, ...], str]:
+    if policy == GATE_DEVELOP:
+        return POST_ADOPTION_RUN_ARGV
+    if policy == GATE_RECOVERY:
+        return RECOVERY_RUN_ARGV
+    if policy == GATE_FAIL_CLOSED:
+        return FAIL_CLOSED_RUN_ARGV
+    return ALLOWED_RUN_ARGV
+
+
+def _intake_flag_error(flags: dict[str, Any]) -> str | None:
+    json_text = flags.get("intake_json")
+    b64_text = flags.get("intake_json_b64")
+    if json_text and b64_text:
+        return "provide only one of --intake-json or --intake-json-b64"
+    if json_text:
+        try:
+            payload = json.loads(json_text)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return "intake JSON is not parseable"
+        if not isinstance(payload, dict):
+            return "intake JSON must be an object"
+        return None
+    if b64_text:
+        if not INTAKE_B64_RE.fullmatch(str(b64_text)):
+            return "intake JSON base64 is malformed"
+        return None
+    return None
+
+
+def _mutation_gate_policy(snapshot: Any) -> str:
+    host_class = str(getattr(snapshot, "host_class", "") or "")
+    if host_class not in KNOWN_HOST_CLASSES:
+        return GATE_FAIL_CLOSED
+    if host_class == "NOT_ADOPTED":
+        return GATE_BOOTSTRAP
+    if host_class != "ESTABLISHED_HOST":
+        return GATE_RECOVERY
+    project = getattr(snapshot, "project", None) or {}
+    lifecycle = str(
+        (project.get("lifecycle") if isinstance(project, dict) else None)
+        or getattr(snapshot, "lifecycle", "")
+        or ""
+    )
+    maintenance = list(
+        (project.get("maintenance") if isinstance(project, dict) else None)
+        or []
+    )
+    if lifecycle == "ACTIVE" and not any(
+        item in {"NEEDS_REFRESH", "NEEDS_MIGRATION"} for item in maintenance
+    ):
+        return GATE_DEVELOP
+    return GATE_RECOVERY
+
+
+def _mutation_target_paths(
+    payload: dict[str, Any],
+    host: Path,
+) -> tuple[list[str], str | None]:
+    tool_input = _tool_input_object(payload)
+    found: list[str] = []
+    for key in MUTATION_PATH_KEYS:
+        raw = payload.get(key)
+        if raw in (None, ""):
+            raw = tool_input.get(key)
+        if raw in (None, ""):
+            continue
+        rel, error = _relative_mutation_path(host, raw)
+        if error:
+            return [], error
+        if rel:
+            found.append(rel)
+    patch = tool_input.get("patch")
+    if isinstance(patch, str) and patch.strip():
+        for match in PATCH_FILE_RE.finditer(patch):
+            rel, error = _relative_mutation_path(host, match.group(1))
+            if error:
+                return [], error
+            if rel:
+                found.append(rel)
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        for item in edits:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("path") or item.get("file_path") or item.get("target_file")
+            if raw in (None, ""):
+                continue
+            rel, error = _relative_mutation_path(host, raw)
+            if error:
+                return [], error
+            if rel:
+                found.append(rel)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in found:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    if not unique:
+        return [], "mutation target path is missing; fail closed"
+    return unique, None
+
+
+def _relative_mutation_path(host: Path, raw: Any) -> tuple[str | None, str | None]:
+    text = str(raw or "").strip().replace("\\", "/")
+    if not text:
+        return None, None
+    try:
+        host_root = host.resolve()
+        candidate = Path(text)
+        resolved = candidate.resolve() if candidate.is_absolute() else (host_root / text).resolve()
+        relative = resolved.relative_to(host_root)
+    except (OSError, ValueError):
+        return None, "mutation target is outside the host; fail closed"
+    out = relative.as_posix()
+    if out.startswith("../") or out == "..":
+        return None, "mutation target is outside the host; fail closed"
+    return out, None
 
 
 def _same_host(path: str, host: str | Path) -> bool:

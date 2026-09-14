@@ -1250,5 +1250,9 @@ def _portable_locator(locator: str) -> bool:
 
 def _p6_engine(root: Path) -> TestEngine:
     from scaffold_p6.engine import TestEngine
+    from scaffold_p5.packages import resolve_skill_package
 
-    return TestEngine(root, Path(__file__).resolve().parents[2] / "skills" / "test")
+    return TestEngine(
+        root,
+        resolve_skill_package("test", host=root, runtime_file=Path(__file__)),
+    )

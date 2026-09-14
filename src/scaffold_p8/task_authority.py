@@ -37,6 +37,7 @@ class TaskScopeResolution:
     declared_paths: list[str]
     declared_modules: list[str]
     resolved_module_paths: list[str]
+    supporting_paths: list[str] = field(default_factory=list)
 
 
 def resolve_submit_task_authority(
@@ -71,6 +72,7 @@ def resolve_task_scope(root: Path, task: dict[str, Any] | None) -> TaskScopeReso
     scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
     declared_paths = _normalize_list(scope.get("paths"))
     excludes = _normalize_list(scope.get("exclude"))
+    supporting_paths = _normalize_list(scope.get("supporting_paths"))
     declared_modules = [
         str(item).strip()
         for item in (scope.get("modules") or [])
@@ -88,7 +90,7 @@ def resolve_task_scope(root: Path, task: dict[str, Any] | None) -> TaskScopeReso
         if item not in seen:
             seen.add(item)
             allowed.append(item)
-    constrained = bool(declared_paths or declared_modules)
+    constrained = bool(declared_paths or declared_modules or supporting_paths)
     return TaskScopeResolution(
         allowed=allowed,
         excludes=excludes,
@@ -97,6 +99,7 @@ def resolve_task_scope(root: Path, task: dict[str, Any] | None) -> TaskScopeReso
         declared_paths=declared_paths,
         declared_modules=declared_modules,
         resolved_module_paths=resolved,
+        supporting_paths=supporting_paths,
     )
 
 
@@ -149,6 +152,18 @@ def path_in_resolved_scope(path: str, resolution: TaskScopeResolution) -> bool:
     return any(path_covered(path, allowed) for allowed in resolution.allowed)
 
 
+def path_in_supporting_scope(path: str, resolution: TaskScopeResolution) -> bool:
+    if any(path_covered(path, excluded) for excluded in resolution.excludes):
+        return False
+    return any(path_covered(path, declared) for declared in resolution.supporting_paths)
+
+
+def path_in_task_candidate(path: str, resolution: TaskScopeResolution) -> bool:
+    return path_in_resolved_scope(path, resolution) or path_in_supporting_scope(
+        path, resolution
+    )
+
+
 def classify_task_applicability(
     root: Path, task: dict[str, Any], real_paths: list[str]
 ) -> tuple[str, list[str]]:
@@ -161,7 +176,7 @@ def classify_task_applicability(
         for path in real_paths
         if path and not str(path).startswith(".scaffold/")
     ]
-    if any(path_in_resolved_scope(path, resolution) for path in relevant_paths):
+    if any(path_in_task_candidate(path, resolution) for path in relevant_paths):
         return APPLICABLE, []
     if resolution.issues:
         return UNKNOWN, list(resolution.issues)

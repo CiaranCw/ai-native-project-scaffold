@@ -53,7 +53,17 @@ clone host
   → Cursor beforeShellExecution returns ask (FORCE_PROMPT); the Agent cannot
     self-approve that prompt
   → only after the user confirms that Cursor permission may the apply run
-  → later Develop / Test / Submit use the same installed packages + runtime
+  → host becomes ACTIVE / ESTABLISHED_HOST
+  → ordinary HUMAN_OWNED business mutation is still denied until Develop
+    has a current Task Book, mutable Stage, OPEN Session, and current
+    execution pointer
+  → required route: `python .scaffold/install/run.py enter develop
+       --intake-json-b64 <envelope>`
+    Intake creates no Develop Session.
+    Then `python .scaffold/install/run.py develop session --task-id
+       <task-id>` opens the execution window and writes the current
+       execution pointer. Close with `develop seal` or `develop abort`.
+  → later Test / Submit use the same installed packages + runtime
 ```
 
 Cursor project-skill convention used here is the documented location
@@ -75,6 +85,10 @@ Cursor syntax and does not take ownership of unrelated skills such as
 | How does runtime execute? | Vendored `.scaffold/install/runtime/` — no PYTHONPATH to SOURCE |
 | How is package identity verified? | `install.yaml` digests + `load_package` on installed packages; later `skills.lock` after Adoption |
 | How do Develop/Test/Submit proceed? | Same installed packages; Repair remains Develop |
+| How does first Task authority get created after Adoption? | Installed `enter develop --intake-json-b64 <envelope>` (or `develop intake --intake-json-b64`) calls `DevelopEngine.intake`. Intake creates no Develop Session. Bare `enter develop` without a proposal fails closed. Do not write `.scaffold/tasks/` directly |
+| How does Develop execution start? | `python .scaffold/install/run.py develop session --task-id <task-id>` opens a canonical OPEN Session, binds `.scaffold/runtime/develop-execution.yaml`, and a mutable Stage. Close with `develop seal` or `develop abort`. Deleting the pointer cannot resurrect editor authority from leftover OPEN history. |
+| What may an OPEN Session mutate? | Only after the current execution pointer is bound. Then only the current Task's product scope and explicit supporting scope, and only paths recorded through the authorized client mutation events. Not governance, not unrelated paths, not arbitrary shell, not unexplained same-scope files |
+| Project ownership vs Task scope | `project.yaml` ownership is not Task permission. Task `scope.paths`/`modules` are product scope. Task `scope.supporting_paths` are supporting delta and do not become product ownership |
 
 ## Non-goals of this walkthrough
 

@@ -123,7 +123,7 @@ class FA2Batch4EvidenceTrustTests(unittest.TestCase):
     def test_B4E08_invoke_test_reloads_published_report(self):
         write_submit_host(self.host)
         with mock.patch(
-            "scaffold_p6.engine.load_completed_report",
+            "scaffold_p6.published.load_completed_report",
             wraps=load_completed_report,
         ) as reader:
             result = run_submit(self.host, 
@@ -132,8 +132,17 @@ class FA2Batch4EvidenceTrustTests(unittest.TestCase):
                 selected=["unit"],
             )
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        report_id = result.extras["completeness"]["report_id"]
+        self.assertTrue(report_id)
         self.assertTrue(reader.called)
-        self.assertTrue(result.extras["completeness"]["report_id"])
+        self.assertGreaterEqual(reader.call_count, 1)
+        reloaded_ids = [
+            call.args[1]
+            if len(call.args) > 1
+            else call.kwargs.get("run_id")
+            for call in reader.call_args_list
+        ]
+        self.assertIn(report_id, reloaded_ids, reader.call_args_list)
 
     def test_B4E09_task_only_requirement_missing_from_evidence_blocks(self):
         write_submit_host(self.host)

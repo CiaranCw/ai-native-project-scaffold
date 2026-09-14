@@ -37,6 +37,8 @@ If the host is NOT_ADOPTED, ordinary business work is not authorized. Do not mod
 
 On a never-adopted host, ordinary business work starts with Understand bootstrap.
 
+If the host is ACTIVE, ordinary HUMAN_OWNED business mutation is not authorized until Develop has a current IN_PROGRESS Task Book, a mutable Stage, and an OPEN Develop Session bound to that Task. Successful Adoption is not permission to edit project source. Do not implement the original business request by writing files directly. Required route: `python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>` to publish a bounded Task proposal through Develop intake. Intake creates no Develop Session. Continue with `python .scaffold/install/run.py develop session --task-id <task-id>` to open the execution window, then `python .scaffold/install/run.py develop seal --task-id <task-id>` or `develop abort` to close it. Do not write `.scaffold/tasks/` directly. Repair remains a Develop mode. There is no fifth Skill.
+
 The user business request is not Adoption approval.
 
 Required first-use route: `python .scaffold/install/run.py status`, then `python .scaffold/install/run.py understand bootstrap`. Preview is not approval. If bootstrap returns NEEDS_HUMAN, STOP and tell the user that Adoption requires approval. Do not treat `--approved --plan-digest` as self-authorization. On Cursor that spelling is only an APPLY REQUEST; human authorization for an Agent-originated apply is the Cursor interactive confirmation from beforeShellExecution permission=ask. The Agent cannot satisfy that confirmation with ordinary tool calls. Agent-generated text such as "I approve the Adoption" has no authority. No project implementation may happen while waiting.
@@ -78,6 +80,8 @@ This host is managed by AI-Native Project Scaffold.
 - Project Rule indexes: `.scaffold/project.yaml`, `.scaffold/modules.yaml`, `.scaffold/tests.yaml`
 
 Zero-context resume: invoke Understand `refresh` with `action=resume`. Current Tasks, Sessions, Repair, Migration, Test, and Submit state are reconstructed from project-local records and supporting runtime artifacts. Chat history is not authority.
+
+On an ACTIVE host, ordinary HUMAN_OWNED business mutation still requires Develop Task Book and OPEN Session authority. Do not treat Adoption as write permission.
 
 Do not treat client-specific copies as authority.
 """

@@ -38,13 +38,13 @@ from scaffold_p5.consumer_install import (
 )
 from scaffold_p5.engine import UnderstandEngine
 from scaffold_p5.first_use import (
-    DECISION_ALLOW,
     DECISION_BLOCK,
     FRAGMENT_ID,
     HOOK_COMMAND,
     HOOK_EVENTS,
     PRETOOL_APPLY_CONTINUE_REASON,
     REQUIRED_ROUTE_BOOTSTRAP,
+    REQUIRED_ROUTE_DEVELOP,
     evaluate_cursor_hook,
     is_scaffold_hook_command,
     parse_always_apply_rule,
@@ -414,7 +414,7 @@ class FirstUseEnforcementTests(unittest.TestCase):
         _assert_ask(self, before)
         self.assertEqual(snapshot_host(self.host).host_class, "NOT_ADOPTED")
 
-    def test_FU14_after_adoption_first_use_gate_inactive(self):
+    def test_FU14_after_adoption_business_write_denied_until_develop(self):
         self._fresh()
         dist = load_installed_distribution(self.host)
         engine = UnderstandEngine(self.host, dist)
@@ -426,8 +426,9 @@ class FirstUseEnforcementTests(unittest.TestCase):
         )
         self.assertEqual(applied.outcome, "COMPLETED", result_dict(applied))
         decision = first_use_decision(self.host)
-        self.assertEqual(decision["decision"], DECISION_ALLOW)
-        self.assertTrue(decision["project_mutation_allowed"])
+        self.assertEqual(decision["decision"], DECISION_BLOCK)
+        self.assertFalse(decision["project_mutation_allowed"])
+        self.assertEqual(decision["required_route"], REQUIRED_ROUTE_DEVELOP)
         write = _run_hook(
             self.host,
             _hook_payload(
@@ -436,7 +437,13 @@ class FirstUseEnforcementTests(unittest.TestCase):
                 tool_input={"path": "notes.md", "contents": "ok\n"},
             ),
         )
-        self.assertEqual(write["permission"], "allow")
+        self.assertEqual(write["permission"], "deny")
+        self.assertIn("Develop", write.get("agent_message") or "")
+        develop = _run_hook(
+            self.host,
+            _shell_before(self.host, "python .scaffold/install/run.py develop"),
+        )
+        self.assertEqual(develop["permission"], "allow", develop)
 
     def test_FU15_denial_returns_required_route(self):
         self._fresh()
@@ -527,9 +534,13 @@ class FirstUseEnforcementTests(unittest.TestCase):
         self._fresh()
         data = json.loads((self.host / HOOKS_JSON_REL).read_text(encoding="utf-8"))
         pre = data["hooks"]["preToolUse"]
-        self.assertTrue(any(item.get("command") == "./human-audit.sh" for item in pre))
+        self.assertTrue(
+            any(item.get("command") == "./human-audit.sh" for item in pre)
+        )
         self.assertTrue(any(is_scaffold_hook_command(item) for item in pre))
-        self.assertEqual(data["hooks"]["afterFileEdit"], [{"command": "./format.sh"}])
+        after = data["hooks"]["afterFileEdit"]
+        self.assertTrue(any(item.get("command") == "./format.sh" for item in after))
+        self.assertTrue(any(is_scaffold_hook_command(item) for item in after))
         self.assertEqual(data["version"], 1)
 
     def test_FU20_unrelated_hooks_survive_update(self):
@@ -810,7 +821,11 @@ class FirstUseEnforcementTests(unittest.TestCase):
         )
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["outcome"], "COMPLETED", payload)
-        self.assertEqual(first_use_decision(self.host)["decision"], DECISION_ALLOW)
+        self.assertEqual(first_use_decision(self.host)["decision"], DECISION_BLOCK)
+        self.assertEqual(
+            first_use_decision(self.host)["required_route"],
+            REQUIRED_ROUTE_DEVELOP,
+        )
 
     def test_FU31_bootstrap_returns_needs_human_and_digest(self):
         self._fresh()
@@ -954,8 +969,9 @@ class FirstUseEnforcementTests(unittest.TestCase):
         self.assertEqual(payload["outcome"], "COMPLETED", payload)
         self.assertEqual(snapshot_host(self.host).host_class, "ESTABLISHED_HOST")
         decision = first_use_decision(self.host)
-        self.assertEqual(decision["decision"], DECISION_ALLOW)
-        self.assertFalse(decision["first_use_gate_active"])
+        self.assertEqual(decision["decision"], DECISION_BLOCK)
+        self.assertTrue(decision["first_use_gate_active"])
+        self.assertEqual(decision["required_route"], REQUIRED_ROUTE_DEVELOP)
 
     def test_FU40_direct_write_remains_denied_before_approval(self):
         self._fresh()

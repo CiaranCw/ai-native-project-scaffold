@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 import threading
 
-from scaffold_p5.packages import load_package
+from scaffold_p5.packages import load_package, resolve_skill_package
 from scaffold_p5.result import skill_result
 from scaffold_p5.rules import resolve_project_rules, rule_test_ids
 from scaffold_p5.scm import DIVERGED, STALE, observe_upstream_currentness
@@ -66,7 +66,7 @@ class SubmitEngine:
     ):
         self.root = Path(host_root)
         self.package_root = (
-            Path(package_root) if package_root else default_submit_package()
+            Path(package_root) if package_root else default_submit_package(self.root)
         )
         self.skill_version = ""
         self.preflight: SubmitPreflight | None = None
@@ -121,7 +121,7 @@ class SubmitEngine:
         test_package = (
             Path(opts["test_package"])
             if opts.get("test_package")
-            else default_test_package()
+            else default_test_package(self.root)
         )
         test_engine = TestEngine(self.root, test_package)
         candidate = observe_candidate(self.root)
@@ -218,6 +218,7 @@ class SubmitEngine:
             real_paths=real_paths,
             sessions=sessions,
             entries=list(real_diff.get("entries") or []),
+            task=task,
         )
         task_scope = (
             task.get("scope")
@@ -1681,8 +1682,8 @@ class SubmitEngine:
         }
 
 
-def default_submit_package() -> Path:
-    return Path(__file__).resolve().parents[2] / "skills" / "submit"
+def default_submit_package(host: str | Path | None = None) -> Path:
+    return resolve_skill_package("submit", host=host, runtime_file=Path(__file__))
 
 
 _FINALIZATION_LOCKS: dict[str, threading.Lock] = {}
@@ -1699,8 +1700,8 @@ def _finalization_lock(root: Path) -> threading.Lock:
         return lock
 
 
-def default_test_package() -> Path:
-    return Path(__file__).resolve().parents[2] / "skills" / "test"
+def default_test_package(host: str | Path | None = None) -> Path:
+    return resolve_skill_package("test", host=host, runtime_file=Path(__file__))
 
 
 def _public_completeness(completeness: dict[str, Any]) -> dict[str, Any]:

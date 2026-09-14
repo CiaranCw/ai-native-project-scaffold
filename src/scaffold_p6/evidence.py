@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from scaffold_p5.io_util import sha256_text
+from scaffold_p5.ownership import normalize_project_path, path_covered
 
 from scaffold_p6.models import (
     EVIDENCE_KINDS,
@@ -98,6 +100,8 @@ def compile_supplied_bundle(
     supplied_items: list[dict[str, Any]],
     required_kinds: list[str],
     declared_provenance: str,
+    host_root: Path | None = None,
+    task: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, list[str], str]:
     items: list[dict[str, Any]] = []
     refs: list[dict[str, Any]] = []
@@ -111,6 +115,8 @@ def compile_supplied_bundle(
             supplied=supplied,
             declared_provenance=declared_provenance,
             index=index,
+            host_root=host_root,
+            task=task,
         )
         blockers.extend(item_blockers)
         if compiled:
@@ -144,6 +150,8 @@ def compile_supplied_evidence(
     supplied: dict[str, Any],
     required_kinds: list[str],
     declared_provenance: str = "",
+    host_root: Path | None = None,
+    task: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, list[str]]:
     items, refs, complete, blockers, _result = compile_supplied_bundle(
         run_id=run_id,
@@ -152,6 +160,8 @@ def compile_supplied_evidence(
         supplied_items=[supplied],
         required_kinds=required_kinds,
         declared_provenance=declared_provenance,
+        host_root=host_root,
+        task=task,
     )
     return items, refs, complete, blockers
 
@@ -252,6 +262,8 @@ def compile_supplied_sav_item(
     candidate: CandidateIdentity,
     supplied: dict[str, Any],
     index: int,
+    host_root: Path | None = None,
+    task: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str]]:
     """Compile caller SAV assertions through supplied-evidence provenance rules."""
     if not isinstance(supplied, dict):
@@ -270,6 +282,8 @@ def compile_supplied_sav_item(
         supplied=supplied,
         declared_provenance=str(provenance),
         index=index,
+        host_root=host_root,
+        task=task,
     )
     if compiled is None:
         return None, refs, blockers
@@ -309,6 +323,53 @@ def local_execution_permitted(declared_provenance: str) -> bool:
     )
 
 
+def supporting_evidence_locator_issues(
+    root: str | Path,
+    locator: str,
+    *,
+    task: dict[str, Any] | None,
+    kind: str | None = None,
+) -> list[str]:
+    """Validate a host-file evidence locator against Task supporting scope.
+
+    Membership never manufactures TEST_PASS or TEST_COMPLETE. P6 remains the
+    sole Test/Evidence authority. test-runs/ locators stay P6 run artifacts.
+    Missing project-local file_artifact locators fail closed. Opaque External
+    locators that are not host files are left to existing P6 evidence rules.
+    """
+    raw = str(locator or "").strip()
+    if "://" in raw:
+        return []
+    rel = normalize_project_path(locator, area=False)
+    if not rel:
+        return []
+    if rel.startswith("test-runs/"):
+        return []
+    if rel.startswith(".scaffold/") or rel.startswith(".cursor/") or rel.startswith(".git/"):
+        return [f"evidence locator {rel} is protected Scaffold governance"]
+    if rel in {"AGENTS.md", ".gitattributes"}:
+        return [f"evidence locator {rel} is protected Scaffold governance"]
+    host = Path(root)
+    full = host / rel
+    exists = full.is_file()
+    requires_existence = kind == "file_artifact"
+    if not exists and not requires_existence:
+        return []
+    if task is None or not isinstance(task, dict):
+        return ["project evidence locator requires current Task supporting scope"]
+    scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
+    supporting = [
+        normalize_project_path(item, area=False)
+        for item in (scope.get("supporting_paths") or [])
+        if normalize_project_path(item, area=False)
+    ]
+    if not any(path_covered(rel, prefix) or rel == prefix for prefix in supporting):
+        return [f"evidence locator {rel} is outside Task supporting scope"]
+    if requires_existence and not exists:
+        return [f"evidence locator {rel} is missing"]
+    return []
+
+
 def _compile_one_supplied(
     *,
     run_id: str,
@@ -317,6 +378,8 @@ def _compile_one_supplied(
     supplied: dict[str, Any],
     declared_provenance: str,
     index: int,
+    host_root: Path | None = None,
+    task: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[str], str]:
     provenance = supplied.get("provenance")
     kind = supplied.get("kind")
@@ -360,6 +423,17 @@ def _compile_one_supplied(
             [f"{provenance} requires an explicit candidate_digest for the current candidate"],
             "",
         )
+
+    locator = str(supplied.get("locator") or "")
+    if host_root is not None and locator:
+        locator_issues = supporting_evidence_locator_issues(
+            host_root,
+            locator,
+            task=task,
+            kind=str(kind or ""),
+        )
+        if locator_issues:
+            return None, [], locator_issues, ""
 
     item = {
         "schema_version": EVIDENCE_SCHEMA_VERSION,

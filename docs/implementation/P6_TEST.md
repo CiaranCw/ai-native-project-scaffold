@@ -36,6 +36,13 @@ P6 produces a candidate-bound completeness **support summary**. P8 later owns Su
 
 Task Book and Develop Session are optional references only. Neither is required.
 
+Runtime input `task_id` loads the authoritative Task Book for that Test run.
+Engine kwarg `task_book` is only an already-loaded Task Book mapping; it is
+not a string identifier. Published `optional_refs.task_book` is the durable
+Task id of the Task that produced the report. `consume_published_report`
+reuses that published binding: a report bound to Task A cannot be consumed
+as authority for Task B, even when Candidate identity is identical.
+
 ## Skill package identity
 
 Frozen from P4 package/release convention and the P4 Test fixture identity:

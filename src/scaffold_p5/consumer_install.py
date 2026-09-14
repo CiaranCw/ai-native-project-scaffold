@@ -253,18 +253,33 @@ name: scaffold-develop
 description: >-
   Scaffold Develop. Use to implement a Task, continue work, or repair under
   Develop. Repair is a Develop mode, not a fifth Skill. Do not start Develop on
-  a never-adopted host; Understand bootstrap comes first.
+  a never-adopted host; Understand bootstrap comes first. On an ACTIVE host,
+  ordinary HUMAN_OWNED business mutation is unauthorized until Develop has a
+  current Task Book, OPEN Session, and current execution pointer.
 ---
 
 # Develop (Cursor adapter)
 
 Canonical package: `.scaffold/install/packages/develop/SKILL.md`
 
+On an ACTIVE host, do not edit project source until Task authority exists,
+a Develop execution Session is OPEN, and the current execution pointer is
+bound. Establish or continue a Task through
+the installed Develop intake channel. Intake creates no Session. Then begin
+execution with `develop session --task-id`, mutate only inside that Task's
+product or supporting scope, and close with `develop seal` or `develop abort`.
+
 Run:
 
 ```text
-python .scaffold/install/run.py develop
+python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>
+python .scaffold/install/run.py develop session --task-id <task-id>
+python .scaffold/install/run.py develop seal --task-id <task-id>
 ```
+
+`--intake-json-b64` carries the structured Task proposal required by
+Develop intake. Do not write `.scaffold/tasks/` directly. Repair is a
+Develop mode. Supporting scope is Task affiliation, not ownership override.
 
 Do not use an external Distribution checkout.
 """,
@@ -1223,8 +1238,28 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     parser.add_argument("--task-id", default=None)
     parser.add_argument("--approved", action="store_true")
     parser.add_argument("--plan-digest", dest="plan_digest", default=None)
+    parser.add_argument("--intake-json", default=None)
+    parser.add_argument("--intake-json-b64", default=None)
     args, _rest = parser.parse_known_args(argv)
     target = Path(args.host)
+    intake_allowed = (
+        (args.command == "enter" and (args.mode or "") == "develop")
+        or (args.command == "develop" and (args.mode or "") == "intake")
+    )
+    if (args.intake_json or args.intake_json_b64) and not intake_allowed:
+        print(
+            json.dumps(
+                {
+                    "outcome": "BLOCKED",
+                    "blockers": [
+                        "--intake-json / --intake-json-b64 is only valid on "
+                        "enter develop or develop intake"
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1
     if args.command == "verify":
         payload = verify_consumer_install(target)
         print(json.dumps(payload, indent=2))
@@ -1239,9 +1274,32 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         return 0
     if args.command == "enter":
         from scaffold_entry import enter_project
+        from scaffold_p7.intake import load_intake_envelope_flags
 
         kind = args.mode or "status"
-        result = enter_project(target, structured_intent={"kind": kind})
+        envelope, envelope_error = load_intake_envelope_flags(
+            args.intake_json, args.intake_json_b64
+        )
+        if envelope_error:
+            print(
+                json.dumps(
+                    {"outcome": "BLOCKED", "blockers": [envelope_error]},
+                    indent=2,
+                )
+            )
+            return 1
+        if envelope is not None:
+            result = enter_project(
+                target,
+                structured_intent=envelope["structured_intent"],
+                proposal=envelope["proposal"],
+                grounding=envelope["grounding"],
+            )
+        else:
+            structured = {"kind": kind}
+            if args.task_id:
+                structured["task_id"] = args.task_id
+            result = enter_project(target, structured_intent=structured)
         print(json.dumps(result if isinstance(result, dict) else result_dict(result), indent=2, default=str))
         return 0
     dist = load_installed_distribution(target)
@@ -1259,14 +1317,61 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     package = target / ".scaffold" / "install" / "packages" / args.command
     if args.command == "develop":
         from scaffold_p7.engine import DevelopEngine
+        from scaffold_p7.intake import load_intake_envelope_flags
 
-        result = DevelopEngine(target, package).run(args.mode or "normal_task", task_id=args.task_id)
+        engine = DevelopEngine(
+            target,
+            package if (package / "SKILL.md").is_file() else None,
+        )
+        mode = args.mode or "normal_task"
+        if mode == "intake":
+            envelope, envelope_error = load_intake_envelope_flags(
+                args.intake_json, args.intake_json_b64
+            )
+            if envelope_error:
+                print(
+                    json.dumps(
+                        {"outcome": "BLOCKED", "blockers": [envelope_error]},
+                        indent=2,
+                    )
+                )
+                return 1
+            if envelope is None:
+                print(
+                    json.dumps(
+                        {
+                            "outcome": "BLOCKED",
+                            "blockers": [
+                                "develop intake requires --intake-json or "
+                                "--intake-json-b64"
+                            ],
+                        },
+                        indent=2,
+                    )
+                )
+                return 1
+            result = engine.intake(
+                structured_intent=envelope["structured_intent"],
+                proposal=envelope["proposal"],
+                grounding=envelope["grounding"],
+            )
+        elif mode == "session":
+            result = engine.open_develop_session(task_id=args.task_id)
+        elif mode == "seal":
+            result = engine.seal_develop_execution(task_id=args.task_id)
+        elif mode == "abort":
+            result = engine.abort_develop_execution(task_id=args.task_id)
+        else:
+            result = engine.run(mode, task_id=args.task_id)
         print(json.dumps(result_dict(result), indent=2, default=str))
         return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
     if args.command == "test":
         from scaffold_p6.engine import TestEngine
 
-        result = TestEngine(target, package).run(args.mode or "scoped_verification")
+        result = TestEngine(target, package).run(
+            args.mode or "scoped_verification",
+            task_id=args.task_id,
+        )
         print(json.dumps(result_dict(result), indent=2, default=str))
         return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
     from scaffold_p8.engine import SubmitEngine

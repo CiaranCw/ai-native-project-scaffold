@@ -344,3 +344,37 @@ def _entry_identity_contradiction(skill_md: str, skill_id: str, version: str) ->
     if versions and any(value != version for value in versions):
         return "skill.yaml / entry skill_version contradiction"
     return None
+
+
+def installed_package_dir(host: str | Path, skill_id: str) -> Path:
+    return Path(host) / ".scaffold" / "install" / "packages" / skill_id
+
+
+def resolve_skill_package(
+    skill_id: str,
+    *,
+    host: str | Path | None = None,
+    runtime_file: Path | None = None,
+) -> Path:
+    """Resolve a Skill package from published install/packages, then vendor skills/.
+
+    Published Consumer layout is `.scaffold/install/packages/{skill}/`.
+    Vendor Distribution checkout layout is `skills/{skill}/`.
+    Do not invent a duplicate installed `skills/` tree.
+    """
+    if host is not None:
+        installed = installed_package_dir(host, skill_id)
+        if installed.is_dir():
+            return installed
+    origin = Path(runtime_file or __file__).resolve()
+    try:
+        base = origin.parents[2]
+    except IndexError:
+        base = origin.parent
+    packages = base / "packages" / skill_id
+    if packages.is_dir():
+        return packages
+    skills = base / "skills" / skill_id
+    if skills.is_dir():
+        return skills
+    return Path(__file__).resolve().parents[2] / "skills" / skill_id

@@ -70,8 +70,10 @@ An established Commit is durable truth and is never rolled back.
 S5 consumes the current P6 Test completeness result. Foundation `TEST_COMPLETE` is P6 `test_complete` after current-candidate usability checks. Required FAIL cannot yield it. Unknown required policy cannot masquerade as authoritative zero-required completeness. Any false `test_complete` stops both review-only and finalizing flows at S5, before S6 authorization or S7 repository synchronization. Terminal coverage remains `coverage_complete`. Batch `TEST_PASS` is reported but is not a second required-obligation gate: a selected optional FAIL does not block S10 when required verification is complete. Batch 3 left caller-report trust and requirement-id Evidence coverage for the later correction below.
 
 Batch 4 narrows the S5 trust boundary to P6-published completed reports. Both
-`report_id` and P8-invoked Test are reloaded through the same P6 reader; raw
-report mappings are not authoritative. Task required-test labels are proven
+`report_id` and P8-invoked Test are reloaded through `consume_published_report`;
+raw report mappings are not authoritative. A published report's
+`optional_refs.task_book` is the durable Task identity; Submit cannot consume a
+report bound to a different Task Book. Task required-test labels are proven
 only through their P6-owned `evidence_ref.locator`, never by equality with a
 profile name. Project-required profile identities are checked separately.
 S9 copies P6-minted Evidence locators into the Change Record and asks P6 to

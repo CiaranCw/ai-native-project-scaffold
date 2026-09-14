@@ -8,12 +8,15 @@ from typing import Any
 from scaffold_p5.io_util import read_yaml
 from scaffold_p5.ownership import (
     normalize_project_path,
-    ordinary_business_source,
     path_covered,
     resolve_ownership,
 )
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
-from scaffold_p8.task_authority import path_in_resolved_scope, resolve_task_scope
+from scaffold_p7.mutation import authorize_path_mutation
+from scaffold_p8.task_authority import (
+    path_in_task_candidate,
+    resolve_task_scope,
+)
 
 
 IMPACT_MODULE_STRUCTURE = "MODULE_STRUCTURE"
@@ -120,7 +123,7 @@ def review_structure(
                 path
                 for path in real_paths
                 if _is_source_path(path)
-                and not path_in_resolved_scope(path, scope)
+                and not path_in_task_candidate(path, scope)
                 and path not in CORE_MACHINE_ARTIFACTS
             ]
             if undeclared:
@@ -136,32 +139,44 @@ def review_structure(
     for path in real_paths:
         if not _is_source_path(path):
             continue
+        if task is None:
+            resolved = resolve_ownership(ownership, path)
+            if resolved.status == "UNKNOWN":
+                unknown_ownership.append(path)
+            elif resolved.status != "RESOLVED":
+                conflicting_ownership.append(
+                    f"{path}: {resolved.reason or 'ownership is conflicting'}"
+                )
+            continue
+        allowed, reason, role = authorize_path_mutation(
+            root,
+            path,
+            task=task,
+            project=project or {},
+            require_in_progress=False,
+        )
         resolved = resolve_ownership(ownership, path)
-        if resolved.status == "UNKNOWN":
-            unknown_ownership.append(path)
+        if not allowed:
+            if resolved.status == "UNKNOWN" and role != "supporting":
+                unknown_ownership.append(path)
+            else:
+                conflicting_ownership.append(f"{path}: {reason}")
             continue
-        if resolved.status != "RESOLVED":
-            conflicting_ownership.append(
-                f"{path}: {resolved.reason or 'ownership is conflicting'}"
+        ownership_mode = (
+            "UNKNOWN"
+            if resolved.status == "UNKNOWN"
+            else (
+                str(resolved.mode)
+                if resolved.status == "RESOLVED"
+                else "CONFLICTING"
             )
-            continue
-        if resolved.mode == "MANAGED":
-            conflicting_ownership.append(
-                f"{path}: MANAGED whole-file change lacks bounded-region proof"
-            )
-            continue
-        if resolved.mode == "HUMAN_OWNED" and not ordinary_business_source(
-            path, list((project or {}).get("source_areas") or [])
-        ):
-            conflicting_ownership.append(
-                f"{path}: HUMAN_OWNED change is not ordinary business source"
-            )
-            continue
+        )
         ownership_authority.append(
             {
                 "path": path,
-                "ownership": resolved.mode,
+                "ownership": ownership_mode,
                 "ownership_key": resolved.matched_key,
+                "scope_role": role,
             }
         )
     if unknown_ownership:

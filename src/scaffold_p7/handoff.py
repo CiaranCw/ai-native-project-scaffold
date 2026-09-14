@@ -223,7 +223,7 @@ def invoke_test(
 
     engine = TestEngine(host, test_package)
     opts: dict[str, Any] = {
-        "task_book": payload.get("task_id"),
+        "task_id": payload.get("task_id"),
         "develop_session": payload.get("session_id"),
         "scope_paths": list((payload.get("scope") or {}).get("paths") or []),
         "scope_modules": list((payload.get("scope") or {}).get("modules") or []),

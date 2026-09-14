@@ -78,6 +78,8 @@ class TestEngine:
         self.adapter_invocations = 0
         self.preflight: TestPreflight | None = None
         self.project_rules: dict[str, Any] | None = None
+        self._evidence_task: dict[str, Any] | None = None
+        self._report_task_id = ""
         if self.package_root:
             loaded = load_package(self.package_root)
             self.skill_version = loaded.ref.skill_version
@@ -85,6 +87,23 @@ class TestEngine:
 
     def run(self, mode: str = "scoped_verification", **opts: Any):
         self.project_rules = None
+        task_id = str(opts.get("task_id") or "").strip()
+        task_book = opts.get("task_book")
+        if isinstance(task_book, dict):
+            self._evidence_task = task_book
+            if not task_id:
+                task_id = str(task_book.get("record_id") or "").strip()
+        elif task_id:
+            from scaffold_p6.sav import load_task_book
+
+            self._evidence_task = load_task_book(self.root, task_id)
+        else:
+            self._evidence_task = None
+        self._report_task_id = task_id
+        if not self._report_task_id and isinstance(self._evidence_task, dict):
+            self._report_task_id = str(
+                self._evidence_task.get("record_id") or ""
+            ).strip()
         if mode not in TEST_MODES:
             return skill_result(
                 skill_id=SKILL_ID,
@@ -239,19 +258,28 @@ class TestEngine:
             self._execute_profiles(run_id, pre, contract, selected_ids, supplied)
         )
         default_profile = (selected_ids or [""])[0]
+        sav_blockers: list[str] = []
         for index, item in enumerate(opts.get("sav_evidence") or []):
             if not isinstance(item, dict):
                 continue
-            compiled, item_refs, _blockers = compile_supplied_sav_item(
+            compiled, item_refs, item_blockers = compile_supplied_sav_item(
                 run_id=run_id,
                 profile_id=str(item.get("profile_id") or default_profile),
                 candidate=pre,
                 supplied=item,
                 index=index,
+                host_root=self.root,
+                task=self._evidence_task,
             )
             refs.extend(item_refs)
-            if compiled is not None:
+            sav_blockers.extend(item_blockers)
+            if compiled is not None and not item_blockers:
                 evidence.append(compiled)
+        if sav_blockers:
+            for row in results:
+                row.blockers.extend(sav_blockers)
+                row.result = "BLOCKED"
+                row.evidence_complete = False
         post = observe_candidate(self.root)
         match = candidates_match(pre, post)
         if not match:
@@ -509,6 +537,18 @@ class TestEngine:
     def cleanup_run(self, run_id: str) -> dict[str, Any]:
         return cleanup_test_run_result(self.root, run_id)
 
+    def _optional_refs(self, opts: dict[str, Any]) -> dict[str, Any]:
+        """Durable report identity. task_book here is the Task id, not the mapping."""
+        task_ref = str(getattr(self, "_report_task_id", "") or "").strip()
+        if not task_ref and isinstance(opts.get("task_book"), dict):
+            task_ref = str(opts["task_book"].get("record_id") or "").strip()
+        if not task_ref:
+            task_ref = str(opts.get("task_id") or "").strip()
+        return {
+            "task_book": task_ref or None,
+            "develop_session": opts.get("develop_session"),
+        }
+
     def _extras(
         self,
         run_id: str,
@@ -529,10 +569,7 @@ class TestEngine:
                 "provides": list(PROVIDES),
                 "requires": list(REQUIRES),
             },
-            "optional_refs": {
-                "task_book": opts.get("task_book"),
-                "develop_session": opts.get("develop_session"),
-            },
+            "optional_refs": self._optional_refs(opts),
         }
         if report is not None:
             extras["report"] = report
@@ -816,6 +853,8 @@ class TestEngine:
             supplied_items=supplied_items,
             required_kinds=required_kinds,
             declared_provenance=profile.provenance,
+            host_root=self.root,
+            task=self._evidence_task,
         )
         result = preserve_verification_truth(raw)
         if blockers and result != "FAIL":
@@ -957,10 +996,7 @@ class TestEngine:
                 "name": (project or {}).get("name"),
                 "lifecycle": (project or {}).get("lifecycle"),
             },
-            "optional_refs": {
-                "task_book": opts.get("task_book"),
-                "develop_session": opts.get("develop_session"),
-            },
+            "optional_refs": self._optional_refs(opts),
             "selected": completeness.get("selected") or [],
             "required": completeness.get("required") or [],
             "optional": completeness.get("optional") or [],

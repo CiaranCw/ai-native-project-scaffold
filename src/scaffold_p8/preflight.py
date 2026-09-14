@@ -218,7 +218,11 @@ def evaluate_submit_preflight(
         package_digest=str(entry.get("package_digest") or ""),
         package_format_version=str(entry.get("package_format_version") or "1"),
     )
-    applicable = _applicable_packages(actual_pkg)
+    applicable = _applicable_packages(
+        actual_pkg,
+        root=root,
+        package_root=package_root,
+    )
     evaluation = evaluate_package(
         expected,
         actual_pkg,
@@ -297,17 +301,38 @@ def _identity(ref: PackageRef | None) -> dict[str, str] | None:
     }
 
 
-def _applicable_packages(actual: Any) -> dict[str, Any]:
+def _applicable_packages(
+    actual: Any,
+    *,
+    root: Path,
+    package_root: Path | None,
+) -> dict[str, Any]:
     packages = {SKILL_ID: actual}
-    repo = Path(__file__).resolve().parents[2]
-    for skill_id, rel in (
-        ("understand", "skills/understand"),
-        ("test", "skills/test"),
-        ("develop", "skills/develop"),
-    ):
-        path = repo / rel
-        if path.is_dir():
-            packages[skill_id] = load_package(path)
+    search_roots: list[Path] = []
+    if package_root is not None:
+        search_roots.append(Path(package_root).resolve().parent)
+    search_roots.append(Path(root) / ".scaffold" / "install" / "packages")
+    runtime_base = Path(__file__).resolve().parents[2]
+    search_roots.append(runtime_base / "packages")
+    search_roots.append(runtime_base / "skills")
+    seen: set[Path] = set()
+    needed = ("understand", "test", "develop")
+    for base in search_roots:
+        try:
+            resolved = base.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        for skill_id in needed:
+            if skill_id in packages:
+                continue
+            path = resolved / skill_id
+            if path.is_dir():
+                packages[skill_id] = load_package(path)
+        if all(skill_id in packages for skill_id in needed):
+            break
     return packages
 
 

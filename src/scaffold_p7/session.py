@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,16 @@ from scaffold_p5.scm import observe_scm
 
 from scaffold_p7.models import DIGEST_PREFIX, SESSIONS_DIR
 from scaffold_p7.schemas import SESSION_ID_RE, validate_develop_session, validate_files_yaml
+
+OPEN_INVENTORY_NAME = "open-inventory.yaml"
+MUTATION_ATTEMPTS_NAME = "mutation-attempts.yaml"
+MUTATION_PENDING = "authorized_pending"
+MUTATION_OBSERVED = "observed_success"
+MUTATION_FAILED = "failed"
+MUTATION_CANCELLED = "cancelled"
+INVENTORY_SKIP_DIRS = frozenset(
+    {".git", ".scaffold", ".cursor", "__pycache__", "test-runs"}
+)
 
 
 def operational_project_name(
@@ -104,6 +115,7 @@ def load_session(
     mode: str,
     project_name: str,
     current_candidate_digest: str,
+    require_candidate_match: bool = True,
 ) -> SessionResolution:
     if not SESSION_ID_RE.fullmatch(session_id):
         return SessionResolution(
@@ -161,19 +173,20 @@ def load_session(
             ],
         )
     bound_digest = str(data.get("observed_candidate_digest") or "")
-    if not current_candidate_digest:
-        return SessionResolution(
-            ok=False,
-            blockers=["current candidate identity is UNKNOWN; Session cannot resume"],
-        )
-    if bound_digest != current_candidate_digest:
-        return SessionResolution(
-            ok=False,
-            blockers=[
-                "OPEN Develop Session is bound to a different candidate; "
-                "workspace truth overrides Session memory"
-            ],
-        )
+    if require_candidate_match:
+        if not current_candidate_digest:
+            return SessionResolution(
+                ok=False,
+                blockers=["current candidate identity is UNKNOWN; Session cannot resume"],
+            )
+        if bound_digest != current_candidate_digest:
+            return SessionResolution(
+                ok=False,
+                blockers=[
+                    "OPEN Develop Session is bound to a different candidate; "
+                    "workspace truth overrides Session memory"
+                ],
+            )
     files, file_issues = load_files_yaml(directory)
     if file_issues or files is None:
         return SessionResolution(
@@ -203,6 +216,41 @@ def load_files_yaml(directory: Path) -> tuple[list[dict[str, Any]] | None, list[
     return [row for row in data.get("files") or [] if isinstance(row, dict)], []
 
 
+def load_mutation_attempts(
+    directory: Path,
+) -> tuple[list[dict[str, Any]] | None, list[str]]:
+    path = directory / MUTATION_ATTEMPTS_NAME
+    if not path.is_file():
+        return [], []
+    try:
+        data = read_yaml(path)
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return None, ["Develop Session mutation-attempts.yaml is malformed or unreadable"]
+    if not isinstance(data, dict):
+        return None, ["Develop Session mutation-attempts.yaml is malformed"]
+    if data.get("record_type") not in {None, "develop_mutation_attempts"}:
+        return None, ["Develop Session mutation-attempts.yaml record_type is unsupported"]
+    rows = data.get("attempts")
+    if rows is None:
+        rows = data.get("files")
+    if not isinstance(rows, list):
+        return None, ["Develop Session mutation-attempts.yaml attempts must be a list"]
+    return [row for row in rows if isinstance(row, dict)], []
+
+
+def persist_mutation_attempts(
+    directory: Path, attempts: list[dict[str, Any]]
+) -> None:
+    write_yaml_atomic(
+        directory / MUTATION_ATTEMPTS_NAME,
+        {
+            "schema_version": "1",
+            "record_type": "develop_mutation_attempts",
+            "attempts": list(attempts),
+        },
+    )
+
+
 def record_touch(
     directory: Path,
     files: list[dict[str, Any]],
@@ -215,6 +263,7 @@ def record_touch(
     change_kind: str,
     was_preexisting_dirty: bool,
     stage_ids: list[str],
+    mutation_state: str = MUTATION_OBSERVED,
 ) -> list[dict[str, Any]]:
     entry = {
         "path": rel,
@@ -227,6 +276,7 @@ def record_touch(
         "content_class": "text",
         "patch_ref": None,
         "stage_ids": list(stage_ids),
+        "mutation_state": mutation_state,
     }
     updated = [row for row in files if row.get("path") != rel]
     updated.append(entry)
@@ -260,6 +310,100 @@ def file_sha256(path: Path) -> str | None:
     if not path.is_file():
         return None
     return DIGEST_PREFIX + file_digest(path)
+
+
+def execution_workspace_digests(root: str | Path) -> dict[str, str]:
+    """Digest project files that can participate in Develop execution provenance.
+
+    Session bookkeeping, Git metadata, Cursor client files, and P6 run
+    artifacts are excluded so they cannot masquerade as Task product drift.
+    """
+    host = Path(root)
+    out: dict[str, str] = {}
+    if not host.is_dir():
+        return out
+    for dirpath, dirnames, filenames in os.walk(host, followlinks=False):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in INVENTORY_SKIP_DIRS and not name.endswith(".egg-info")
+        ]
+        rel_dir = Path(dirpath).relative_to(host).as_posix()
+        if rel_dir == ".":
+            rel_dir = ""
+        for name in filenames:
+            if name.endswith((".pyc", ".pyo")):
+                continue
+            rel = name if not rel_dir else f"{rel_dir}/{name}"
+            rel = rel.replace("\\", "/")
+            if _inventory_skipped(rel):
+                continue
+            full = host / rel
+            if full.is_symlink() or not full.is_file():
+                continue
+            digest = file_sha256(full)
+            if digest:
+                out[rel] = digest
+    return out
+
+
+def snapshot_open_inventory(
+    root: str | Path,
+    directory: Path,
+    *,
+    overwrite: bool = False,
+) -> dict[str, str]:
+    path = directory / OPEN_INVENTORY_NAME
+    if path.is_file() and not overwrite:
+        loaded = load_open_inventory(directory)
+        if loaded is not None:
+            return loaded
+    files = execution_workspace_digests(root)
+    payload = {
+        "schema_version": "1",
+        "record_type": "develop_open_inventory",
+        "files": [
+            {"path": rel, "digest": digest}
+            for rel, digest in sorted(files.items())
+        ],
+    }
+    directory.mkdir(parents=True, exist_ok=True)
+    write_yaml_atomic(path, payload)
+    return files
+
+
+def load_open_inventory(directory: Path) -> dict[str, str] | None:
+    path = directory / OPEN_INVENTORY_NAME
+    if not path.is_file():
+        return None
+    try:
+        data = read_yaml(path)
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("record_type") != "develop_open_inventory":
+        return None
+    rows = data.get("files")
+    if not isinstance(rows, list):
+        return None
+    out: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        rel = str(row.get("path") or "").replace("\\", "/").strip().strip("/")
+        digest = str(row.get("digest") or "").strip()
+        if rel and digest:
+            out[rel] = digest
+    return out
+
+
+def _inventory_skipped(rel: str) -> bool:
+    if rel in INVENTORY_SKIP_DIRS:
+        return True
+    return any(
+        rel == name or rel.startswith(name + "/") for name in INVENTORY_SKIP_DIRS
+    )
 
 
 def path_kind(path: Path) -> str:

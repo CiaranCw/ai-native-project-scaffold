@@ -35,6 +35,13 @@ PROVENANCE_CLASSES = (
     "UNATTRIBUTED",
 )
 
+TASK_DELTA_ROLES = (
+    "inherited_baseline",
+    "task_product_delta",
+    "task_supporting_delta",
+    "unrelated_delta",
+)
+
 CHANGE_RECORD_TYPE = "change_record"
 RECORD_SCHEMA_VERSION = "1"
 EXECUTABLE_COMPAT = frozenset({"EXACT", "COMPATIBLE"})

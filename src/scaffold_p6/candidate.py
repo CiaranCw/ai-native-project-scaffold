@@ -81,7 +81,7 @@ def observe_candidate(
     classified = generated_classification_prefixes(host)
     exclusions = [item for item in declared if _classified_generated(item, classified)]
     omit = {
-        str(item).replace("\\", "/")
+        str(item).replace("\\", "/").strip().strip("/")
         for item in (omit_paths or [])
         if str(item or "").strip()
     }
@@ -378,6 +378,23 @@ def _project_requirement_authority(item: Any) -> Any:
     }
 
 
+def _path_omitted(rel: str, omitted: set[str]) -> bool:
+    """Exact path or declared prefix. New in-scope files stay omitted."""
+    if not omitted:
+        return False
+    target = str(rel or "").replace("\\", "/").strip().strip("/")
+    if not target:
+        return False
+    if target in omitted:
+        return True
+    for item in omitted:
+        if not item:
+            continue
+        if target == item or target.startswith(item.rstrip("/") + "/"):
+            return True
+    return False
+
+
 def _noscms_inventory(
     root: Path,
     exclusions: list[str],
@@ -396,7 +413,7 @@ def _noscms_inventory(
         for name in filenames:
             full = Path(dirpath) / name
             rel = str(full.relative_to(root)).replace("\\", "/")
-            if rel in omitted:
+            if _path_omitted(rel, omitted):
                 continue
             if excluded_from_candidate(rel, exclusions, tracked=False):
                 continue
@@ -428,7 +445,7 @@ def _git_dirty_paths(
     for entry in scm.entries:
         dest = entry["path"]
         orig = entry.get("orig_path") or ""
-        if dest in omitted:
+        if _path_omitted(dest, omitted):
             continue
         if entry["untracked"]:
             if excluded_from_candidate(dest, exclusions, tracked=False):
@@ -438,7 +455,7 @@ def _git_dirty_paths(
             )
             continue
         paths = [dest]
-        if orig and orig != dest and orig not in omitted:
+        if orig and orig != dest and not _path_omitted(orig, omitted):
             paths.append(orig)
         for path in paths:
             if excluded_from_candidate(path, exclusions, tracked=True):
