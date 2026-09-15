@@ -238,7 +238,11 @@ An existing legitimate HUMAN/CI/EXTERNAL P6 locator may be cited directly.
         × overlay membership ≠ Develop attribution
         ▼
       OPEN  ──────────────────────────────► ABORTED
-        │                                   (no trustworthy Session-S1)
+        │                                   (no trustworthy Session-S1;
+        │                                    not acceptance of current bytes;
+        │                                    observed_success remains attribution,
+        │                                    not DEVELOP_KNOWN;
+        │                                    unexplained drift remains durable)
         │ Develop work (may invoke Test)
         ▼
  Session-S1
@@ -327,8 +331,14 @@ Order Sessions by `created_at`, then `record_id`.
  Dirty then Develop-touched            → MIXED_CHANGE
  Develop-touched then S2 ≠ S1          → MIXED_CHANGE (not POST)
  S0 dirty, never touched, S2 = S0      → PREEXISTING_CHANGE
+                                        only if no durable unexplained-drift
+                                        fact contradicts the inference
  S0 dirty, never touched, S2 ≠ S0      → not pure PREEXISTING → UNATTRIBUTED
                                         (or another provable class)
+ durable unexplained fact vs later
+ Session overlays                      → MUST NOT become inherited_baseline
+                                        merely because the earlier Session
+                                        was aborted or cleaned up
  not dirty, never touched,
  S1 overlay shows baseline-equivalent,
  S2 shows the change                   → POST_DEVELOP_ADDITIONAL
@@ -446,6 +456,9 @@ No second operation solely to flip a status field. No post-S10 record rewrite to
         ▼
  Historical Task Book already understandable without runtime/
 ```
+
+Submit-S12 MUST NOT erase durable unexplained truth living outside ephemeral
+Session runtime (`.scaffold/ext/develop/unexplained.yaml`).
 
 ---
 

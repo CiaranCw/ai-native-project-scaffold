@@ -211,7 +211,7 @@ Session-S0/S1 overlays are compact dirty-path observations where the host can ho
 
 Loading an existing Session fail-closes unless `session.yaml` carries usable task, mode, project, baseline, Session-S0 overlay, and observed candidate binding, and unless `files.yaml` exists and is structurally valid. Raw `status == OPEN` plus a matching `task_id` is not sufficient current editor authority. Hand-written partial Session files do not grant authority.
 
-Editor mutation authority requires an explicit current execution pointer. A raw OPEN Session is durable history/recovery evidence, not a mutation grant. The execution also freezes `open-inventory.yaml` at bind time. Task scope says WHERE a Task may change; `files.yaml` records successful observed mutations and `mutation-attempts.yaml` records pending/failed authorizations. Scope is not provenance. In-scope editor evolution remains valid only when the path has successful observed provenance from the current execution. New product-scope or supporting-scope paths without an observed mutation, and outside-scope drift, fail closed. Inherited dirty files that are unchanged since open remain distinct and do not false-fail.
+Editor mutation authority requires an explicit current execution pointer. A raw OPEN Session is durable history/recovery evidence, not a mutation grant. The execution also freezes `open-inventory.yaml` at bind time. Task scope says WHERE a Task may change; `files.yaml` records successful observed mutations and `mutation-attempts.yaml` records pending/failed authorizations. Scope is not provenance. In-scope editor evolution remains valid only when the path has successful observed provenance from the current execution. New product-scope or supporting-scope paths without an observed mutation, and outside-scope drift, fail closed. Inherited dirty files that are unchanged since open remain distinct and do not false-fail. Open-inventory bytes are physical starting observation, not proof that those bytes were legitimate or accepted.
 
 Client recording model: Cursor `preToolUse` authorizes a mutation attempt and writes a durable pending transaction (`authorized_pending` in `mutation-attempts.yaml`). That row is not mutation provenance: it does not explain the path, does not let seal stamp live bytes as execution-produced, and does not make P8 `DEVELOP_KNOWN`. Successful `postToolUse` observes the actual filesystem post-state (digest or absence) and records `observed_success` into `files.yaml`. `postToolUseFailure` fails/cancels the pending row and leaves no whitelist. `afterFileEdit` / `afterTabFileEdit` may complete a unique pending authorization that belongs to the **current** Develop execution and the same normalized path; they must not attach a replayed/late event to whichever Session happens to be current, and an ambiguous match is ignored as provenance. Delete success is source-absent. Move/Rename success is source-absent plus destination observed. Unresolved pending rows fail closed at seal; they are never upgraded by hashing whatever bytes exist at seal time. Same-path rewrite after a successful observation is out-of-band drift. Same-path rewrite after failure or with no terminal event is unexplained / unresolved, never `DEVELOP_KNOWN`. After seal the pointer is removed and no editor authority remains. Submit reviews the sealed historical delta without reopening execution.
 
@@ -220,6 +220,60 @@ Hard live mutation enforcement is validated for the supported Cursor hook surfac
 `DevelopEngine.run` still requires exact candidate match when resuming a Session by `session_id` without the current execution pointer.
 
 Unsuccessful started Sessions terminate as `ABORTED`. It does not invent extra session states.
+
+FA2-FND-005: ABORT means this Session is not trustworthy as a completed
+Develop result. ABORT does NOT mean current workspace bytes are accepted,
+that successful `observed_success` mutations never occurred, or that
+unexplained drift may be forgotten. `observed_success` provenance remains
+attribution after abort and is not `DEVELOP_KNOWN`. Pending authorization
+is not upgraded to provenance. Candidate acceptance does not occur.
+
+Abort MUST remain an escape path: persist unresolved physical truth, then
+proceed. Drift MUST NOT make abort impossible.
+
+Opening a new Develop Session MAY observe current disk, create its own
+open-inventory / `workspace_overlay_s0`, and bind execution authority. The
+Session open snapshot is physical starting observation, not acceptance. It
+MUST NOT accept current disk state, erase existing unexplained drift,
+reinterpret attributed changes as accepted, mint a new accepted anchor, or
+launder prior physical divergence. Opening a Session MUST NOT mint a new
+accepted anchor.
+
+Unexplained drift is host/workspace-level, Task-agnostic, Session-independent
+durable support at `.scaffold/ext/develop/unexplained.yaml`. It is not a
+fourth canonical development record. It MUST NOT depend indefinitely on
+walking the full historical Session directory chain. MUST NOT introduce
+per-Task full-workspace accepted baselines. Task B's attributed mutation
+MUST NOT become Task A rogue drift merely because Task A did not produce it.
+
+Known unexplained drift on path X does not automatically deny legitimate
+mutation on unrelated path Y. Path-scoped Develop permissiveness does NOT
+mean Submit may ignore known unexplained drift.
+
+If an unexplained physical mutation reaches disk because a client lacked a
+pre-write hook, later Scaffold observation MUST still preserve that physical
+fact. MAJ-008 MUST NOT depend on solving MAJ-007.
+
+No new normal-path Agent command, flag, or abort/reopen ritual is introduced.
+MUST NOT require a longer abort/reopen ritual. Implementation strategy and
+source exploration order are not constrained. Generic human clear of
+unexplained bytes is forbidden. S10 remains the existing acceptance boundary.
+
+On a no-SCM host the accepted anchor is existing durable publication /
+baseline authority. If that authority is unavailable, UNKNOWN / fail-closed
+remains valid. Do NOT fabricate an anchor. Unknowable pre-upgrade physical
+divergence MAY be inherited-at-initialization ONLY during the one-time
+compatibility initialization of an existing established host, recorded by a
+durable initialization boundary. After that boundary exists, UNKNOWN /
+missing evidence / future divergence MUST NOT fall back to
+inherited-at-initialization. Post-initialization unexplained drift MUST NOT
+be downgraded to inherited-at-initialization. Do NOT fabricate historical
+certainty.
+
+Attribution may retire unexplained status ONLY when the current physical
+state / current bytes of that path are proven consistent with the durable
+trustworthy mutation provenance being used. Historical provenance for a
+different byte/digest state MUST NOT clear a newer unexplained mutation.
 
 ## Mutation authority
 

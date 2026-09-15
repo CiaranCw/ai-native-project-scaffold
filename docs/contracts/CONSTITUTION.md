@@ -340,7 +340,7 @@ The development / handoff lifecycle has exactly three **canonical development re
 
 MUST NOT introduce another record that duplicates the lifecycle or duty of these three. MUST NOT create parallel scratchpad / work-log / handoff-log / session-history / changelog copies of the same development facts.
 
-Other bounded artifacts MAY exist only when they have a clearly different purpose, authority, lifecycle, and retention policy. Examples such as Test Reports / Evidence, Adoption Session, migration artifacts, or analysis artifacts are **not** automatically prohibited, and are **not** a fourth canonical development record.
+Other bounded artifacts MAY exist only when they have a clearly different purpose, authority, lifecycle, and retention policy. Examples such as Test Reports / Evidence, Adoption Session, migration artifacts, analysis artifacts, or the FA2-FND-005 host-level unexplained-drift support under `.scaffold/ext/develop/` are **not** automatically prohibited, and are **not** a fourth canonical development record.
 
 | Record | Answers | Lifecycle |
 | --- | --- | --- |
@@ -371,9 +371,20 @@ Submit MAY classify paths as:
 | `MIXED_CHANGE` | Changed by Develop; same path changed again after |
 | `PREEXISTING_CHANGE` | Already present before Develop started |
 
+`PREEXISTING_CHANGE` / `inherited_baseline` MUST NOT be inferred from later
+Session overlays when a durable unexplained-drift fact contradicts that
+inference (FA2-FND-005). Abort MUST NOT launder unexplained physical drift
+into ordinary inherited baseline.
+
 MUST NOT use `HUMAN_CHANGE` as a definite class. Later edits cannot be reliably attributed to a human. They MAY come from a developer, IDE, script, another Agent, a generator, or other tools.
 
 **Repository truth overrides agent memory.** Real SCM / working tree always outranks the Develop Session.
+
+Accepted physical truth is SCM HEAD on a Git host, or successful S10
+publication / durable publication inventory on a no-SCM host. Session seal is
+not acceptance. ABORT does NOT mean current workspace bytes are accepted.
+`observed_success` provenance remains attribution after abort and is not
+`DEVELOP_KNOWN`.
 
 Submit MUST work even when there is **no** Develop Session and **no** Task Book (pure human or mixed edits that never used Develop). Missing Develop history MUST NOT make Submit unable to start.
 
@@ -664,7 +675,7 @@ After structural or important knowledge change, Understand Refresh MUST be possi
 
 ### 5. Repository truth overrides agent memory
 
-Working tree and SCM are authoritative. Develop Session, Agent summaries, and chat are auxiliary. On conflict, the repository wins.
+Working tree and SCM are authoritative. Develop Session, Agent summaries, and chat are auxiliary. On conflict, the repository wins. Unexplained physical drift versus accepted physical truth is a durable host-level fact; abort and later Session overlays MUST NOT launder it into ordinary inherited baseline (FA2-FND-005).
 
 ### 6. Single Source of Truth
 

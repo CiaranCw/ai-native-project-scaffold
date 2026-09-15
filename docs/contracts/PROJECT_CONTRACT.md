@@ -216,6 +216,9 @@ durable Change Record must retain a resolvable opaque reference to it. Such use
 is shared and durable when tracked, remains non-core, and MUST satisfy the
 ownership registry. It MUST NOT redefine `runtime/` as durable, add an
 unnamespaced `.scaffold/` root, or create another canonical development record.
+FA2-FND-005 places host-level unexplained-drift support under
+`.scaffold/ext/develop/`. That file is Session-independent durable truth, not
+a Task Book, Develop Session, or Change Record.
 
 ---
 

@@ -820,7 +820,7 @@ Frozen Session states:
 | --- | --- |
 | `OPEN` | Develop execution is still active. Session-S0 exists; Session-S1 is not sealed. |
 | `SEALED` | Session-S1 has been captured; session evidence is closed. SHOULD be immutable. |
-| `ABORTED` | No trustworthy complete Session-S1 exists. |
+| `ABORTED` | No trustworthy complete Session-S1 exists. Not acceptance of current bytes. |
 
 ```text
 OPEN → SEALED
@@ -832,6 +832,14 @@ MUST NOT create `SUBMITTED` as a Session state. Successful S10 durable finalizat
 A SEALED session remains locally available until successful Submit cleanup (or explicit cancel/stale cleanup). It MUST NOT be silently deleted while Submit is incomplete or blocked.
 
 ABORTED sessions MUST NOT be used as DEVELOP_KNOWN evidence. They MAY remain until explicit cleanup so the abort is inspectable.
+
+Abort means this Session is not trustworthy as a completed Develop result.
+It does NOT mean successful `observed_success` mutations never occurred, that
+current workspace bytes are accepted, or that unexplained drift may be
+forgotten (FA2-FND-005). ABORTED `observed_success` MAY remain attribution.
+Pending authorization is not upgraded to provenance. Candidate acceptance
+does not occur. Abort MUST remain an escape path: persist unresolved physical
+truth, then proceed. Drift MUST NOT make abort impossible.
 
 ---
 
@@ -846,11 +854,19 @@ Two evidence kinds MUST stay distinct:
 
 **Boundary observation ≠ Develop attribution.** An ambient overlay change MUST NOT be treated as if Develop produced it.
 
+Session-S0 / open-inventory are physical starting observation, not
+acceptance. Opening a Session MUST NOT mint a new accepted anchor, erase
+durable unexplained drift, or convert unexplained bytes into ordinary
+inherited baseline (FA2-FND-005).
+
 MUST NOT snapshot the whole project. Overlays record only paths that **differ from the Session baseline**, where the host can honestly observe them.
 
 ### 16.1 Session-S0 (start)
 
 Develop MUST NOT assume a clean tree.
+
+Session-S0 is physical starting observation, not acceptance. Opening a
+Session MUST NOT mint a new accepted anchor.
 
 Session-S0 MUST preserve:
 
@@ -1025,6 +1041,11 @@ If the Session-S0 pre-existing state and Observed-S2 **differ**, and no Develop 
 
 If Develop **also** touched it: `MIXED_CHANGE`, not `PREEXISTING_CHANGE`.
 
+A durable unexplained-drift fact for the path MUST NOT become
+`PREEXISTING_CHANGE` / `inherited_baseline` merely because later Session
+overlays still show the same bytes, or because an earlier contradicting
+Session was aborted or cleaned up (FA2-FND-005).
+
 ### 19.4 POST_DEVELOP_ADDITIONAL
 
 `POST_DEVELOP_ADDITIONAL` MAY be used only when evidence establishes **all** of:
@@ -1070,7 +1091,7 @@ Label-order MUST NOT override the definitions. In particular:
 
 - dirty then Develop-touched → `MIXED_CHANGE`
 - Develop-touched and Observed-S2 ≠ Session-S1 → `MIXED_CHANGE`
-- S0 dirty, never Develop-touched, S2 still equals that S0 state → `PREEXISTING_CHANGE` possible
+- S0 dirty, never Develop-touched, S2 still equals that S0 state → `PREEXISTING_CHANGE` possible only when no durable unexplained-drift fact contradicts that inference
 - not dirty at S0, never Develop-touched, S1 overlay shows still baseline-equivalent, S2 shows the change → `POST_DEVELOP_ADDITIONAL` possible
 - insufficient overlay/timing evidence → `UNATTRIBUTED`
 
@@ -1941,7 +1962,7 @@ Contract-level behavior. No fixtures.
 | **D** All stages complete but final tests fail | TASK_COMPLETE holds; `status` MUST NOT become READY_FOR_REVIEW; remain in Develop ↔ Test. |
 | **E** Task canceled | `status: CANCELED`. Not READY_FOR_REVIEW. Sessions MUST NOT be silently deleted; explicit cleanup MAY remove them. No fake Change Record. |
 | **F** Develop starts from clean working tree | Session-S0 workspace overlay empty (or coverage complete with no dirty paths). Touched paths MAY become DEVELOP_KNOWN if chain and Observed-S2 match. |
-| **G** Unrelated dirty file exists before Develop | Recorded in Session-S0 workspace overlay. PREEXISTING_CHANGE only if Develop never touches it **and** Observed-S2 still matches that S0 pre-existing state. If S0 and S2 differ without Develop coverage ⇒ not pure PREEXISTING; use a provable class or UNATTRIBUTED. |
+| **G** Unrelated dirty file exists before Develop | Recorded in Session-S0 workspace overlay. PREEXISTING_CHANGE only if Develop never touches it **and** Observed-S2 still matches that S0 pre-existing state **and** no durable unexplained-drift fact contradicts the inference (FA2-FND-005). If S0 and S2 differ without Develop coverage ⇒ not pure PREEXISTING; use a provable class or UNATTRIBUTED. |
 | **H** Develop edits a file that was already dirty | `was_preexisting_dirty: true`. Final path ⇒ MIXED_CHANGE. MUST NOT be DEVELOP_KNOWN. MUST NOT claim the extra portion is human. |
 | **I** New file appears after Session-S1 | POST_DEVELOP_ADDITIONAL only if: not pre-existing dirty; Develop did not touch it; Session-S1 overlay shows still baseline-equivalent/absent at Develop end; Observed-S2 shows the addition. MUST NOT infer POST from “not in S0 and exists at S2”. If S1 coverage is partial/unavailable ⇒ UNATTRIBUTED. |
 | **J** Develop-edited file changes again after Session-S1 | Observed-S2 ≠ Session-S1 ⇒ MIXED_CHANGE, not POST_DEVELOP_ADDITIONAL. |
@@ -2020,6 +2041,19 @@ Contract-level behavior. No fixtures.
 | **FND4-C08** Candidate stays C; S3 impact set changes I1 → I2 | The I1 head cannot support I2. |
 | **FND4-C09** Current-head runtime metadata is published or updated | P6 candidate digest is unchanged. |
 | **FND4-C10** A later process reads project-local runtime state | It recovers the same current Assessment authority. |
+| **FND5-E01** Unexplained W0→W1 then S1 abort then S2 open | The unexplained mutation remains durably unexplained. Abort MUST NOT launder unexplained drift. S2 MUST NOT convert it to `inherited_baseline`. |
+| **FND5-E02** S1 `observed_success` A and B then abort | A and B remain attribution and MUST NOT become unexplained merely because S1 aborted. They are not `DEVELOP_KNOWN` and not accepted. |
+| **FND5-E03** New Develop Session opens on current disk | Open snapshot is physical starting observation, not acceptance. MUST NOT mint a new accepted anchor. |
+| **FND5-E04** Task B attributed mutation; later Task A Session sees those bytes | Host-level physical truth. MUST NOT introduce per-Task full-workspace accepted baselines. Task B's attribution MUST NOT become Task A rogue drift merely because Task A did not produce it. |
+| **FND5-E05** Durable unexplained fact vs later sealed overlays | MUST NOT become `inherited_baseline` merely because the earlier contradicting Session was aborted or cleaned up. |
+| **FND5-E06** Submit-S12 / normal Session cleanup | MUST NOT erase durable unexplained truth living outside ephemeral Session runtime. |
+| **FND5-E07** Agent Develop window after FND-005 | No new normal-path Agent ceremony. MUST NOT require a longer abort/reopen ritual. |
+| **FND5-E08** Human wants current unexplained bytes accepted without S10 | Generic human clear of unexplained bytes is forbidden. Out of scope. |
+| **FND5-E09** Successful S10 | S10 remains the existing acceptance boundary; the new accepted anchor may retire prior drift. |
+| **FND5-E10** Unexplained path X; legitimate mutation on unrelated path Y | Path-scoped Develop permissiveness does not deny Y automatically; Submit still sees unresolved drift. |
+| **FND5-E11** Client lacks a pre-write hook and unexplained bytes reach disk | Later observation MUST still preserve the physical fact. MAJ-008 MUST NOT depend on solving MAJ-007. |
+| **FND5-E12** no-SCM missing accepted anchor, or existing-host upgrade | UNKNOWN / fail-closed if no anchor. Do NOT fabricate an anchor. `inherited-at-initialization` exists ONLY for the one-time compatibility initialization of an existing established host. A durable initialization boundary is required. After that boundary, UNKNOWN / missing evidence / future divergence MUST NOT fall back to inherited-at-initialization. Post-initialization unexplained drift MUST NOT be downgraded to inherited-at-initialization. |
+| **FND5-E13** Attribution appears for a path whose current bytes differ from the provenanced state | Current physical state / current bytes MUST be proven consistent with the durable provenance used. Historical provenance for a different byte/digest state MUST NOT clear a newer unexplained mutation. |
 
 ---
 
@@ -2069,6 +2103,7 @@ Agents implementing later phases MUST preserve:
 | AL | P6 owns one content-deterministic semantic candidate projection; current Task control-plane bytes with unchanged substantive projection do not self-invalidate candidate identity, but do not prove publication authorization; substantive Task/source/project mutation changes candidate identity |
 | AM | Task `requirement_id` and P6 `profile_id` are distinct; fresh automatic locator attachment requires an explicit durable execution binding |
 | AN | Knowledge Assessment is Understand-owned supporting authority, not a fourth canonical development record; S4 SATISFIED requires current candidate-bound and impact-bound SATISFIED outcomes; lexical token presence is not S4 authority |
+| AO | Unexplained physical drift vs accepted anchor is host-level durable truth outside Session runtime; abort does not accept bytes or launder drift; ABORTED `observed_success` is attribution not `DEVELOP_KNOWN`; later overlays cannot mint `inherited_baseline` against a durable unexplained fact; attribution retirement requires current-byte consistency with the provenance used; `inherited-at-initialization` is one-time compatibility only and MUST NOT be a runtime fallback; S10 remains the acceptance boundary; generic human clear of unexplained bytes is forbidden (FA2-FND-005) |
 
 ---
 
@@ -2118,3 +2153,60 @@ digest. Candidate + impact equality alone is NOT enough. C1 assessments MUST
 NOT support C2. A superseded locator MUST NOT be replayed. Change Record
 `knowledge_updates` / `understand_involvement` remain S9 summaries and are not
 S4 authority.
+
+---
+
+## 42. Cross-session unexplained drift (FA2-FND-005)
+
+Durable unexplained physical drift is a Develop-owned **supporting artifact**.
+It is not a Task Book, Develop Session, or Change Record, and MUST NOT be
+described as a fourth canonical development record.
+
+Runtime location:
+
+```text
+.scaffold/ext/develop/unexplained.yaml
+```
+
+The artifact is host/workspace-level and Task-agnostic. It records path-scoped
+facts that current bytes differ from accepted physical truth without
+trustworthy attribution. It MUST NOT duplicate the whole workspace and MUST NOT introduce
+per-Task full-workspace accepted baselines.
+
+Accepted physical truth is already:
+
+- Git: SCM HEAD
+- no-SCM: successful S10 publication / durable publication inventory
+
+Session seal, Stage Completion, Task Completion, and P6 publication are not
+acceptance. S10 remains the existing acceptance boundary.
+
+`observed_success` remains attribution even after abort. An ABORTED Session
+MUST NOT be consumed as `DEVELOP_KNOWN`. Abort MUST NOT launder unexplained
+drift. Session open snapshot is physical starting observation, not
+acceptance, and MUST NOT mint a new accepted anchor.
+
+P8 still observes actual physical Diff fresh. Durable drift records never
+replace that Diff. Known unexplained drift MUST NOT become
+`inherited_baseline` merely because an earlier Session was aborted or cleaned
+up. Normal Session cleanup MUST NOT erase this artifact.
+
+Generic human clear of unexplained bytes is forbidden. Drift MAY retire only
+when the path returns to the accepted anchor; when the current physical
+state / current bytes of that path are proven consistent with the durable
+trustworthy mutation provenance being used for attribution, becoming
+attributed-but-unaccepted not accepted; or when successful S10 advances the
+accepted anchor. Historical provenance for a different byte/digest state
+MUST NOT clear a newer unexplained mutation of the same path.
+
+`inherited-at-initialization` exists ONLY for the one-time compatibility
+initialization when an existing established host first adopts the FA2-FND-005
+authority model. It is not a recurring reconciliation mode. The system MUST
+record a durable initialization boundary. After that initialization boundary
+exists, UNKNOWN, missing evidence, reconciliation uncertainty, or ordinary
+future physical divergence MUST NOT fall back to inherited-at-initialization
+merely because attribution cannot be proven. Any physical divergence first
+observed after the compatibility boundary that lacks trustworthy current-byte
+attribution is unexplained and MUST NOT be downgraded to
+inherited-at-initialization. The one-time rule does not fabricate historical
+certainty that pre-upgrade dirt was legitimate.
