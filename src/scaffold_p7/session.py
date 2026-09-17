@@ -12,6 +12,7 @@ from scaffold_p5.host_state import scm_baseline
 from scaffold_p5.io_util import file_digest, read_yaml, write_yaml_atomic
 from scaffold_p5.scm import observe_scm
 
+from scaffold_p5.client_support import is_client_support_path
 from scaffold_p7.models import DIGEST_PREFIX, SESSIONS_DIR
 from scaffold_p7.schemas import SESSION_ID_RE, validate_develop_session, validate_files_yaml
 
@@ -22,7 +23,7 @@ MUTATION_OBSERVED = "observed_success"
 MUTATION_FAILED = "failed"
 MUTATION_CANCELLED = "cancelled"
 INVENTORY_SKIP_DIRS = frozenset(
-    {".git", ".scaffold", ".cursor", "__pycache__", "test-runs"}
+    {".git", ".scaffold", "__pycache__", "test-runs"}
 )
 
 
@@ -315,8 +316,8 @@ def file_sha256(path: Path) -> str | None:
 def execution_workspace_digests(root: str | Path) -> dict[str, str]:
     """Digest project files that can participate in Develop execution provenance.
 
-    Session bookkeeping, Git metadata, Cursor client files, and P6 run
-    artifacts are excluded so they cannot masquerade as Task product drift.
+    Session bookkeeping, Git metadata, declared CLIENT_SUPPORT paths, and P6
+    run artifacts are excluded so they cannot masquerade as Task product drift.
     """
     host = Path(root)
     out: dict[str, str] = {}
@@ -336,7 +337,7 @@ def execution_workspace_digests(root: str | Path) -> dict[str, str]:
                 continue
             rel = name if not rel_dir else f"{rel_dir}/{name}"
             rel = rel.replace("\\", "/")
-            if _inventory_skipped(rel):
+            if _inventory_skipped(rel, host):
                 continue
             full = host / rel
             if full.is_symlink() or not full.is_file():
@@ -398,12 +399,14 @@ def load_open_inventory(directory: Path) -> dict[str, str] | None:
     return out
 
 
-def _inventory_skipped(rel: str) -> bool:
+def _inventory_skipped(rel: str, root: Path | None = None) -> bool:
     if rel in INVENTORY_SKIP_DIRS:
         return True
-    return any(
+    if any(
         rel == name or rel.startswith(name + "/") for name in INVENTORY_SKIP_DIRS
-    )
+    ):
+        return True
+    return root is not None and is_client_support_path(root, rel)
 
 
 def path_kind(path: Path) -> str:

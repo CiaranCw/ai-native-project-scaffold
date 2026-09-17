@@ -637,9 +637,21 @@ def _handle_mutation_terminal(
         paths,
         tool_name=tool_name,
         tool_use_id=tool_use_id,
-        event=event,
+        observation_scope=_observation_scope(event),
     )
     return _allow(detail)
+
+
+def _observation_scope(event: str) -> str:
+    """Adapter translation. Core never sees a client event name."""
+    from scaffold_p7.develop_authority import (
+        OBSERVATION_ATTEMPT_SCOPE,
+        OBSERVATION_SINGLE_PATH,
+    )
+
+    if event in MUTATION_EVENTS:
+        return OBSERVATION_SINGLE_PATH
+    return OBSERVATION_ATTEMPT_SCOPE
 
 
 def _tool_use_id(payload: dict[str, Any]) -> str:

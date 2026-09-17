@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scaffold_p5.client_support import is_client_support_path
 from scaffold_p5.io_util import sha256_text
 from scaffold_p5.ownership import normalize_project_path, path_covered
 
@@ -345,8 +346,10 @@ def supporting_evidence_locator_issues(
         return []
     if rel.startswith("test-runs/"):
         return []
-    if rel.startswith(".scaffold/") or rel.startswith(".cursor/") or rel.startswith(".git/"):
+    if rel.startswith(".scaffold/") or rel.startswith(".git/"):
         return [f"evidence locator {rel} is protected Scaffold governance"]
+    if is_client_support_path(root, rel):
+        return [f"evidence locator {rel} is a declared CLIENT_SUPPORT path"]
     if rel in {"AGENTS.md", ".gitattributes"}:
         return [f"evidence locator {rel} is protected Scaffold governance"]
     host = Path(root)

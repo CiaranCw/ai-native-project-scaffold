@@ -13,6 +13,7 @@ from typing import Any, Iterator
 from scaffold_p5.io_util import file_digest, read_yaml, sha256_bytes, write_yaml_atomic
 from scaffold_p5.ownership import resolve_ownership
 from scaffold_p5.scm import observe_scm
+from scaffold_p5.client_support import is_client_support_path
 from scaffold_p6.candidate import RUNTIME_PREFIX, is_ext_support_path, observe_candidate
 from scaffold_p8.schemas import (
     CHANGE_ID_RE,
@@ -46,7 +47,7 @@ LINEAGE_FIELDS = (
 )
 
 
-def is_noscms_support_path(rel: str) -> bool:
+def is_noscms_support_path(rel: str, root: Path | None = None) -> bool:
     normalized = rel.replace("\\", "/")
     if normalized.startswith(RUNTIME_PREFIX) or normalized == ".scaffold/runtime":
         return True
@@ -54,7 +55,7 @@ def is_noscms_support_path(rel: str) -> bool:
         return True
     if normalized.endswith(".pyc") or "/__pycache__/" in f"/{normalized}":
         return True
-    return False
+    return root is not None and is_client_support_path(root, normalized)
 
 
 def submit_namespace_write_allowed(rel: str) -> bool:
@@ -161,13 +162,14 @@ def inventory_workspace(root: Path) -> dict[str, dict[str, str]]:
             for name in dirnames
             if name not in {".git", "__pycache__"}
             and not is_noscms_support_path(
-                str((Path(dirpath) / name).relative_to(root)).replace("\\", "/")
+                str((Path(dirpath) / name).relative_to(root)).replace("\\", "/"),
+                root,
             )
         ]
         for name in filenames:
             full = Path(dirpath) / name
             rel = str(full.relative_to(root)).replace("\\", "/")
-            if is_noscms_support_path(rel):
+            if is_noscms_support_path(rel, root):
                 continue
             if full.is_file() and not full.is_symlink():
                 inventory[rel] = {

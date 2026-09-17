@@ -472,6 +472,25 @@ They MUST NOT be independent encyclopedias. If a client format technically requi
 
 Client-entry **strategies** remain P1: PRESERVE / MANAGED_UPDATE / THIN_BRIDGE / DEFER. Generic Plan actions remain the five P1 classes.
 
+### 24.1 `clients[]` as generic CLIENT_SUPPORT classification
+
+`clients[]` is also the project-local source for the generic `CLIENT_SUPPORT`
+path classification. A row MAY name one path, or an area when its `path` ends
+with `/`. Core reads only the declaration; it never asks which client a path
+belongs to, and Scaffold authority paths are never reclassified this way.
+
+For a path classified `CLIENT_SUPPORT`:
+
+- raw filesystem and raw SCM still see it — physical existence is never hidden;
+- it is excluded from the product Diff, from candidate identity, and from S10
+  product staging;
+- it is not treated as project product merely because client-local state
+  changed.
+
+A client-support artifact becomes product content only through an explicit
+project-local classification change — for example removing it from `clients[]`.
+Git tracking alone MUST NOT be read as that opt-in.
+
 ---
 
 ## 25. Project Rules

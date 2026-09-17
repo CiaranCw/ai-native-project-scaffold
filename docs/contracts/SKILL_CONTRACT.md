@@ -1144,6 +1144,15 @@ Core MUST NOT implement a trusted human-confirmation perimeter, grant issuer,
 or approval_origin for those lifecycle operations. Missing client broker
 support MUST NOT block them.
 
+### 30.2 CLIENT_SUPPORT is a generic classification
+
+Core classifies every project path as exactly one of `PRODUCT`,
+`SCAFFOLD_AUTHORITY`, or `CLIENT_SUPPORT`. The `CLIENT_SUPPORT` set is declared
+project-locally (P2 `project.yaml` `clients[]`); client adapters MAY propose
+defaults for it. **Core ships no client-specific path list** and MUST NOT grow
+one as clients are added. Scaffold authority paths always win over a
+client-support declaration.
+
 ---
 
 ## 31. Client integration modes

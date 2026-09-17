@@ -28,6 +28,7 @@ from scaffold_p5.host_state import (
     TESTS_YAML,
     scm_baseline,
 )
+from scaffold_p5.client_support import client_support_row
 from scaffold_p5.io_util import sha256_text, write_yaml_atomic
 from scaffold_p5.models import AdoptionPlan, DiscoveryFact
 from scaffold_p5.ownership import source_area_ownership
@@ -448,7 +449,7 @@ def _project_data(
         "ownership": ownership,
         "facts": facts,
         "source_areas": source or [],
-        "clients": _client_index(plan),
+        "clients": _client_index(plan, root),
     }
     regions = managed_regions_from_actions(plan.actions)
     if ownership.get(AGENTS_MD) == "MANAGED":
@@ -561,7 +562,7 @@ def _fact_maps(facts: list[DiscoveryFact]) -> list[dict[str, Any]]:
     ]
 
 
-def _client_index(plan: AdoptionPlan) -> list[dict[str, Any]]:
+def _client_index(plan: AdoptionPlan, root: Path) -> list[dict[str, Any]]:
     out = []
     for action in plan.actions:
         if action.client_strategy:
@@ -573,7 +574,24 @@ def _client_index(plan: AdoptionPlan) -> list[dict[str, Any]]:
                     "ownership": action.ownership,
                 }
             )
+    out.extend(_proposed_client_support(root, {row["path"] for row in out}))
     return out
+
+
+def _proposed_client_support(root: Path, declared: set[str]) -> list[dict[str, Any]]:
+    """Client-support areas proposed by the installation's declared adapters.
+
+    Core consumes the resulting generic declaration; the per-client detail
+    stays in the adapter profile.
+    """
+    from scaffold_p5.adapter_profiles import client_support_areas, declared_profiles
+    from scaffold_p5.consumer_install import current_manifest
+
+    rows = []
+    for area in client_support_areas(declared_profiles(current_manifest(root))):
+        if area not in declared:
+            rows.append(client_support_row(area.rstrip("/"), area=True))
+    return [row for row in rows if row]
 
 
 def _knowledge_state(fact: dict[str, Any] | None) -> str:

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from scaffold_p5.client_support import is_client_support_path
 from scaffold_p5.io_util import file_digest, sha256_text
 from scaffold_p5.scm import ScmObservation, observe_scm
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
@@ -134,11 +135,14 @@ def excluded_from_candidate(
     exclusions: list[str],
     *,
     tracked: bool = False,
+    root: str | Path | None = None,
 ) -> bool:
     normalized = rel.replace("\\", "/")
     if normalized.startswith(RUNTIME_PREFIX) or normalized == ".scaffold/runtime":
         return True
     if is_ext_support_path(normalized):
+        return True
+    if root is not None and is_client_support_path(root, normalized):
         return True
     if normalized.endswith(".pyc") or "/__pycache__/" in f"/{normalized}":
         return True
@@ -427,7 +431,7 @@ def _noscms_inventory(
             rel = str(full.relative_to(root)).replace("\\", "/")
             if _path_omitted(rel, omitted):
                 continue
-            if excluded_from_candidate(rel, exclusions, tracked=False):
+            if excluded_from_candidate(rel, exclusions, tracked=False, root=root):
                 continue
             if full.is_file():
                 inventory[rel] = {
@@ -460,7 +464,7 @@ def _git_dirty_paths(
         if _path_omitted(dest, omitted):
             continue
         if entry["untracked"]:
-            if excluded_from_candidate(dest, exclusions, tracked=False):
+            if excluded_from_candidate(dest, exclusions, tracked=False, root=root):
                 continue
             untracked.append(
                 {"path": dest, "digest": _path_digest(root / dest)}
@@ -470,7 +474,7 @@ def _git_dirty_paths(
         if orig and orig != dest and not _path_omitted(orig, omitted):
             paths.append(orig)
         for path in paths:
-            if excluded_from_candidate(path, exclusions, tracked=True):
+            if excluded_from_candidate(path, exclusions, tracked=True, root=root):
                 continue
             row = {"path": path, "digest": _path_digest(root / path)}
             if orig and path == dest:

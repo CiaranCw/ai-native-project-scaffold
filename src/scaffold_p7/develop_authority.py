@@ -43,6 +43,10 @@ from scaffold_p7.unexplained import physical_authority_issues, reconcile_unexpla
 
 EXECUTION_POINTER_REL = ".scaffold/runtime/develop-execution.yaml"
 
+OBSERVATION_SINGLE_PATH = "single_path"
+OBSERVATION_ATTEMPT_SCOPE = "attempt_scope"
+OBSERVATION_SCOPES = (OBSERVATION_SINGLE_PATH, OBSERVATION_ATTEMPT_SCOPE)
+
 
 @dataclass
 class CurrentDevelopAuthority:
@@ -133,7 +137,7 @@ def authorize_mutation_paths(
         normalized = str(rel or "").replace("\\", "/").strip().strip("/")
         if not normalized:
             return False, "mutation target path is missing; fail closed"
-        if is_protected_governance_path(normalized):
+        if is_protected_governance_path(normalized, host):
             return False, f"{normalized} is protected Scaffold governance"
         allowed, reason, _role = authorize_path_mutation(
             host,
@@ -491,9 +495,14 @@ def observe_authorized_mutation(
     *,
     tool_name: str = "",
     tool_use_id: str = "",
-    event: str = "postToolUse",
+    observation_scope: str = OBSERVATION_ATTEMPT_SCOPE,
 ) -> tuple[bool, str]:
-    """Resolve a pending authorization from a terminal or after-file observation."""
+    """Resolve a pending authorization from a generic client mutation observation.
+
+    ``single_path`` reports exactly one materialized path and may resolve one
+    path of a wider pending attempt. ``attempt_scope`` reports the completion
+    of the whole authorized attempt.
+    """
     host = Path(root)
     current = resolve_current_develop_authority(host, require_provenance=False)
     if not current.ok or current.directory is None or current.session is None:
@@ -502,7 +511,7 @@ def observe_authorized_mutation(
     if attempt_issues or attempts is None:
         return False, (attempt_issues or ["mutation-attempts.yaml is unusable"])[0]
     event_paths = _normalize_paths(paths)
-    after_event = event in {"afterFileEdit", "afterTabFileEdit"}
+    after_event = observation_scope == OBSERVATION_SINGLE_PATH
     matched, ambiguous = _match_pending_attempt(
         attempts,
         session_id=current.session_id,
@@ -511,7 +520,7 @@ def observe_authorized_mutation(
         require_unique_path=after_event,
     )
     if ambiguous:
-        return False, "after-file mutation observation is ambiguous; ignored as provenance"
+        return False, "single-path mutation observation is ambiguous; ignored as provenance"
     if matched is None:
         return False, "no compatible current pending mutation authorization"
     observe_paths = list(matched.get("paths") or []) if not after_event else event_paths
@@ -536,7 +545,7 @@ def observe_authorized_mutation(
     pending_paths = _normalize_paths(list(matched.get("paths") or []))
     if after_event and any(rel not in recorded_after for rel in pending_paths):
         persist_mutation_attempts(current.directory, attempts)
-        return True, "after-file observation recorded against current pending authorization"
+        return True, "single-path observation recorded against current pending authorization"
     updated = list(files)
     before_map = matched.get("before") if isinstance(matched.get("before"), dict) else {}
     for rel in pending_paths:
@@ -625,7 +634,7 @@ def record_authorized_mutation(
             paths,
             tool_name=tool_name,
             tool_use_id=tool_use_id,
-            event="postToolUse",
+            observation_scope=OBSERVATION_ATTEMPT_SCOPE,
         )
         return
     record_pending_mutation(

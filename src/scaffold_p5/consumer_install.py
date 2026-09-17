@@ -23,6 +23,16 @@ from scaffold_p5.agents import (
     has_consumer_install_region,
     parse_managed_regions,
 )
+from scaffold_p5.adapter_profiles import (
+    CURSOR_PROFILE,
+    PROFILE_KEY,
+    AdapterProfile,
+    declared_profiles,
+    gitattributes_lines,
+    profile_ids,
+    required_paths,
+    resolve_profiles,
+)
 from scaffold_p5.distribution import Distribution, load_distribution, load_fixture_distribution
 from scaffold_p5.engine import UnderstandEngine
 from scaffold_p5.first_use import (
@@ -349,6 +359,7 @@ class InstallPlan:
     source: dict[str, str] = field(default_factory=dict)
     bridges: dict[str, Any] = field(default_factory=dict)
     existing_manifest: dict[str, Any] | None = None
+    profiles: tuple[AdapterProfile, ...] = ()
 
     @property
     def allowed(self) -> bool:
@@ -642,6 +653,7 @@ def plan_consumer_install(
     distribution: str | Path,
     *,
     mode: str = "install",
+    adapter_profiles: list[str] | tuple[str, ...] | None = None,
 ) -> InstallPlan:
     host_path = Path(host)
     dist_path = Path(distribution)
@@ -649,6 +661,11 @@ def plan_consumer_install(
     if mode not in {"install", "update"}:
         plan.blockers.append(f"unsupported install mode {mode}")
         return plan
+    profiles, profile_issues = resolve_profiles(adapter_profiles)
+    if profile_issues:
+        plan.blockers.extend(profile_issues)
+        return plan
+    plan.profiles = profiles
     plan.blockers.extend(host_target_issues(host_path, dist_path))
     plan.blockers.extend(live_source_issues(dist_path))
     if plan.blockers:
@@ -723,11 +740,12 @@ def plan_consumer_install(
     payloads[f"{RELEASES_DIR}/installed.yaml"] = _release_yaml_bytes(plan.skills)
     payloads[RUNNER_REL] = RUNNER_TEXT.encode("utf-8")
     payloads[INSTALL_GITIGNORE_REL] = INSTALL_GITIGNORE_TEXT.encode("utf-8")
-    for adapter in CURSOR_ADAPTERS:
-        rel = f".cursor/skills/{adapter}/SKILL.md"
-        payloads[rel] = CURSOR_BODIES[adapter].encode("utf-8")
-    payloads[FIRST_USE_RULE_REL] = FIRST_USE_RULE_TEXT.encode("utf-8")
-    payloads[HOOK_SCRIPT_REL] = HOOK_SCRIPT_TEXT.encode("utf-8")
+    if _has_cursor_profile(profiles):
+        for adapter in CURSOR_ADAPTERS:
+            rel = f".cursor/skills/{adapter}/SKILL.md"
+            payloads[rel] = CURSOR_BODIES[adapter].encode("utf-8")
+        payloads[FIRST_USE_RULE_REL] = FIRST_USE_RULE_TEXT.encode("utf-8")
+        payloads[HOOK_SCRIPT_REL] = HOOK_SCRIPT_TEXT.encode("utf-8")
     agents_text, agents_issue = _planned_agents_text(host_path)
     if agents_issue:
         plan.blockers.append(agents_issue)
@@ -780,20 +798,27 @@ def plan_consumer_install(
         )
     if plan.blockers:
         return plan
-    hooks_issue = _plan_hooks_json(plan)
-    if hooks_issue:
-        plan.blockers.append(hooks_issue)
-        return plan
+    if _has_cursor_profile(profiles):
+        hooks_issue = _plan_hooks_json(plan)
+        if hooks_issue:
+            plan.blockers.append(hooks_issue)
+            return plan
 
     plan.source = source_identity(dist_path)
     plan.bridges = {
-        "cursor": list(CURSOR_ADAPTER_PATHS),
+        PROFILE_KEY: profile_ids(profiles),
         "agents_md_region": CONSUMER_INSTALL_REGION if AGENTS_MD in payloads else None,
         "gitattributes_region": GITATTR_REGION if GITATTRIBUTES in payloads else None,
-        "cursor_first_use_rule": FIRST_USE_RULE_REL,
-        "cursor_hooks_fragment": FRAGMENT_ID,
-        "cursor_hook_command": HOOK_COMMAND,
     }
+    if _has_cursor_profile(profiles):
+        plan.bridges.update(
+            {
+                "cursor": list(CURSOR_ADAPTER_PATHS),
+                "cursor_first_use_rule": FIRST_USE_RULE_REL,
+                "cursor_hooks_fragment": FRAGMENT_ID,
+                "cursor_hook_command": HOOK_COMMAND,
+            }
+        )
     manifest = _manifest_from_plan(plan)
     manifest_bytes = yaml_lite.dump(manifest).encode("utf-8")
     _replace_or_add_file(plan, INSTALL_MANIFEST, manifest_bytes)
@@ -911,6 +936,7 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
             "status": VERIFY_INCOMPLETE,
             "reasons": ["install.yaml file set is empty"],
         }
+    profiles = declared_profiles(manifest)
     expected = manifest_file_map(manifest)
     missing: list[str] = []
     drifted: list[str] = []
@@ -929,10 +955,11 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
     missing.extend(region_missing)
     drifted.extend(region_drifted)
     reasons.extend(region_incompat)
-    frag_missing, frag_drifted, frag_incompat = _hook_fragment_issues(root, manifest)
-    missing.extend(frag_missing)
-    drifted.extend(frag_drifted)
-    reasons.extend(frag_incompat)
+    if any(p.profile_id == CURSOR_PROFILE for p in profiles):
+        frag_missing, frag_drifted, frag_incompat = _hook_fragment_issues(root, manifest)
+        missing.extend(frag_missing)
+        drifted.extend(frag_drifted)
+        reasons.extend(frag_incompat)
     for required in (
         RUNNER_REL,
         f"{RUNTIME_DIR}/scaffold_entry.py",
@@ -942,9 +969,7 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         f"{RUNTIME_DIR}/scaffold_p8/engine.py",
         *(f"{PACKAGES_DIR}/{skill}/skill.yaml" for skill in CORE_SKILLS),
         *(f"{PACKAGES_DIR}/{skill}/SKILL.md" for skill in CORE_SKILLS),
-        *CURSOR_ADAPTER_PATHS,
-        FIRST_USE_RULE_REL,
-        HOOK_SCRIPT_REL,
+        *required_paths(profiles),
     ):
         if required not in expected:
             missing.append(required)
@@ -968,9 +993,10 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         drifted.extend(extra)
         reasons.extend(f"unexpected extra install file {rel}" for rel in extra)
     skill_issues = _installed_skill_issues(root, manifest)
-    adapter_issues = _cursor_adapter_issues(root, manifest)
-    rule_issues = _first_use_rule_issues(root)
-    gitattr_missing, gitattr_incompat = _git_attr_policy_issues(root, manifest)
+    cursor_declared = any(p.profile_id == CURSOR_PROFILE for p in profiles)
+    adapter_issues = _cursor_adapter_issues(root, manifest) if cursor_declared else []
+    rule_issues = _first_use_rule_issues(root) if cursor_declared else []
+    gitattr_missing, gitattr_incompat = _git_attr_policy_issues(root, manifest, profiles)
     abs_hits = absolute_runtime_path_hits(root, expected)
     reasons.extend(skill_issues)
     reasons.extend(adapter_issues)
@@ -1307,11 +1333,13 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         mode = args.mode or "bootstrap"
         opts: dict[str, Any] = {}
         if args.approved:
+            # Subject selector only. It names which Plan is presented to the
+            # human; it is never proof that the human approved it.
             opts["approval"] = {
                 "approved": True,
                 "plan_digest": args.plan_digest,
             }
-        result = UnderstandEngine(target, dist).run(mode, **opts)
+        result = _run_understand(target, dist, mode, opts, args.plan_digest)
         print(json.dumps(result_dict(result), indent=2, default=str))
         return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
     package = target / ".scaffold" / "install" / "packages" / args.command
@@ -1379,6 +1407,18 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     result = SubmitEngine(target, package).run(task_id=args.task_id)
     print(json.dumps(result_dict(result), indent=2, default=str))
     return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
+
+
+def _run_understand(
+    target: Path,
+    dist: Distribution,
+    mode: str,
+    opts: dict[str, Any],
+    plan_digest: str | None,
+):
+    """Understand CLI entry. Adoption apply is Agent lifecycle work, not a grant."""
+    del plan_digest
+    return UnderstandEngine(target, dist).run(mode, **opts)
 
 
 def never_adopted_after_install(host: str | Path) -> dict[str, Any]:
@@ -1872,7 +1912,9 @@ def _managed_region_issues(
 
 
 def _git_attr_policy_issues(
-    host: Path, manifest: dict[str, Any]
+    host: Path,
+    manifest: dict[str, Any],
+    profiles: tuple[AdapterProfile, ...] = (),
 ) -> tuple[list[str], list[str]]:
     missing: list[str] = []
     incompat: list[str] = []
@@ -1906,7 +1948,7 @@ def _git_attr_policy_issues(
     if slice_text:
         live_digest = sha256_bytes(slice_text.encode("utf-8"))
         stale = live_digest in predecessor_region_digests(GITATTRIBUTES)
-    for line in GITATTR_REQUIRED_LINES:
+    for line in _required_gitattr_lines(profiles):
         if line not in inner and not stale:
             incompat.append(f".gitattributes managed region omits {line}")
     after = text[span[1] :]
@@ -2270,6 +2312,19 @@ def _hook_fragment_issues(
         if sha256_bytes(live.encode("utf-8")) != expected:
             drifted.append(HOOKS_JSON_REL)
     return sorted(set(missing)), sorted(set(drifted)), incompat
+
+
+def _has_cursor_profile(profiles: tuple[AdapterProfile, ...]) -> bool:
+    return any(profile.profile_id == CURSOR_PROFILE for profile in profiles)
+
+
+def _required_gitattr_lines(profiles: tuple[AdapterProfile, ...]) -> tuple[str, ...]:
+    base = (
+        ".scaffold/install/** -text",
+        "AGENTS.md -text",
+        ".gitattributes -text",
+    )
+    return base + gitattributes_lines(profiles)
 
 
 def _first_use_rule_issues(host: Path) -> list[str]:

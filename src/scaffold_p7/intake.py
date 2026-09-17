@@ -44,7 +44,9 @@ class IntakeDecision:
     human_gate: dict[str, Any] = field(default_factory=dict)
 
 
-def prepare_proposal(value: Any) -> tuple[dict[str, Any] | None, list[str]]:
+def prepare_proposal(
+    value: Any, root: Path | None = None
+) -> tuple[dict[str, Any] | None, list[str]]:
     if not isinstance(value, dict):
         return None, ["Task proposal must be a structured mapping"]
     issues: list[str] = []
@@ -58,7 +60,7 @@ def prepare_proposal(value: Any) -> tuple[dict[str, Any] | None, list[str]]:
     if not acceptance:
         issues.append("Task proposal acceptance is required")
 
-    scope, scope_issues = _scope(value.get("scope"))
+    scope, scope_issues = _scope(value.get("scope"), root)
     issues.extend(scope_issues)
     stages, stage_issues = _stages(value.get("stages"))
     issues.extend(stage_issues)
@@ -483,7 +485,9 @@ def _build_task(
     return task
 
 
-def _scope(value: Any) -> tuple[dict[str, list[str]] | None, list[str]]:
+def _scope(
+    value: Any, root: Path | None = None
+) -> tuple[dict[str, list[str]] | None, list[str]]:
     if not isinstance(value, dict):
         return None, ["Task proposal scope must be a mapping"]
     issues: list[str] = []
@@ -514,6 +518,7 @@ def _scope(value: Any) -> tuple[dict[str, list[str]] | None, list[str]]:
         supporting_path_declaration_issues(
             out.get("supporting_paths") or [],
             out.get("paths") or [],
+            root,
         )
     )
     return out, issues

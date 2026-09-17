@@ -194,7 +194,7 @@ class DevelopEngine:
                 ),
             )
 
-        normalized, proposal_issues = prepare_proposal(proposal)
+        normalized, proposal_issues = prepare_proposal(proposal, self.root)
         if proposal_issues or normalized is None:
             return self._intake_result(
                 outcome="NEEDS_HUMAN",
@@ -2502,6 +2502,7 @@ def _intake_scope_issues(
         supporting_path_declaration_issues(
             [item for item in supporting if item],
             list(scope.get("paths") or []),
+            root,
         )
     )
     tests = _read_rows(root / ".scaffold/tests.yaml", "profiles", issues)

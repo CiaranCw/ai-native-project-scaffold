@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from scaffold_p5.client_support import is_client_support_path
 from scaffold_p5.io_util import file_digest, read_yaml
 from scaffold_p5.scm import observe_scm, parse_porcelain_z
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
@@ -56,8 +57,8 @@ def observe_real_diff(root: Path) -> dict[str, Any]:
         entries = [
             row
             for row in entries
-            if not _ignored_submit_path(str(row.get("path") or ""))
-            and not _ignored_submit_path(str(row.get("orig_path") or ""))
+            if not _ignored_submit_path(str(row.get("path") or ""), root)
+            and not _ignored_submit_path(str(row.get("orig_path") or ""), root)
         ]
         return {
             "ok": True,
@@ -303,8 +304,12 @@ def _entry_pathspecs(entries: list[dict[str, Any]]) -> list[str]:
     return sorted(paths)
 
 
-def _ignored_submit_path(path: str) -> bool:
-    return bool(path) and (_runtime_path(path) or is_ext_support_path(path))
+def _ignored_submit_path(path: str, root: Path | None = None) -> bool:
+    if not path:
+        return False
+    if _runtime_path(path) or is_ext_support_path(path):
+        return True
+    return root is not None and is_client_support_path(root, path)
 
 
 def _runtime_path(path: str) -> bool:
@@ -326,6 +331,8 @@ def _noscms_paths(root: Path) -> list[str]:
             if rel.startswith(RUNTIME_PREFIX) or rel.endswith(".pyc"):
                 continue
             if is_ext_support_path(rel):
+                continue
+            if is_client_support_path(root, rel):
                 continue
             if rel in CORE_MACHINE_ARTIFACTS:
                 continue

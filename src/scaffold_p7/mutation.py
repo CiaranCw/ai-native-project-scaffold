@@ -11,6 +11,7 @@ from scaffold_p5.ownership import (
     path_covered,
     resolve_ownership,
 )
+from scaffold_p5.client_support import is_client_support_path
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS, whole_file_mutation_allowed
 
 from scaffold_p7.models import MODULES_YAML
@@ -20,8 +21,8 @@ from scaffold_p7.session import file_sha256, path_kind, record_touch
 CORE_PROTECTED = frozenset(CORE_MACHINE_ARTIFACTS)
 OWNERSHIP_MODES = frozenset({"GENERATED", "MANAGED", "HUMAN_OWNED"})
 MAX_SUPPORTING_PATHS = 32
-GOVERNANCE_NAMES = frozenset({".scaffold", ".cursor", ".git"})
-GOVERNANCE_PREFIXES = (".scaffold/", ".cursor/", ".git/")
+GOVERNANCE_NAMES = frozenset({".scaffold", ".git"})
+GOVERNANCE_PREFIXES = (".scaffold/", ".git/")
 GOVERNANCE_FILES = frozenset({"AGENTS.md", ".gitattributes"})
 SUPPORTING_WILDCARD_CHARS = frozenset("*?[]")
 
@@ -131,6 +132,13 @@ def authorize_path_mutation(
         or ":" in normalized.split("/", 1)[0]
     ):
         return False, f"{normalized} is outside ordinary local fixture path form", ""
+    if is_client_support_path(root, normalized):
+        return (
+            False,
+            f"mutation authority for {normalized} is CONFLICTING: "
+            "declared CLIENT_SUPPORT path is not project product",
+            "",
+        )
     if is_protected_governance_path(normalized) or normalized in CORE_PROTECTED:
         return (
             False,
@@ -288,7 +296,8 @@ def path_in_supporting_scope(
     return False, f"{rel} is outside declared Task supporting scope"
 
 
-def is_protected_governance_path(rel: str) -> bool:
+def is_protected_governance_path(rel: str, root: Path | None = None) -> bool:
+    """Scaffold authority paths, plus project-declared CLIENT_SUPPORT when root is known."""
     normalized = _normalize(rel)
     if not normalized:
         return True
@@ -296,12 +305,15 @@ def is_protected_governance_path(rel: str) -> bool:
         return True
     if normalized in GOVERNANCE_NAMES:
         return True
-    return any(normalized.startswith(prefix) for prefix in GOVERNANCE_PREFIXES)
+    if any(normalized.startswith(prefix) for prefix in GOVERNANCE_PREFIXES):
+        return True
+    return root is not None and is_client_support_path(root, normalized)
 
 
 def supporting_path_declaration_issues(
     supporting: list[str],
     product_paths: list[str] | None = None,
+    root: Path | None = None,
 ) -> list[str]:
     issues: list[str] = []
     if len(supporting) > MAX_SUPPORTING_PATHS:
@@ -319,7 +331,7 @@ def supporting_path_declaration_issues(
         if any(char in path for char in SUPPORTING_WILDCARD_CHARS):
             issues.append(f"Task supporting path must not use wildcards: {path}")
             continue
-        if is_protected_governance_path(path):
+        if is_protected_governance_path(path, root):
             issues.append(
                 f"Task supporting path cannot declare protected governance: {path}"
             )
@@ -352,7 +364,7 @@ def supporting_path_grounding_issues(
         path = _normalize(raw)
         if not path:
             continue
-        if is_protected_governance_path(path):
+        if is_protected_governance_path(path, root):
             continue
         if not supporting_path_grounded(root, path, fact_prefixes=facts):
             issues.append(
