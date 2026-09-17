@@ -86,7 +86,7 @@ class P5UnderstandTests(unittest.TestCase):
         write(
             self.host,
             ".scaffold/project.yaml",
-            "schema_version: \"1\"\nlifecycle: ACTIVE\nproject_contract_generation: \"1\"\n",
+            "schema_version: \"1\"\nlifecycle: ACTIVE\nproject_contract_generation: \"2\"\n",
         )
         snap = snapshot_host(self.host)
         decision = run_preflight(snap, distribution())
@@ -180,14 +180,14 @@ class P5UnderstandTests(unittest.TestCase):
         released = load_package(REPO / "tests/fixtures/distribution/packages/understand-2.0.0")
         pinned = released.ref
         dist = distribution()
-        exact = evaluate_package(pinned, released, project={"project_contract_generation": "1"}, distribution=dist)
+        exact = evaluate_package(pinned, released, project={"project_contract_generation": "2"}, distribution=dist)
         self.assertEqual(exact["validity"], "VALID")
         self.assertEqual(exact["result"], "EXACT")
         live = load_package(REPO_UNDERSTAND)
         live_exact = evaluate_package(
             live.ref,
             live,
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=dist,
         )
         self.assertEqual(live.validity, "VALID")
@@ -196,34 +196,34 @@ class P5UnderstandTests(unittest.TestCase):
         compatible = evaluate_package(
             pinned,
             load_package(REPO / "tests/fixtures/distribution/packages/understand-2.0.1"),
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution("2.0.1"),
         )
         self.assertEqual(compatible["result"], "COMPATIBLE")
         migration = evaluate_package(
             pinned,
             load_package(REPO / "tests/fixtures/distribution/packages/understand-2.1.0"),
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution("2.1.0"),
         )
         self.assertEqual(migration["result"], "MIGRATION_REQUIRED")
         unknown = evaluate_package(
             pinned,
             load_package(REPO / "tests/fixtures/distribution/packages/understand-2.2.0"),
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution("2.2.0"),
         )
         self.assertEqual(unknown["result"], "UNKNOWN")
         incompat = evaluate_package(
             pinned,
             load_package(REPO / "tests/fixtures/distribution/packages/understand-incompat"),
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution(),
         )
         self.assertEqual(incompat["result"], "INCOMPATIBLE")
         invalid = load_package(REPO / "tests/fixtures/distribution/packages/understand-invalid")
         self.assertEqual(invalid.validity, "INVALID")
-        invalid_eval = evaluate_package(pinned, invalid, project={"project_contract_generation": "1"}, distribution=dist)
+        invalid_eval = evaluate_package(pinned, invalid, project={"project_contract_generation": "2"}, distribution=dist)
         self.assertEqual(invalid_eval["validity"], "INVALID")
         self.assertIsNone(invalid_eval["result"])
         self.assertEqual(
@@ -269,7 +269,7 @@ class P5UnderstandTests(unittest.TestCase):
         self.assertEqual(done.extras["migration"]["status"], "COMPLETED")
         self.assertTrue(any("PREPARED" in e for e in done.evidence))
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        self.assertEqual(project["project_contract_generation"], "2")
+        self.assertEqual(project["project_contract_generation"], "3")
         self.assertNotIn("NEEDS_MIGRATION", project.get("maintenance") or [])
 
     def test_Q_interrupted_migration_recovery_required(self):

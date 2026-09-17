@@ -116,7 +116,7 @@ class FA2Batch9PackageDocsTests(unittest.TestCase):
         row = evaluate_package(
             pinned,
             loaded,
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution(),
         )
         self.assertEqual(row["validity"], "INVALID")
@@ -173,7 +173,7 @@ class FA2Batch9PackageDocsTests(unittest.TestCase):
         row = evaluate_package(
             loaded.ref,
             loaded,
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution(),
             applicable_packages={},
         )

@@ -5,7 +5,14 @@ import unittest
 from pathlib import Path
 
 from p6_support import CORE_OWNERSHIP
-from p7_support import TASK_A, develop_engine, ready_lifecycle_opts, write_active_host, write_task
+from p7_support import (
+    TASK_A,
+    develop_engine,
+    ensure_noscms_accepted_anchor,
+    ready_lifecycle_opts,
+    write_active_host,
+    write_task,
+)
 from scaffold_p5.io_util import read_text, read_yaml
 from scaffold_p6.candidate import observe_candidate
 from scaffold_p7.models import SESSIONS_DIR
@@ -122,6 +129,7 @@ class P7ClosureTests(unittest.TestCase):
             source_areas=["src"],
         )
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
         seen = {}
 
         def compete():

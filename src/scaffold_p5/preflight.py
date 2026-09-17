@@ -126,8 +126,8 @@ def _bootstrap_preflight(snapshot: HostSnapshot, distribution: Distribution) -> 
     project_generations = [
         str(value) for value in contracts.get("project_contract_generations") or []
     ]
-    if "1" not in project_generations:
-        blockers.append("Understand does not establish target Project Contract generation 1")
+    if not project_generations:
+        blockers.append("Understand does not establish a target Project Contract generation")
     record_capabilities = contracts.get("record_schema_capabilities") or {}
     adoption_versions = [
         str(value) for value in record_capabilities.get("adoption_session") or []

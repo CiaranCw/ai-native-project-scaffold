@@ -259,7 +259,13 @@ def evaluate_develop_preflight(
             host_lifecycle=lifecycle,
             maintenance=maintenance,
         )
-    if compatibility not in EXECUTABLE_COMPAT:
+    if compatibility not in EXECUTABLE_COMPAT and not (
+        allow_approved_migration and compatibility == "MIGRATION_REQUIRED"
+    ):
+        # An approved Task-bound migration is the sanctioned way a legacy host
+        # reaches the current generation. Blocking it here would deadlock the
+        # host: ordinary Develop stays denied by the drift-authority gate until
+        # the migration actually completes.
         return DevelopPreflight(
             allowed=False,
             skill_version=actual_version,

@@ -9,6 +9,7 @@ from p7_support import (
     TASK_A,
     TASK_B,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     ready_lifecycle_opts,
     repair_handoff,
     write_active_host,
@@ -88,6 +89,7 @@ class P7Rev1Tests(unittest.TestCase):
     def test_E06_valid_p3_task_book_remains_executable(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.extras["task"]["record_id"], TASK_A)
@@ -153,6 +155,7 @@ class P7Rev1Tests(unittest.TestCase):
     def test_E11_valid_open_session_with_matching_bindings_may_resume(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         created = create_session(
             self.host,
             task_id=TASK_A,
@@ -242,6 +245,7 @@ class P7Rev1Tests(unittest.TestCase):
     def test_E16_valid_current_candidate_failure_handoff_may_repair(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "repair",
             task_id=TASK_A,
@@ -266,6 +270,7 @@ class P7Rev1Tests(unittest.TestCase):
         project["ownership"] = {**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"}
         project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
+        ensure_noscms_accepted_anchor(self.host)
         test = TestEngine(self.host, REPO / "skills" / "test").run(
             "scoped_verification",
             selected=["unit"],
@@ -338,6 +343,7 @@ class P7Rev1Tests(unittest.TestCase):
             source_areas=["src"],
         )
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -361,6 +367,7 @@ class P7Rev1Tests(unittest.TestCase):
             ],
             final_tests=[],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -396,6 +403,7 @@ class P7Rev1Tests(unittest.TestCase):
         write_host(self.host, [(profile, command)])
         bind_develop_lock(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,

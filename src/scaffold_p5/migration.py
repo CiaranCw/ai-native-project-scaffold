@@ -660,6 +660,28 @@ def apply_fresh_migration_execution(
             "compatibility": None,
             "extras": extras,
         }
+    consumed = consume_compatibility_boundary(root, classify_inherited=True)
+    extras["compatibility_boundary"] = consumed
+    if not consumed.get("ok"):
+        data["status"] = "RECOVERY_REQUIRED"
+        data["blockers"] = list(consumed.get("blockers") or [
+            "compatibility boundary could not be established after migration"
+        ])
+        save_execution(directory, data)
+        mark_recovery_required(root)
+        extras["migration"] = data
+        return {
+            "outcome": "BLOCKED",
+            "completed": False,
+            "applied": True,
+            "mutations": "partial",
+            "artifacts": [PROJECT_YAML],
+            "blockers": list(data["blockers"]),
+            "evidence": [],
+            "next_route": "resolve durable drift authority before resuming Develop",
+            "compatibility": post_apply_evaluation.get("overall"),
+            "extras": extras,
+        }
     data["status"] = "COMPLETED"
     save_execution(directory, data)
     delete_execution(directory)
@@ -796,6 +818,23 @@ def mark_recovery_required(root: Path) -> bool:
     data["lifecycle"] = "RECOVERY_REQUIRED"
     write_yaml_atomic(root / PROJECT_YAML, data)
     return inspect_project(root / PROJECT_YAML).valid
+
+
+def consume_compatibility_boundary(
+    root: Path,
+    *,
+    classify_inherited: bool,
+) -> dict[str, Any]:
+    """Establish the FA2-FND-005 boundary once the tracked generation carries it.
+
+    Project-migration authority owns this. Develop only reads the result.
+    """
+    from scaffold_p7.unexplained import establish_compatibility_boundary
+
+    return establish_compatibility_boundary(
+        root,
+        classify_inherited=classify_inherited,
+    )
 
 
 def complete_migration(root: Path, target: str) -> bool:

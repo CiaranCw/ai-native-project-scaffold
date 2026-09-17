@@ -54,6 +54,7 @@ from scaffold_p5.ownership import P6_DURABLE_EVIDENCE_AREA, source_area_key
 from scaffold_p5.preflight import PreflightDecision
 from scaffold_p5.schemas import (
     ADOPTION_PLAN_SCHEMA_VERSION,
+    CURRENT_PROJECT_CONTRACT_GENERATION,
     adoption_plan_digest,
     validate_adoption_plan_data,
 )
@@ -85,6 +86,27 @@ def make_id(prefix: str) -> str:
     return f"{prefix}-{utc_stamp()}-{secrets.token_hex(4)}"
 
 
+def adoption_target_generation(distribution: Distribution) -> str:
+    """Adopt at the newest Project Contract generation the pinned package establishes.
+
+    The shipped packages declare the current generation, so a fresh host is
+    adopted post-boundary and never receives legacy compatibility amnesty.
+    """
+    actual = getattr(distribution, "actual_understand", None)
+    manifest = getattr(actual, "manifest", None) or {}
+    declared = (manifest.get("contracts") or {}).get("project_contract_generations") or []
+    ranked = []
+    for value in declared:
+        text = str(value).strip()
+        try:
+            ranked.append((int(text), text))
+        except ValueError:
+            continue
+    if not ranked:
+        return CURRENT_PROJECT_CONTRACT_GENERATION
+    return max(ranked)[1]
+
+
 def build_adoption_plan(
     root: Path,
     *,
@@ -99,6 +121,7 @@ def build_adoption_plan(
         raise ValueError("Adoption Plan requires a Selected Distribution Release")
     pinned = preflight.pinned_understand or release.pinned("understand")
     intended = preflight.intended_lock or _intended_from_release(release)
+    target_generation = adoption_target_generation(distribution)
     baseline = scm_baseline(root)
     baseline["workspace"] = workspace_fingerprint(root, _baseline_paths(root))
     actions: list[PlanAction] = []
@@ -282,7 +305,7 @@ def build_adoption_plan(
         "release_id": release.release_id,
         "pinned_understand": _ref_dict(pinned),
         "intended_lock": intended,
-        "target_contract_generation": "1",
+        "target_contract_generation": target_generation,
         "mutation_envelope": envelope,
         "actions": [_action_dict(a) for a in actions],
         "facts": facts_as_dicts(facts),
@@ -297,7 +320,7 @@ def build_adoption_plan(
         release_id=release.release_id,
         pinned_understand=pinned,
         intended_lock=intended,
-        target_contract_generation="1",
+        target_contract_generation=target_generation,
         mutation_envelope=envelope,
         actions=actions,
         facts=facts,

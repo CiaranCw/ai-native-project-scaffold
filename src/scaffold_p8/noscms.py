@@ -13,7 +13,7 @@ from typing import Any, Iterator
 from scaffold_p5.io_util import file_digest, read_yaml, sha256_bytes, write_yaml_atomic
 from scaffold_p5.ownership import resolve_ownership
 from scaffold_p5.scm import observe_scm
-from scaffold_p6.candidate import RUNTIME_PREFIX, observe_candidate
+from scaffold_p6.candidate import RUNTIME_PREFIX, is_ext_support_path, observe_candidate
 from scaffold_p8.schemas import (
     CHANGE_ID_RE,
     HEX_DIGEST_RE,
@@ -50,7 +50,7 @@ def is_noscms_support_path(rel: str) -> bool:
     normalized = rel.replace("\\", "/")
     if normalized.startswith(RUNTIME_PREFIX) or normalized == ".scaffold/runtime":
         return True
-    if normalized.startswith(SUBMIT_EXT_PREFIX) or normalized == ".scaffold/ext/submit":
+    if is_ext_support_path(normalized):
         return True
     if normalized.endswith(".pyc") or "/__pycache__/" in f"/{normalized}":
         return True

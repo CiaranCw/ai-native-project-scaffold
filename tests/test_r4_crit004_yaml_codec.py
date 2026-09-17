@@ -131,6 +131,9 @@ class R4Crit004MutationLifecycleTests(unittest.TestCase):
         )
         _install_marker(self.host)
         _knowledge(self.host)
+        from p7_support import ensure_noscms_accepted_anchor
+
+        ensure_noscms_accepted_anchor(self.host)
 
     def tearDown(self):
         self._tmp.cleanup()

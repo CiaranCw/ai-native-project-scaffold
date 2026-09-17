@@ -240,11 +240,34 @@ launder prior physical divergence. Opening a Session MUST NOT mint a new
 accepted anchor.
 
 Unexplained drift is host/workspace-level, Task-agnostic, Session-independent
-durable support at `.scaffold/ext/develop/unexplained.yaml`. It is not a
-fourth canonical development record. It MUST NOT depend indefinitely on
+durable support at `.scaffold/ext/develop/unexplained.yaml`. The one-time
+existing-host compatibility boundary is NOT witnessed by any support file. It
+is the tracked `project_contract_generation` advance in `.scaffold/project.yaml`,
+owned by Understand / project-migration authority. Develop reconciliation only
+consumes that boundary and MUST NOT create, recreate, or re-grant it. Because
+the generation lives in tracked project authority, ordinary untracked cleanup
+such as a bare `git clean -fd` can destroy `.scaffold/ext/` without ever
+returning the host to never-initialized. A malformed or missing drift payload
+after the boundary has been consumed is unusable authority, not a second
+compatibility initialization. A legacy-generation host that still carries a
+drift payload is likewise unusable. It is
+not a fourth canonical development record. It MUST NOT depend indefinitely on
 walking the full historical Session directory chain. MUST NOT introduce
 per-Task full-workspace accepted baselines. Task B's attributed mutation
 MUST NOT become Task A rogue drift merely because Task A did not produce it.
+
+Runtime observation boundaries that persist unexplained facts:
+
+- Session open / bind, including pointer resume
+- seal, including run-completion seal
+- abort / blocked abort, before pointer clear
+- Submit S2 after a successful physical Diff observation
+- successful S10, after accepted-anchor advancement
+
+Status / entry may observe candidate identity but do not write unexplained
+facts. Drift that occurs with no Session open is detected at the next
+Session open or Submit S2. Perfect client pre-write interception is not
+required.
 
 Known unexplained drift on path X does not automatically deny legitimate
 mutation on unrelated path Y. Path-scoped Develop permissiveness does NOT
@@ -261,7 +284,9 @@ unexplained bytes is forbidden. S10 remains the existing acceptance boundary.
 
 On a no-SCM host the accepted anchor is existing durable publication /
 baseline authority. If that authority is unavailable, UNKNOWN / fail-closed
-remains valid. Do NOT fabricate an anchor. Unknowable pre-upgrade physical
+remains valid. Do NOT fabricate an anchor. Ordinary mutation authority MUST
+fail closed while accepted physical authority is UNKNOWN or durable drift
+authority is unusable. Abort remains an escape path. Unknowable pre-upgrade physical
 divergence MAY be inherited-at-initialization ONLY during the one-time
 compatibility initialization of an existing established host, recorded by a
 durable initialization boundary. After that boundary exists, UNKNOWN /

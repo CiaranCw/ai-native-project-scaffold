@@ -203,7 +203,7 @@ class P5Rev1Tests(unittest.TestCase):
         result = evaluate_package(
             package.ref,
             package,
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=distribution(),
         )
         self.assertEqual(result["result"], "INCOMPATIBLE")

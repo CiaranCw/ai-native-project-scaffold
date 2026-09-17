@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from p6_support import CORE_OWNERSHIP
-from p7_support import TASK_A, TASK_B, develop_engine, write_active_host, write_task
+from p7_support import TASK_A, TASK_B, develop_engine, ensure_noscms_accepted_anchor, write_active_host, write_task
 from support import write
 from test_first_use_enforcement import _hook_payload
 
@@ -175,6 +175,7 @@ class PcConsumer003Tests(unittest.TestCase):
             status="IN_PROGRESS",
             stages=_in_progress_stages(),
         )
+        ensure_noscms_accepted_anchor(self.host)
         _install_marker(self.host)
         _knowledge(self.host)
 
@@ -377,6 +378,7 @@ class PcConsumer003AIntakeTests(unittest.TestCase):
             source_areas=["src"],
         )
         write(self.host, "src/app.py", "value = 0\n")
+        ensure_noscms_accepted_anchor(self.host)
         _install_marker(self.host)
         _knowledge(self.host)
 
@@ -730,6 +732,7 @@ class PcConsumer003AuthorityChainTests(unittest.TestCase):
             status="IN_PROGRESS",
             stages=_in_progress_stages(),
         )
+        ensure_noscms_accepted_anchor(self.host)
         _install_marker(self.host)
         _knowledge(self.host)
 

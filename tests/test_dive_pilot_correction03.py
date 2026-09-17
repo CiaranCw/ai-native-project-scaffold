@@ -16,6 +16,7 @@ from p7_support import (
     TASK_A,
     bind_develop_lock,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     four_core_lock_skills,
     ready_lifecycle_opts,
     write_task,
@@ -43,6 +44,7 @@ def _verified_develop_host(host: Path, *, failing: bool = False) -> None:
     write_host(host, [(profile, command)])
     bind_develop_lock(host)
     write(host, "src/app.py", "value = 0\n")
+    ensure_noscms_accepted_anchor(host)
 
 
 def _bound_task(**overrides) -> dict:
@@ -596,6 +598,7 @@ class DiveShapedReadyRefreshE2ETests(unittest.TestCase):
         write_host(self.host, [passing_profile(PROFILE)])
         bind_develop_lock(self.host)
         write(self.host, "src/app.py", "value = 0\n")
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, **_bound_task())
         persist_currentness_without_completion(self.host)
         c1 = observe_candidate(self.host).digest

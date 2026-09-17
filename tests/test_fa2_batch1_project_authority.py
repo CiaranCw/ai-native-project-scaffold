@@ -13,7 +13,7 @@ from p6_support import (
     write_commands,
     write_tests,
 )
-from p7_support import TASK_A, bind_develop_lock, develop_engine, write_active_host, write_task
+from p7_support import TASK_A, bind_develop_lock, develop_engine, ensure_noscms_accepted_anchor, write_active_host, write_task
 from p8_support import (
     bind_ready_completion_authority,
     bind_submit_lock,
@@ -660,6 +660,7 @@ class FA2Batch1ProjectAuthorityTests(unittest.TestCase):
         write(self.host, "src/app.py", "value = 1\n")
         result = adopt(self.host)
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        ensure_noscms_accepted_anchor(self.host)
         return result
 
     def _develop_host(self) -> None:

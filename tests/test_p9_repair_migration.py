@@ -22,6 +22,7 @@ from p7_support import (
     actual_develop_lock_entry,
     bind_develop_lock,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     repair_handoff,
     satisfied_decision,
     submit_repair_handoff,
@@ -157,6 +158,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R01_ready_explicit_target_reopens(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(
             self.host,
             status="READY_FOR_REVIEW",
@@ -186,6 +188,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R02_ready_without_targets_fails_closed(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
         handoff = submit_repair_handoff(
@@ -204,6 +207,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R03_nonexistent_stage_fails_closed(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
         result = develop_engine(self.host).run(
@@ -220,6 +224,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R04_old_decisions_cannot_restore_ready(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
         result = develop_engine(self.host).run(
@@ -267,6 +272,7 @@ class P9RepairTests(unittest.TestCase):
         bind_develop_lock(self.host)
         self._own_src()
         write(self.host, "src/app.py", "value = 0\n")
+        ensure_noscms_accepted_anchor(self.host)
         write_task(
             self.host,
             stages=[
@@ -343,6 +349,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R08_fresh_process_reconstructs_repair_state(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
         develop_engine(self.host).run(
@@ -364,6 +371,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R09_stale_cas_revision_rejects(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
 
@@ -392,6 +400,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R10_concurrent_repair_cas_one_winner(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
         barrier = threading.Barrier(2)
@@ -424,6 +433,7 @@ class P9RepairTests(unittest.TestCase):
 
     def test_P9_R11_replayed_repair_does_not_duplicate(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host, status="READY_FOR_REVIEW", stages=[self._complete_stage()])
         bind_ready_completion_authority(self.host)
         first = develop_engine(self.host).run(
@@ -477,6 +487,7 @@ class P9RepairTests(unittest.TestCase):
         bind_develop_lock(self.host)
         self._own_src()
         write(self.host, "src/app.py", "value = 0\n")
+        ensure_noscms_accepted_anchor(self.host)
 
     def _prepare_passing_bound_host(self) -> None:
         profile, command = passing_profile("unit")
@@ -484,6 +495,7 @@ class P9RepairTests(unittest.TestCase):
         bind_develop_lock(self.host)
         self._own_src()
         write(self.host, "src/app.py", "value = 1\n")
+        ensure_noscms_accepted_anchor(self.host)
 
     def _own_src(self) -> None:
         payload = read_yaml(self.host / ".scaffold/project.yaml")
@@ -537,6 +549,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M01_valid_exact_no_migration(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         bind_resolvable_lock(self.host)
         need = self._need(p9_dist("2.0.0"))
         self.assertEqual(need["validity"], "VALID")
@@ -545,6 +558,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M02_valid_compatible_does_not_force_migration(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         bind_resolvable_lock(self.host)
         before = (self.host / ".scaffold/skills.lock").read_bytes()
         need = self._need(p9_dist("2.1.0", actual_understand_dir=REPO / "skills" / "understand"))
@@ -555,6 +569,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M03_valid_migration_required_is_explicit(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         bind_resolvable_lock(self.host)
         need = self._need(p9_dist("2.1.0"))
         self.assertEqual(need["validity"], "VALID")
@@ -565,6 +580,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M04_invalid_is_not_migration_required(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         bind_resolvable_lock(self.host)
         dest = Path(self._tmp.name) / "bad-understand"
         write_skill_package(
@@ -580,6 +596,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M05_version_difference_with_explicit_compatibility(self):
         write_active_host(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         bind_resolvable_lock(self.host)
         need = self._need(
             p9_dist("2.1.0", actual_understand_dir=REPO / "skills" / "understand")
@@ -589,6 +606,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M06_human_owned_whole_file_blocked(self):
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         allowed, reason = whole_file_mutation_allowed(
             {"docs/notes.md": "HUMAN_OWNED"},
             "docs/notes.md",
@@ -618,6 +636,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M07_authorized_bounded_migration_through_develop(self):
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
         preview = develop_engine(self.host).run(
             "normal_task",
@@ -636,7 +655,7 @@ class P9MigrationTests(unittest.TestCase):
         )
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        self.assertEqual(project["project_contract_generation"], "2")
+        self.assertEqual(project["project_contract_generation"], "3")
         self.assertIn(
             result.extras.get("post_compatibility"),
             {"EXACT", "COMPATIBLE"},
@@ -651,6 +670,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M09_unprovable_post_state_is_not_forced_pass(self):
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
         preview = develop_engine(self.host).run(
             "normal_task",
@@ -680,6 +700,7 @@ class P9MigrationTests(unittest.TestCase):
 
     def test_P9_M10_fresh_process_reconstructs_pending_migration(self):
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
         preview = develop_engine(self.host).run(
             "normal_task",
@@ -729,6 +750,7 @@ class P9DiveReadinessTests(unittest.TestCase):
         payload["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", payload)
         write(self.host, "src/movement.py", "speed = 1\n")
+        ensure_noscms_accepted_anchor(self.host)
         write_task(
             self.host,
             title="Implement movement velocity",
@@ -806,6 +828,7 @@ class P9MigrationTaskBindingTests(unittest.TestCase):
         self.host = Path(self._tmp.name) / "host"
         self.host.mkdir()
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
 
     def tearDown(self):
@@ -854,7 +877,7 @@ class P9MigrationTaskBindingTests(unittest.TestCase):
         )
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        self.assertEqual(project["project_contract_generation"], "2")
+        self.assertEqual(project["project_contract_generation"], "3")
 
     def test_P9_X03_stale_task_revision_requires_reapproval(self):
         preview = preview_migration(self.host)
@@ -945,6 +968,7 @@ class P9MigrationCompletionTests(unittest.TestCase):
         self.host = Path(self._tmp.name) / "host"
         self.host.mkdir()
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
 
     def tearDown(self):
@@ -989,7 +1013,7 @@ class P9MigrationCompletionTests(unittest.TestCase):
         shutil.copytree(FIXTURE_DIST / "packages" / "understand-2.2.0", dest)
         payload = read_yaml(dest / "skill.yaml")
         contracts = dict(payload.get("contracts") or {})
-        contracts["project_contract_generations"] = ["1", "2"]
+        contracts["project_contract_generations"] = ["2", "3"]
         payload["contracts"] = contracts
         write_yaml_atomic(dest / "skill.yaml", payload)
         unknown = load_fixture_distribution(
@@ -1041,6 +1065,7 @@ class P9MigrationRecoveryTests(unittest.TestCase):
         self.host = Path(self._tmp.name) / "host"
         self.host.mkdir()
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
 
     def tearDown(self):
@@ -1141,7 +1166,7 @@ class P9MigrationRecoveryTests(unittest.TestCase):
         )
         project = read_yaml(self.host / ".scaffold/project.yaml")
         self.assertEqual(project.get("lifecycle"), "ACTIVE")
-        self.assertEqual(project.get("project_contract_generation"), "2")
+        self.assertEqual(project.get("project_contract_generation"), "3")
 
 
 def _task_snapshot(host: Path, task_id: str = TASK_A) -> dict:
@@ -1163,6 +1188,7 @@ class P9PreMutationAuthorityTests(unittest.TestCase):
         self.host = Path(self._tmp.name) / "host"
         self.host.mkdir()
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         write_task(self.host)
         self.before_task = _task_snapshot(self.host)
         self.before_project = (self.host / ".scaffold/project.yaml").read_bytes()
@@ -1343,6 +1369,7 @@ class P9PostCompatibilityTests(unittest.TestCase):
         self.host = Path(self._tmp.name) / "host"
         self.host.mkdir()
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -1465,7 +1492,7 @@ class P9PostCompatibilityTests(unittest.TestCase):
         shutil.copytree(FIXTURE_DIST / "packages" / "understand-2.2.0", dest)
         payload = read_yaml(dest / "skill.yaml")
         contracts = dict(payload.get("contracts") or {})
-        contracts["project_contract_generations"] = ["1", "2"]
+        contracts["project_contract_generations"] = ["2", "3"]
         payload["contracts"] = contracts
         write_yaml_atomic(dest / "skill.yaml", payload)
         unknown = load_fixture_distribution(
@@ -1530,6 +1557,7 @@ class P9FreshApplyAuthorityTests(unittest.TestCase):
         self.host = Path(self._tmp.name) / "host"
         self.host.mkdir()
         adopt(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         self.before_project = (self.host / ".scaffold/project.yaml").read_bytes()
 
     def tearDown(self):
@@ -1632,7 +1660,7 @@ class P9FreshApplyAuthorityTests(unittest.TestCase):
         )
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
         project = read_yaml(self.host / ".scaffold/project.yaml")
-        self.assertEqual(project.get("project_contract_generation"), "2")
+        self.assertEqual(project.get("project_contract_generation"), "3")
 
     def test_P9_Q06_recovery_remains_understand_owned(self):
         write_task(self.host)
@@ -1663,7 +1691,7 @@ class P9FreshApplyAuthorityTests(unittest.TestCase):
         self.assertEqual(resumed.outcome, "COMPLETED", resumed.blockers)
         project = read_yaml(self.host / ".scaffold/project.yaml")
         self.assertEqual(project.get("lifecycle"), "ACTIVE")
-        self.assertEqual(project.get("project_contract_generation"), "2")
+        self.assertEqual(project.get("project_contract_generation"), "3")
 
 
 if __name__ == "__main__":

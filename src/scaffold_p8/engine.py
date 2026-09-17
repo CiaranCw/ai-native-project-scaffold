@@ -13,6 +13,11 @@ from scaffold_p5.scm import DIVERGED, STALE, observe_upstream_currentness
 from scaffold_p6.candidate import observe_candidate
 from scaffold_p6.engine import TestEngine
 from scaffold_p7.tasks import ready_for_review_gates, resolve_task, task_complete
+from scaffold_p7.unexplained import (
+    STATE_AUTHORITY_UNUSABLE,
+    inspect_drift_authority,
+    reconcile_unexplained_drift,
+)
 
 from scaffold_p8.authorization import (
     authorization_request,
@@ -163,6 +168,24 @@ class SubmitEngine:
                 extras={"stage": "S2", "real_diff": real_diff},
             )
         real_paths = list(real_diff.get("paths") or [])
+        inspected = inspect_drift_authority(self.root)
+        if inspected.get("state") == STATE_AUTHORITY_UNUSABLE:
+            return self._blocked(
+                list(inspected.get("blockers") or ["durable drift authority is unusable"]),
+                "stop",
+                candidate=observe_candidate(self.root),
+                project=project,
+                extras={"stage": "S2", "drift_authority": inspected},
+            )
+        reconciled = reconcile_unexplained_drift(self.root, boundary="submit_s2")
+        if not reconciled.get("ok"):
+            return self._blocked(
+                list(reconciled.get("blockers") or ["durable drift authority is unusable"]),
+                "stop",
+                candidate=observe_candidate(self.root),
+                project=project,
+                extras={"stage": "S2", "drift_authority": reconciled},
+            )
         authority = resolve_submit_task_authority(
             self.root,
             task_id=opts.get("task_id"),
@@ -888,6 +911,8 @@ class SubmitEngine:
                     )
                     if s10.get("durable"):
                         s10["ok"] = False
+            if s10.get("durable"):
+                reconcile_unexplained_drift(self.root, boundary="s10")
             if not s10.get("ok"):
                 if s10.get("durable"):
                     return self._durable_but_blocked(

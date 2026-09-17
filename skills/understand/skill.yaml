@@ -14,7 +14,7 @@ contracts:
   records_contract: "1"
   skill_contract: "1"
   project_contract_generations:
-    - "1"
+    - "2"
   record_schema_capabilities:
     adoption_session:
       - "1"

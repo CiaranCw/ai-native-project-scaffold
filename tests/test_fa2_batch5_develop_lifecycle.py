@@ -10,6 +10,7 @@ from p7_support import (
     TASK_B,
     bind_develop_lock,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     ready_lifecycle_opts,
     repair_handoff,
     satisfied_decision,
@@ -257,6 +258,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
                 )
             ],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -307,6 +309,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
                 )
             ],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -333,6 +336,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
                 )
             ],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -450,6 +454,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
             self.host,
             stages=[self._in_progress_stage()],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -483,6 +488,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
             ],
         )
         digest = observe_candidate(self.host).digest
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "repair",
             task_id=TASK_A,
@@ -600,6 +606,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
                 )
             ],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "repair",
             task_id=TASK_A,
@@ -626,6 +633,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
             stages=[self._complete_stage()],
             task_completion_decision=satisfied_decision(candidate_digest=digest),
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "repair",
             task_id=TASK_A,
@@ -794,6 +802,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
     def test_B5R14_in_progress_repair_regression(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "repair",
             task_id=TASK_A,
@@ -976,6 +985,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
             self.host,
             stages=[self._in_progress_stage(required=True)],
         )
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -1008,6 +1018,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
                 )
             ],
         )
+        ensure_noscms_accepted_anchor(self.host)
         digest = observe_candidate(self.host).digest
         test = TestEngine(self.host, REPO / "skills" / "test").run(
             supplied_evidence=[
@@ -1418,6 +1429,7 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
         payload["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", payload)
         write(self.host, "src/app.py", "value = 0\n")
+        ensure_noscms_accepted_anchor(self.host)
 
     def _task_path(self) -> Path:
         return self.host / ".scaffold/tasks" / f"{TASK_A}.yaml"

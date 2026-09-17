@@ -10,7 +10,14 @@ from unittest.mock import patch
 
 from p6_support import CORE_OWNERSHIP, passing_profile, write_commands, write_host, write_tests
 from p6_support import test_engine as make_test_engine
-from p7_support import TASK_A, TASK_B, develop_engine, write_active_host, write_task
+from p7_support import (
+    TASK_A,
+    TASK_B,
+    develop_engine,
+    ensure_noscms_accepted_anchor,
+    write_active_host,
+    write_task,
+)
 from support import REPO, write
 from test_first_use_enforcement import _hook_payload
 from test_pc_consumer_003 import _install_marker, _knowledge
@@ -25,6 +32,7 @@ from scaffold_p6.evidence import compile_supplied_sav_item, supporting_evidence_
 from scaffold_p6.published import consume_published_report
 from scaffold_p7.develop_authority import (
     EXECUTION_POINTER_REL,
+    execution_provenance_issues,
     resolve_current_develop_authority,
 )
 from scaffold_p7.handoff import invoke_test
@@ -97,6 +105,7 @@ class R3PointerAndLineageTests(unittest.TestCase):
         )
         _install_marker(self.host)
         _knowledge(self.host)
+        ensure_noscms_accepted_anchor(self.host)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -126,20 +135,49 @@ class R3PointerAndLineageTests(unittest.TestCase):
         self.assertEqual(still["permission"], "allow", still)
 
     def test_rogue_product_and_supporting_and_outside_are_detected(self):
+        """FA2-FND-005 path-scoped Develop: same-scope X must not globally deny Y.
+
+        Out-of-scope drift remains a global editor deny. Seal still fail-closes
+        on this Session's unexplained same-scope delta.
+        """
         self._open()
         evaluate_cursor_hook(_write_payload(self.host, VAULT_PRODUCT), self.host)
         write(self.host, "src/mvp/rogue.py", "rogue = True\n")
         product = evaluate_cursor_hook(_write_payload(self.host, VAULT_PRODUCT), self.host)
-        self.assertEqual(product["permission"], "deny", product)
-        self.assertIn("unexplained same-scope", product.get("reason") or "")
-
+        self.assertEqual(product["permission"], "allow", product)
+        authority = resolve_current_develop_authority(self.host)
+        self.assertTrue(authority.ok, authority.reason)
         pointer = self.host / EXECUTION_POINTER_REL
         session_id = read_yaml(pointer)["session_id"]
+        directory = self.host / SESSIONS_DIR / session_id
+        issues = execution_provenance_issues(
+            self.host,
+            task=self.task,
+            session=read_yaml(directory / "session.yaml"),
+            directory=directory,
+        )
+        self.assertTrue(
+            any("unexplained same-scope drift: src/mvp/rogue.py" in item for item in issues),
+            issues,
+        )
+
         (self.host / "src" / "mvp" / "rogue.py").unlink()
         write(self.host, "tests/unit/rogue_support.py", "nope\n")
         supporting = evaluate_cursor_hook(_write_payload(self.host, VAULT_TEST), self.host)
-        self.assertEqual(supporting["permission"], "deny", supporting)
-        self.assertIn("unexplained same-scope", supporting.get("reason") or "")
+        self.assertEqual(supporting["permission"], "allow", supporting)
+        supporting_issues = execution_provenance_issues(
+            self.host,
+            task=self.task,
+            session=read_yaml(directory / "session.yaml"),
+            directory=directory,
+        )
+        self.assertTrue(
+            any(
+                "unexplained same-scope drift: tests/unit/rogue_support.py" in item
+                for item in supporting_issues
+            ),
+            supporting_issues,
+        )
 
         (self.host / "tests" / "unit" / "rogue_support.py").unlink()
         write(self.host, "lib/other/secret.js", "nope\n")
@@ -659,6 +697,7 @@ class R3MutationTransactionTests(unittest.TestCase):
         )
         _install_marker(self.host)
         _knowledge(self.host)
+        ensure_noscms_accepted_anchor(self.host)
 
     def tearDown(self):
         self._tmp.cleanup()

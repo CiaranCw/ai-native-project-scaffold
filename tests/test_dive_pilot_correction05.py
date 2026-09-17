@@ -35,19 +35,19 @@ RECORD_BAD = "change-20260830T120300Z-dddd4444"
 EXPECTED_PACKAGES = {
     "understand": (
         "2.1.0",
-        "9dcf65fbfb34f8238ff11c3152690a81b470332e537149f839de4a161f3e0429",
+        "0f04f61cd1de48846e8619a2e05d75f4f06479a8576c03dd924d462c9b0283d8",
     ),
     "develop": (
         "2.1.0",
-        "b6ea5d90deea12fd4f79a3a24c200d41c04fc6b447a0fe5bd6cd17849a0d83a9",
+        "0a35bd95894e3baffcee802171b08759db3d00eb60a33db8028784fe6ec9583c",
     ),
     "test": (
         "2.0.1",
-        "fc529254efee382fde8270edb8381b499603f591bca904bdf3a902e990ab0ec8",
+        "c90af65699a323a1ff3597051f310a12edd8c72583015d7934e17d717a5366f8",
     ),
     "submit": (
         "2.1.0",
-        "a1ba273c731deb233d222fe0b0c40701c244d64bde679a2dc1a1616bf9c2acff",
+        "672c6ea522792b4cec1e57b9c32c44b3af165519fa905b388e7aa4938e0452ef",
     ),
 }
 

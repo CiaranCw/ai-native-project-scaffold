@@ -228,7 +228,7 @@ class P5Rev3Tests(unittest.TestCase):
             read_yaml(self.host / ".scaffold/project.yaml")[
                 "project_contract_generation"
             ],
-            "1",
+            "2",
         )
 
     def test_AB7_commands_change_invalidates_migration_approval(self):
@@ -531,7 +531,7 @@ class P5Rev3Tests(unittest.TestCase):
         result = evaluate_package(
             develop.ref,
             develop,
-            project={"project_contract_generation": "1"},
+            project={"project_contract_generation": "2"},
             distribution=dist,
             applicable_packages=dist.selected_packages(),
         )

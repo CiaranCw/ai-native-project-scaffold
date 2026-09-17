@@ -7,7 +7,7 @@ core:
   understand:
     skill_id: understand
     skill_version: "2.0.0"
-    package_digest: "9e60909a32b5fcd4e46ef782b826d70e54f10611782686c8ace407d8f9c9e7c2"
+    package_digest: "bf9491892bd469b1343b0425764a8515079725d31f33976905f326e3728988c3"
     package_format_version: "1"
   develop:
     skill_id: develop

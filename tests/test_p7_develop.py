@@ -21,6 +21,7 @@ from p7_support import (
     actual_develop_lock_entry,
     bind_develop_lock,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     four_core_lock_skills,
     repair_handoff,
     write_active_host,
@@ -79,6 +80,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D05_active_exact_may_continue(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.extras["execution_gate"], "allow")
@@ -109,6 +111,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D08_normal_task_accepted(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.mode, "normal_task")
@@ -117,6 +120,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D09_repair_accepted(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "repair",
             task_id=TASK_A,
@@ -147,6 +151,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D12_authoritative_task_resolves(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.extras["task"]["record_id"], TASK_A)
@@ -192,6 +197,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D17_new_session_bound_to_task_mode_project(self):
         write_active_host(self.host, name="p7-host")
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         session = result.extras["session"]
         self.assertEqual(session["task_id"], TASK_A)
@@ -207,6 +213,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D18_session_identity_unique(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         first = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         second = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertNotEqual(
@@ -218,6 +225,7 @@ class P7DevelopTests(unittest.TestCase):
         write_active_host(self.host)
         write_task(self.host, TASK_A)
         write_task(self.host, TASK_B, title="Other task")
+        ensure_noscms_accepted_anchor(self.host)
         first = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         reused = develop_engine(self.host).run(
             "normal_task",
@@ -255,6 +263,7 @@ class P7DevelopTests(unittest.TestCase):
             source_areas=["src"],
         )
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -275,6 +284,7 @@ class P7DevelopTests(unittest.TestCase):
             source_areas=["src"],
         )
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -287,6 +297,7 @@ class P7DevelopTests(unittest.TestCase):
     def test_D23_unknown_conflicting_mutation_authority_blocks(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         unknown = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -313,6 +324,7 @@ class P7DevelopTests(unittest.TestCase):
         )
         write_task(self.host, scope={"paths": ["docs/project/testing.md"]})
         write(self.host, "docs/project/testing.md", "human text\n")
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -519,6 +531,7 @@ class P7DevelopTests(unittest.TestCase):
         project["ownership"] = ownership
         project["source_areas"] = ["src"]
         write_yaml_atomic(self.host / ".scaffold/project.yaml", project)
+        ensure_noscms_accepted_anchor(self.host)
 
 
 class P7PresenceTests(unittest.TestCase):

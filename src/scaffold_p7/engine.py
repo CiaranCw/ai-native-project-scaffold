@@ -23,6 +23,7 @@ from scaffold_p6.candidate import observe_candidate, report_usable_for
 from scaffold_p7.develop_authority import (
     bind_open_execution,
     clear_current_execution,
+    editor_blocking_provenance_issues,
     execution_provenance_issues,
     list_canonical_open_sessions,
     load_canonical_open_session,
@@ -94,6 +95,7 @@ from scaffold_p7.tasks import (
     task_complete,
     task_revision,
 )
+from scaffold_p7.unexplained import physical_authority_issues, reconcile_unexplained_drift
 
 
 class DevelopEngine:
@@ -590,6 +592,19 @@ class DevelopEngine:
                     session=session,
                     session_directory=loaded,
                 )
+            reconcile_unexplained_drift(self.root, boundary="seal")
+            physical = physical_authority_issues(self.root)
+            if physical:
+                return self._blocked(
+                    chosen_mode,
+                    physical,
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                    session=session,
+                    session_directory=loaded,
+                )
             pointer_issues = execution_provenance_issues(
                 self.root,
                 task=task,
@@ -619,6 +634,7 @@ class DevelopEngine:
             except (OSError, ValueError, TypeError, UnicodeError):
                 session = None
             if not isinstance(session, dict):
+                reconcile_unexplained_drift(self.root, boundary="abort")
                 clear_current_execution(self.root, session_id=session_id)
                 return self._blocked(
                     chosen_mode,
@@ -627,6 +643,7 @@ class DevelopEngine:
                     candidate=candidate,
                     project=project,
                 )
+            reconcile_unexplained_drift(self.root, boundary="abort")
             if session.get("status") == "OPEN":
                 session = abort_session(directory, session)
             clear_current_execution(self.root, session_id=session_id)
@@ -1200,10 +1217,11 @@ class DevelopEngine:
                     session=bound.session,
                     directory=bound.directory,
                 )
-                if provenance:
+                blocking = editor_blocking_provenance_issues(provenance)
+                if blocking:
                     return self._blocked(
                         mode,
-                        provenance,
+                        blocking,
                         "stop",
                         candidate=candidate,
                         project=project,
@@ -1238,6 +1256,18 @@ class DevelopEngine:
                 session.get("observed_candidate_digest") or candidate.digest
             ),
         )
+        physical = physical_authority_issues(self.root)
+        if physical and has_source_writes:
+            return self._blocked(
+                mode,
+                physical,
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                session=session,
+                session_directory=bound.directory,
+            )
         expected = task_revision(task)
         if expected is None:
             return self._blocked(
@@ -1761,6 +1791,21 @@ class DevelopEngine:
             else:
                 next_route = "human"
 
+        reconcile_unexplained_drift(self.root, boundary="seal")
+        physical = physical_authority_issues(self.root)
+        if physical:
+            return self._blocked(
+                mode,
+                physical,
+                "stop",
+                candidate=after,
+                project=project,
+                task=task,
+                session=session,
+                session_directory=bound.directory,
+                writes_applied=applied,
+                task_mutated=task_mutated,
+            )
         provenance = execution_provenance_issues(
             self.root,
             task=task,
@@ -2282,6 +2327,7 @@ class DevelopEngine:
             and session_directory is not None
             and session.get("status") == "OPEN"
         ):
+            reconcile_unexplained_drift(self.root, boundary="abort")
             session = abort_session(session_directory, session)
             clear_current_execution(
                 self.root, session_id=str(session.get("record_id") or "")

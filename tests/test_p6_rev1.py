@@ -127,7 +127,7 @@ class P6Rev1Tests(unittest.TestCase):
         write_host(
             self.host,
             [passing_profile()],
-            project_contract_generation="2",
+            project_contract_generation="1",
         )
         project_before = file_digest(self.host / ".scaffold/project.yaml")
         lock_before = file_digest(self.host / ".scaffold/skills.lock")

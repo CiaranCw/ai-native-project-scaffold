@@ -48,6 +48,7 @@ from scaffold_p5.migration import (
     bindings_still_hold,
     build_migration_plan,
     complete_migration,
+    consume_compatibility_boundary,
     delete_execution,
     derive_migration_target,
     load_execution,
@@ -650,6 +651,13 @@ class UnderstandEngine:
             expected_active_project_digest=expected_active_digest,
         )
         activate_project(self.root, plan, extra_facts, derived, existing_agents)
+        # The host is now ACTIVE at the adopted generation, so it is already
+        # post-boundary and opens an empty drift register. A freshly adopted
+        # host never receives legacy compatibility amnesty (FND5-E12).
+        extras["compatibility_boundary"] = consume_compatibility_boundary(
+            self.root,
+            classify_inherited=False,
+        )
         mutations = _mutation_observations(self.root, plan, artifacts)
         update_session(
             session_dir,
@@ -1560,6 +1568,23 @@ class UnderstandEngine:
                         "project.yaml became non-executable before migration completion"
                     ],
                     next_route="resolve project host schema/authority",
+                    extras=extras,
+                )
+            consumed = consume_compatibility_boundary(
+                self.root,
+                classify_inherited=True,
+            )
+            extras["compatibility_boundary"] = consumed
+            if not consumed.get("ok"):
+                return self._base(
+                    "compatibility",
+                    "BLOCKED",
+                    mutations="partial",
+                    artifacts=[PROJECT_YAML],
+                    blockers=list(consumed.get("blockers") or [
+                        "compatibility boundary could not be established after migration"
+                    ]),
+                    next_route="resolve durable drift authority before resuming Develop",
                     extras=extras,
                 )
             data["status"] = "COMPLETED"

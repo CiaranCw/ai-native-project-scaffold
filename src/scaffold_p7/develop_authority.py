@@ -26,6 +26,7 @@ from scaffold_p7.session import (
     MUTATION_FAILED,
     MUTATION_OBSERVED,
     MUTATION_PENDING,
+    OPEN_INVENTORY_NAME,
     execution_workspace_digests,
     file_sha256,
     load_files_yaml,
@@ -37,6 +38,7 @@ from scaffold_p7.session import (
     snapshot_open_inventory,
 )
 from scaffold_p7.tasks import resolve_task
+from scaffold_p7.unexplained import physical_authority_issues, reconcile_unexplained_drift
 
 
 EXECUTION_POINTER_REL = ".scaffold/runtime/develop-execution.yaml"
@@ -183,7 +185,11 @@ def bind_open_execution(
     Explicit `develop session` is the canonical rebind. It does not rewrite an
     existing open inventory, so deleting the pointer cannot launder drift.
     """
+    existed = (directory / OPEN_INVENTORY_NAME).is_file()
     snapshot_open_inventory(root, directory, overwrite=False)
+    reconcile_unexplained_drift(
+        root, boundary="resume" if existed else "open"
+    )
     digest = str(opened_candidate_digest or "")
     bind_current_execution(
         root,
@@ -409,6 +415,26 @@ def execution_provenance_issues(
             if marker not in issues:
                 issues.append(marker)
     return issues
+
+
+_EDITOR_NONBLOCKING_PREFIXES = (
+    "unexplained same-scope drift:",
+    "unexplained same-scope deletion:",
+)
+
+
+def editor_blocking_provenance_issues(issues: list[str]) -> list[str]:
+    """Same-scope unexplained drift is durable, not a global Develop lock.
+
+    Out-of-scope drift, out-of-band authorized-path changes, and seal-time
+    unresolved pending rows remain blocking. Mutation of the drifted path
+    itself still requires normal scope/ownership authority.
+    """
+    return [
+        item
+        for item in issues
+        if not item.startswith(_EDITOR_NONBLOCKING_PREFIXES)
+    ]
 
 
 def record_pending_mutation(
@@ -789,13 +815,26 @@ def _authority_from_session(
             mutable_stage_ids=stage_ids,
             directory=directory,
         )
+    physical = physical_authority_issues(host)
+    if physical:
+        return CurrentDevelopAuthority(
+            ok=False,
+            reason=physical[0],
+            task=task,
+            session=session,
+            session_id=session_id,
+            task_id=task_id,
+            mutable_stage_ids=stage_ids,
+            directory=directory,
+        )
     provenance = execution_provenance_issues(
         host, task=task, session=session, directory=directory
     )
-    if require_provenance and provenance:
+    blocking = editor_blocking_provenance_issues(provenance)
+    if require_provenance and blocking:
         return CurrentDevelopAuthority(
             ok=False,
-            reason=provenance[0],
+            reason=blocking[0],
             task=task,
             session=session,
             session_id=session_id,

@@ -58,6 +58,29 @@ def write_active_host(host: Path, **project) -> None:
     bind_develop_lock(host)
 
 
+def ensure_noscms_accepted_anchor(host: Path) -> dict:
+    """Establish existing no-SCM publication/baseline authority. Not a new system."""
+    from scaffold_p5.io_util import read_yaml
+    from scaffold_p5.scm import observe_scm
+    from scaffold_p8.noscms import initialize_noscms_baseline
+
+    if observe_scm(host).kind == "git":
+        return {"ok": True, "skipped": "git"}
+    project_path = host / ".scaffold/project.yaml"
+    if project_path.is_file():
+        payload = read_yaml(project_path)
+        if isinstance(payload, dict):
+            ownership = dict(payload.get("ownership") or {})
+            if ".scaffold/ext/submit/" not in ownership:
+                ownership[".scaffold/ext/submit/"] = "GENERATED"
+                payload["ownership"] = ownership
+                write_yaml_atomic(project_path, payload)
+    result = initialize_noscms_baseline(host)
+    if not result.get("ok"):
+        raise AssertionError(result)
+    return result
+
+
 def write_task(host: Path, task_id: str = TASK_A, **overrides) -> dict:
     data = {
         "record_type": "task_book",

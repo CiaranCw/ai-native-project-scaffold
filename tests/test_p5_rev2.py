@@ -100,7 +100,7 @@ class P5Rev2Tests(unittest.TestCase):
         self.assertEqual(resumed.outcome, "COMPLETED")
         project = read_yaml(self.host / ".scaffold/project.yaml")
         self.assertEqual(project["lifecycle"], "ACTIVE")
-        self.assertEqual(project["project_contract_generation"], "2")
+        self.assertEqual(project["project_contract_generation"], "3")
 
     def test_AA2_validating_divergence_blocks_resume(self):
         plan, _ = self._interrupt()
@@ -164,12 +164,12 @@ class P5Rev2Tests(unittest.TestCase):
     def test_AA6_generation_three_target_is_derived(self):
         adopt(self.host)
         plan = self._plan("3.0.0")
-        self.assertEqual(plan["target_contract_generation"], "3")
+        self.assertEqual(plan["target_contract_generation"], "4")
         self.assertEqual(
             plan["compatibility_binding"][
                 "target_project_contract_generation"
             ],
-            "3",
+            "4",
         )
 
     def test_AA7_requested_target_cannot_override_evidence(self):

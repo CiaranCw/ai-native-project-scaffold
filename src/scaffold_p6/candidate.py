@@ -16,6 +16,8 @@ from scaffold_p6.models import CANDIDATE_SCHEMA_VERSION, CandidateIdentity, TASK
 
 
 RUNTIME_PREFIX = ".scaffold/runtime/"
+SUBMIT_EXT_PREFIX = ".scaffold/ext/submit/"
+DEVELOP_EXT_PREFIX = ".scaffold/ext/develop/"
 BYTECODE_NAMES = {"__pycache__"}
 TASK_NEUTRAL_TASK_KEYS = frozenset(
     {
@@ -117,6 +119,16 @@ def report_usable_for(report: dict[str, Any], candidate: CandidateIdentity) -> b
     return bool(bound) and bound == candidate.digest
 
 
+def is_ext_support_path(rel: str) -> bool:
+    """True for namespaced .scaffold/ext support that is not candidate identity."""
+    normalized = rel.replace("\\", "/")
+    if normalized.startswith(SUBMIT_EXT_PREFIX) or normalized == ".scaffold/ext/submit":
+        return True
+    if normalized.startswith(DEVELOP_EXT_PREFIX) or normalized == ".scaffold/ext/develop":
+        return True
+    return False
+
+
 def excluded_from_candidate(
     rel: str,
     exclusions: list[str],
@@ -126,7 +138,7 @@ def excluded_from_candidate(
     normalized = rel.replace("\\", "/")
     if normalized.startswith(RUNTIME_PREFIX) or normalized == ".scaffold/runtime":
         return True
-    if normalized.startswith(".scaffold/ext/submit/") or normalized == ".scaffold/ext/submit":
+    if is_ext_support_path(normalized):
         return True
     if normalized.endswith(".pyc") or "/__pycache__/" in f"/{normalized}":
         return True

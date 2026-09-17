@@ -251,6 +251,28 @@ durably know that this compatibility initialization has already occurred
 through a durable initialization boundary. Do NOT prescribe that boundary's
 filename, schema layout, or low-level implementation here.
 
+That durable initialization boundary MAY be an existing tracked project
+contract generation advance owned by Understand / project-migration authority.
+Reusing the tracked `project_contract_generation` in `.scaffold/project.yaml`
+is permitted and preferred over inventing a new marker, because it already
+survives ordinary untracked workspace cleanup and exists for Git and no-SCM
+hosts alike. It does NOT create a fourth canonical development record.
+
+Develop reconciliation is a CONSUMER of that boundary. Develop MUST NOT create,
+recreate, or re-grant it, and an ordinary Session boundary MUST NOT consume the
+one-time compatibility initialization.
+
+An established legacy host MAY therefore need to complete one bounded project
+migration before ordinary Develop resumes. That migration remains the existing
+Task-bound approved migration authority. It is not a new Skill, mode, or
+record.
+
+Loss or unreadability of the tracked project authority that carries the
+boundary MUST fail closed. It MUST NOT yield never-initialized, and it MUST NOT
+re-grant the one-time compatibility amnesty. Once the boundary has been
+consumed, the host resolves only to valid initialized authority or to unusable
+authority, never back to never-initialized.
+
 After that initialization boundary exists, UNKNOWN, missing evidence,
 reconciliation uncertainty, or ordinary future physical divergence MUST NOT
 fall back to inherited-at-initialization merely because attribution cannot
@@ -317,6 +339,9 @@ it no longer unexplained. Required safe cases:
 - P7 Develop Session abort / open / provenance notes
 - P8 Submit provenance / `inherited_baseline` classification
 - Project Contract `.scaffold/ext/<namespace>/` reservation (no new root file)
+- Skill Contract migration semantics
+- Project Contract `NEEDS_MIGRATION` semantics
+- `.scaffold/project.yaml` `project_contract_generation`
 
 ## Preserved boundaries
 

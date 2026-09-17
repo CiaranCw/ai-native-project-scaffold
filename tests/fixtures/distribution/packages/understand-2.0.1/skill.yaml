@@ -10,7 +10,7 @@ modes:
   - compatibility
 contracts:
   project_contract_generations:
-    - "1"
+    - "2"
 provides:
   - understand.bootstrap
   - understand.full

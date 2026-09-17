@@ -9,6 +9,7 @@ from scaffold_p5.full import GENERATED_AGENTS
 from scaffold_p5.io_util import write_yaml_atomic
 from scaffold_p5.ownership import P6_DURABLE_EVIDENCE_AREA
 from scaffold_p5.packages import load_package
+from scaffold_p5.schemas import CURRENT_PROJECT_CONTRACT_GENERATION
 from scaffold_p6.engine import TestEngine
 
 
@@ -87,7 +88,7 @@ def valid_baseline(kind: str = "none") -> dict:
 def write_project(host: Path, **overrides) -> None:
     data = {
         "schema_version": "1",
-        "project_contract_generation": "1",
+        "project_contract_generation": CURRENT_PROJECT_CONTRACT_GENERATION,
         "name": host.name,
         "lifecycle": "ACTIVE",
         "maintenance": [],
@@ -104,6 +105,23 @@ def write_project(host: Path, **overrides) -> None:
     write_yaml_atomic(host / ".scaffold/project.yaml", data)
     write_yaml_atomic(host / ".scaffold/modules.yaml", {"schema_version": "1", "modules": []})
     write_lock(host)
+    establish_compatibility_boundary_fixture(host)
+
+
+def establish_compatibility_boundary_fixture(host: Path) -> None:
+    """Mirror what Understand/project-migration does once the generation lands.
+
+    Fixtures bypass real adoption, so without this a current-generation host
+    would read as unusable authority rather than an ordinary initialized host.
+    """
+    from scaffold_p5.io_util import read_yaml
+    from scaffold_p7.unexplained import establish_compatibility_boundary
+
+    project = read_yaml(host / ".scaffold/project.yaml")
+    generation = str((project or {}).get("project_contract_generation") or "")
+    if generation != CURRENT_PROJECT_CONTRACT_GENERATION:
+        return
+    establish_compatibility_boundary(host, classify_inherited=False)
 
 
 def write_modules(host: Path, modules: list[dict]) -> None:
@@ -208,7 +226,9 @@ def write_skill_package(
         "package_format_version": "1",
         "entry": "SKILL.md",
         "modes": ["scoped_verification"],
-        "contracts": {"project_contract_generations": ["1"]},
+        "contracts": {
+            "project_contract_generations": [CURRENT_PROJECT_CONTRACT_GENERATION]
+        },
         "provides": ["test.scoped_verification"],
         "requires": [],
         "runtime": {"language": "python", "min_language_version": "3.10"},

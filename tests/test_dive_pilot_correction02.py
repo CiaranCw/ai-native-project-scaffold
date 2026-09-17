@@ -16,6 +16,7 @@ from p7_support import (
     TASK_A,
     bind_develop_lock,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     ready_lifecycle_opts,
     write_active_host,
     write_task,
@@ -76,6 +77,7 @@ def _verified_develop_host(host: Path, *, failing: bool = False) -> None:
     payload["ownership"] = {**CORE_OWNERSHIP, "src/": "HUMAN_OWNED"}
     payload["source_areas"] = ["src"]
     write_yaml_atomic(host / ".scaffold/project.yaml", payload)
+    ensure_noscms_accepted_anchor(host)
 
 
 def _publish_unit_report(host: Path, **opts):
@@ -337,12 +339,14 @@ class OperationalSessionIdentityTests(unittest.TestCase):
             ],
         )
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
 
     def test_RP2_I02_new_session_uses_stable_nonempty_fallback(self):
         write_active_host(self.host, name="")
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
         name = result.extras["session"]["project_name"]
@@ -364,6 +368,7 @@ class OperationalSessionIdentityTests(unittest.TestCase):
         ]
         write_active_host(self.host, name="", facts=facts)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         develop_engine(self.host).run("normal_task", task_id=TASK_A)
         stored = read_yaml(self.host / ".scaffold/project.yaml")
         self.assertEqual(stored.get("name"), "")
@@ -696,6 +701,7 @@ class PublishedReportConsumptionTests(unittest.TestCase):
                 }
             ],
         )
+        ensure_noscms_accepted_anchor(self.host)
         published_plan = publish_sav_plan(self.host, _inspect_plan())
         self.assertTrue(published_plan.get("ok"), published_plan)
         test = test_engine(self.host).run(

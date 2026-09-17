@@ -11,7 +11,7 @@ contracts:
   records_contract: "1"
   skill_contract: "1"
   project_contract_generations:
-    - "1"
+    - "2"
 provides:
   - test.scoped_verification
 requires: []

@@ -9,6 +9,7 @@ from p6_support import CORE_OWNERSHIP, git
 from p7_support import (
     TASK_A,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     satisfied_decision,
     submit_repair_handoff,
     write_active_host,
@@ -225,6 +226,7 @@ class FA2ReauditTrancheATests(unittest.TestCase):
         )
         write(self.host, "src/app.py", "value = 0\n")
         write_task(self.host, stages=[_two_in_progress()[0]])
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,

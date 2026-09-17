@@ -9,8 +9,13 @@ from typing import Any
 from scaffold_p5.io_util import file_digest, read_yaml
 from scaffold_p5.scm import observe_scm, parse_porcelain_z
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
-from scaffold_p6.candidate import RUNTIME_PREFIX
+from scaffold_p6.candidate import RUNTIME_PREFIX, is_ext_support_path
 from scaffold_p7.schemas import validate_develop_session, validate_files_yaml
+from scaffold_p7.unexplained import (
+    STATE_AUTHORITY_UNUSABLE,
+    inspect_drift_authority,
+    unexplained_matches_current,
+)
 
 from scaffold_p8.noscms import observe_noscms_diff
 from scaffold_p8.models import PROVENANCE_CLASSES, SESSIONS_DIR, TASK_DELTA_ROLES
@@ -51,8 +56,8 @@ def observe_real_diff(root: Path) -> dict[str, Any]:
         entries = [
             row
             for row in entries
-            if not _runtime_path(str(row.get("path") or ""))
-            and not _runtime_path(str(row.get("orig_path") or ""))
+            if not _ignored_submit_path(str(row.get("path") or ""))
+            and not _ignored_submit_path(str(row.get("orig_path") or ""))
         ]
         return {
             "ok": True,
@@ -173,6 +178,10 @@ def _classify_path(
         return "DEVELOP_KNOWN"
 
     if _proven_preexisting(path, observed, sessions):
+        if inspect_drift_authority(root).get("state") == STATE_AUTHORITY_UNUSABLE:
+            return "UNATTRIBUTED"
+        if unexplained_matches_current(root, path):
+            return "UNATTRIBUTED"
         return "PREEXISTING_CHANGE"
     if _proven_post_develop(path, sessions):
         return "POST_DEVELOP_ADDITIONAL"
@@ -185,6 +194,24 @@ def _task_delta_role(
     provenance: str,
     task: dict[str, Any] | None,
 ) -> str:
+    if inspect_drift_authority(root).get("state") == STATE_AUTHORITY_UNUSABLE:
+        if not isinstance(task, dict):
+            return "unrelated_delta"
+        resolution = resolve_task_scope(root, task)
+        if path_in_supporting_scope(path, resolution):
+            return "task_supporting_delta"
+        if path_in_resolved_scope(path, resolution):
+            return "task_product_delta"
+        return "unrelated_delta"
+    if unexplained_matches_current(root, path):
+        if not isinstance(task, dict):
+            return "unrelated_delta"
+        resolution = resolve_task_scope(root, task)
+        if path_in_supporting_scope(path, resolution):
+            return "task_supporting_delta"
+        if path_in_resolved_scope(path, resolution):
+            return "task_product_delta"
+        return "unrelated_delta"
     if provenance in {"PREEXISTING_CHANGE", "MIXED_CHANGE"}:
         return "inherited_baseline"
     if not isinstance(task, dict):
@@ -276,6 +303,10 @@ def _entry_pathspecs(entries: list[dict[str, Any]]) -> list[str]:
     return sorted(paths)
 
 
+def _ignored_submit_path(path: str) -> bool:
+    return bool(path) and (_runtime_path(path) or is_ext_support_path(path))
+
+
 def _runtime_path(path: str) -> bool:
     return bool(
         path
@@ -293,6 +324,8 @@ def _noscms_paths(root: Path) -> list[str]:
             full = Path(dirpath) / name
             rel = str(full.relative_to(root)).replace("\\", "/")
             if rel.startswith(RUNTIME_PREFIX) or rel.endswith(".pyc"):
+                continue
+            if is_ext_support_path(rel):
                 continue
             if rel in CORE_MACHINE_ARTIFACTS:
                 continue

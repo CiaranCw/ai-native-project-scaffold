@@ -12,7 +12,7 @@ from p7_support import TASK_A
 from p8_support import init_submit_git, run_submit, submit_engine, write_ready_task, write_submit_host
 from support import write
 from scaffold_p5.io_util import file_digest, write_yaml_atomic
-from scaffold_p6.candidate import observe_candidate
+from scaffold_p6.candidate import is_ext_support_path, observe_candidate
 from scaffold_p8.cleanup import cleanup_sessions
 from scaffold_p8.delta import _parse_porcelain_z, classify_delta, observe_real_diff
 from scaffold_p8.finalize import finalize_s10
@@ -23,6 +23,17 @@ from scaffold_p8.records import (
     persist_candidate_change,
 )
 from scaffold_p8.schemas import validate_change_record
+
+
+def _product_porcelain(host: Path) -> str:
+    """Raw git porcelain minus namespaced ext support that remains untracked."""
+    lines = []
+    for line in git(host, "status", "--porcelain").splitlines():
+        path = line[3:].replace("\\", "/").strip()
+        if is_ext_support_path(path):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 
 class P8Rev1Tests(unittest.TestCase):
@@ -77,7 +88,7 @@ class P8Rev1Tests(unittest.TestCase):
         result = self._finalize_engine()
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertFalse(self._commit_has("HEAD", "docs/old.md"))
-        self.assertEqual(git(self.host, "status", "--porcelain"), "")
+        self.assertEqual(_product_porcelain(self.host), "")
 
     def test_T06_rename_copy_parsing_has_distinct_paths(self):
         rename, issues = _parse_porcelain_z(b"R  docs/new.md\0docs/old.md\0")
@@ -97,7 +108,7 @@ class P8Rev1Tests(unittest.TestCase):
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertFalse(self._commit_has("HEAD", "docs/old.md"))
         self.assertTrue(self._commit_has("HEAD", "docs/new.md"))
-        self.assertEqual(git(self.host, "status", "--porcelain"), "")
+        self.assertEqual(_product_porcelain(self.host), "")
 
     def test_T08_unrelated_staged_path_is_rejected(self):
         self._git_host()
@@ -139,6 +150,9 @@ class P8Rev1Tests(unittest.TestCase):
         self.assertEqual(delta["classes"]["src/app.py"], "DEVELOP_KNOWN")
 
     def test_T11_preexisting_requires_equal_boundary_state(self):
+        # PREEXISTING_CHANGE is only reachable on a host whose drift authority
+        # is usable, so this needs real project authority rather than a bare dir.
+        write_submit_host(self.host)
         write(self.host, "src/app.py", "preexisting\n")
         state = self._state("src/app.py")
         sessions = [self._session(s0={"src/app.py": state}, s1={"src/app.py": state})]
@@ -262,7 +276,7 @@ class P8Rev1Tests(unittest.TestCase):
         self.assertFalse(
             (self.host / FINALIZATIONS_DIR / f"{record_id}.yaml").exists()
         )
-        self.assertEqual(git(self.host, "status", "--porcelain"), "")
+        self.assertEqual(_product_porcelain(self.host), "")
 
     def test_T26_malformed_support_artifact_is_not_durable(self):
         record_id, _rel = self._persist_record()

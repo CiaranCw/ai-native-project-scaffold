@@ -9,6 +9,7 @@ from p7_support import (
     TASK_A,
     bind_develop_lock,
     develop_engine,
+    ensure_noscms_accepted_anchor,
     ready_lifecycle_opts,
     write_active_host,
     write_task,
@@ -105,6 +106,7 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F04_one_publication_increments_revision_once(self):
         write_active_host(self.host)
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run("normal_task", task_id=TASK_A)
         self.assertEqual(result.outcome, "COMPLETED")
         stored = read_yaml(self._task_path())
@@ -129,6 +131,7 @@ class P7Rev2Tests(unittest.TestCase):
             published = publish_task(path, updated, expected_revision=1)
             self.assertTrue(published.ok)
 
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -156,6 +159,7 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F06_ready_publication_uses_revision_after_prior_publication(self):
         write_active_host(self.host)
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
         seen = {}
 
         def capture():
@@ -178,6 +182,7 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F07_ready_revision_conflict_does_not_handoff(self):
         write_active_host(self.host)
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
 
         def compete():
             path = self._task_path()
@@ -225,6 +230,7 @@ class P7Rev2Tests(unittest.TestCase):
             )
             self.assertTrue(published.ok)
 
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -246,6 +252,7 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F09_ready_transition_changes_candidate_identity(self):
         write_active_host(self.host)
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
         seen = {}
 
         def capture():
@@ -269,6 +276,7 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F10_submit_handoff_uses_fresh_post_ready_candidate(self):
         write_active_host(self.host)
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -285,6 +293,7 @@ class P7Rev2Tests(unittest.TestCase):
     def test_F11_result_extras_describe_post_ready_candidate(self):
         write_active_host(self.host)
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -305,6 +314,7 @@ class P7Rev2Tests(unittest.TestCase):
         write_host(self.host, [(profile, command)])
         bind_develop_lock(self.host)
         write_task(self.host, stages=COMPLETE_STAGES, final_tests=FINAL_PASS)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
