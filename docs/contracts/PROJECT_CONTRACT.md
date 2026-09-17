@@ -614,7 +614,7 @@ Compatibility MUST NOT be assumed silently. Detailed protocol: **P4**.
 | **P5** | Creating/updating these artifacts in practice; Full / Refresh / Compatibility; freshness maintenance |
 | **P6** | `tests.yaml` **execution**, Test Matrix, native tests, Evidence, and owned deterministic materialization/resolution of minimal durable Test support artifacts |
 | **P7** | Task-driven edits; Develop Session |
-| **P8** | Diff-derived consistency and test completeness; `SUBMIT_AUTHORIZED`; final Change Record and Finalization Bundle orchestration; SCM Commit or no-SCM durable finalization; optional Push |
+| **P8** | Diff-derived consistency and test completeness; review-readiness; final Change Record and Finalization Bundle orchestration; optional Git Commit/Push only on current explicit user instruction |
 
 ---
 

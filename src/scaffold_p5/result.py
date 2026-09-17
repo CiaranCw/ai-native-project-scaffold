@@ -85,20 +85,23 @@ def adoption_approval_human_gate(plan: Any) -> dict[str, str]:
             preserved.append(target)
     return {
         "observed": "An Adoption Plan is ready. No project files have been changed.",
-        "why_stopped": "Adoption waits for a human to approve this exact plan.",
+        "why_stopped": (
+            "Preview is not apply. The Agent continues with an exact-plan "
+            "apply request when machine preconditions still hold."
+        ),
         "human_action_required": (
-            "Review and approve this Adoption Plan before any project files are "
-            "changed. A general instruction to adopt or bootstrap the project "
-            "authorizes preview only, not this exact Plan."
+            "No human approval is required for Adoption. Continue bootstrap "
+            "with this exact plan_id/plan_digest to apply. Git Commit and "
+            "Push remain separately forbidden until an explicit user instruction."
             + extra
         ),
         "if_approved": (
-            "The approved plan is applied exactly. If the proposal changes, "
-            "a new plan must be reviewed."
+            "The exact previewed plan is applied. If the proposal or host "
+            "changes materially, preview again before apply."
         ),
         "remains_unchanged": (
-            "This projection grants no source write, Commit, Push, or other "
-            "permission beyond the approved Adoption Plan."
+            "Applying this plan is not Git Commit, Git Push, or permission to "
+            "edit HUMAN_OWNED business source."
         ),
         "plan_id": str(getattr(plan, "plan_id", "") or ""),
         "plan_digest": str(getattr(plan, "digest", "") or ""),

@@ -16,22 +16,22 @@ Structural Review (including lawful first-adoption `skills.lock` creation under
 current Understand authority; ordinary lock edits remain fail-closed), impact-driven Knowledge Consistency (Understand-owned
 candidate-bound Knowledge Assessment; lexical path/basename/module mentions
 are not SATISFIED), Test Completeness,
-the candidate-bound human `SUBMIT_AUTHORIZED` gate (trusted one-shot host
-grant, never a caller dictionary), Repository Sync, the S8
-re-review loop, deterministic S9 Finalization Bundle orchestration, S10 Commit /
-no-SCM durable finalization, optional separately authorized one-shot Push, and
+the candidate-bound S10 apply-intent (`request_s10` / `finalize` for this
+reviewed candidate; not a human grant and not Git Push), Repository Sync, the S8
+re-review loop, deterministic S9 Finalization Bundle orchestration, S10 durable
+finalization, optional separately requested Push, and
 post-success Develop Session cleanup. Test-specific Rules follow a READY Task's
 declared test identifiers even when the caller omits `selected`. Applicable
 Rule prohibitions and conflicts block review; Rules never grant Commit, Push,
-or `SUBMIT_AUTHORIZED`.
+or S10 apply-intent.
 
 Submit MUST NOT invent a Task Book, manufacture `READY_FOR_REVIEW`, treat
-`TEST_PASS` as `TEST_COMPLETE` or `SUBMIT_AUTHORIZED`, silently edit source by
-becoming Develop, reuse C1 authorization for C2, or persist a reusable
+`TEST_PASS` as `TEST_COMPLETE` or S10 apply-intent, silently edit source by
+becoming Develop, reuse C1 review for C2, or persist a reusable
 `submit_authorized` bit. An applicable Task that is not READY MUST NOT be
 treated as no-Task. A caller `{granted: true, candidate_digest: C}` object is
-not Submit or Push authority. Cleanup failure after durable S10 must not
-return top-level COMPLETED; S12 retry does not require another S10 grant.
+not Submit, Commit, or Push authority. Cleanup failure after durable S10 must not
+return top-level COMPLETED; S12 retry does not require another S10 apply.
 
 If substantive implementation repair is required, Submit returns a bounded `submit_to_develop` handoff. When the blocker deterministically maps to current Task Stage authority, the handoff includes nonempty `target_stage_ids` and `next_route` may be `develop.repair`. When mapping is unresolved, Submit does not guess first, last, or all Stages, does not emit an executable `develop.repair` route, and surfaces a human/unresolved blocker. Submit does not write the Task Book. Repair remains Develop `mode=repair`.
 

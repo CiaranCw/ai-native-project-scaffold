@@ -14,8 +14,6 @@ from p6_support import (
 )
 from p7_support import TASK_A, write_task
 from p8_support import (
-    OPERATION_S10,
-    authorized_submit_engine,
     run_submit,
     REPO_SUBMIT,
     bind_submit_lock,
@@ -281,16 +279,17 @@ class P8SubmitTests(unittest.TestCase):
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["completeness"]["zero_required"] or result.extras["test_complete"])
 
-    def test_S20_missing_submit_authorized_blocks_s10(self):
+    def test_S20_default_submit_does_not_run_s10(self):
         write_submit_host(self.host)
         result = submit_engine(self.host).run(
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
-            finalize=True,
         )
-        self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(any("SUBMIT_AUTHORIZED" in item for item in result.blockers))
+        self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        self.assertTrue(result.extras.get("review_ready"))
+        self.assertFalse(result.extras.get("s10_requested"))
+        self.assertFalse(result.extras.get("submit_authorized"))
         self.assertFalse(result.extras["s10"]["durable"])
 
     def test_S21_authorization_bound_to_current_candidate_accepted(self):
@@ -305,22 +304,24 @@ class P8SubmitTests(unittest.TestCase):
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertTrue(result.extras["s10"]["ok"])
 
-    def test_S22_candidate_change_invalidates_authorization(self):
+    def test_S22_candidate_change_immediately_before_s10_blocks(self):
         write_submit_host(self.host)
-        engine, provider = authorized_submit_engine(self.host)
-        c1 = observe_candidate(self.host).digest
-        ref = provider.issue(operation=OPERATION_S10, candidate_digest=c1, attempt_id="A1")
-        write(self.host, "README.md", "# changed after grant\n")
-        result = engine.run(
+
+        def mutate():
+            write(self.host, "README.md", "# changed after review\n")
+
+        result = submit_engine(self.host).run(
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorization_ref=ref,
-            submit_authorization_attempt_id="A1",
+            before_s10=mutate,
         )
         self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(any("C1 authorization is unusable for C2" in item for item in result.blockers))
+        self.assertTrue(
+            any("candidate changed" in item for item in result.blockers),
+            result.blockers,
+        )
 
     def test_S23_authorization_not_manufactured_from_test_pass(self):
         write_submit_host(self.host)
@@ -380,22 +381,17 @@ class P8SubmitTests(unittest.TestCase):
         self.assertFalse(result.extras["submit_authorized"])
         self.assertEqual(result.extras["loop"], "S8→S3/S4/S5/S6")
 
-    def test_S27_c1_authorization_unusable_for_c2(self):
+    def test_S27_current_candidate_is_what_s10_finalizes(self):
         write_submit_host(self.host)
-        engine, provider = authorized_submit_engine(self.host)
-        c1 = observe_candidate(self.host).digest
-        ref = provider.issue(operation=OPERATION_S10, candidate_digest=c1, attempt_id="A1")
         write(self.host, "src/app.py", "value = 3\n")
-        result = engine.run(
+        result = submit_engine(self.host).run(
             task_id=TASK_A,
             invoke_test=True,
             selected=["unit"],
             finalize=True,
-            submit_authorization_ref=ref,
-            submit_authorization_attempt_id="A1",
         )
-        self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(any("C2" in item for item in result.blockers))
+        self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        self.assertTrue(result.extras["s10"]["durable"])
 
     def test_S28_change_record_uses_p3_schema(self):
         write_submit_host(self.host)

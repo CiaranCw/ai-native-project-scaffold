@@ -14,14 +14,11 @@ from p6_support import (
 )
 from p7_support import TASK_A, actual_develop_lock_entry, satisfied_decision, write_task
 from scaffold_p5.packages import load_package
-from scaffold_p8.authorization_provider import (
-    OPERATION_PUSH,
-    OPERATION_S10,
-    EphemeralAuthorizationProvider,
-)
 from scaffold_p8.engine import SubmitEngine
 from support import REPO, write
 
+OPERATION_S10 = "S10"
+OPERATION_PUSH = "PUSH"
 
 REPO_SUBMIT = REPO / "skills" / "submit"
 
@@ -37,42 +34,21 @@ COMPLETE_STAGES = [
 FINAL_PASS: list[dict] = []
 
 
-class TestAuthorizationProvider(EphemeralAuthorizationProvider):
-    """TEST-ONLY issuer. Production Submit never calls issue()."""
+class IgnoredIssuer:
+    """Compatibility stub. Grant refs are not authority and are ignored by Core."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._seq = 0
-
-    def issue(
-        self,
-        *,
-        operation: str,
-        candidate_digest: str,
-        attempt_id: str | None = None,
-    ) -> str:
-        self._seq += 1
-        attempt = attempt_id or f"attempt-{self._seq}"
-        grant_ref = f"grant-{operation}-{self._seq}-{attempt}"
-        self._insert(
-            grant_ref=grant_ref,
-            operation=operation,
-            attempt_id=attempt,
-            candidate_digest=candidate_digest,
-        )
-        return grant_ref
+    def issue(self, **_kwargs) -> str:
+        return "ignored"
 
 
 def submit_engine(
     host: Path,
     package_root: Path | None = None,
-    *,
-    authorization_provider=None,
+    **_ignored,
 ) -> SubmitEngine:
     engine = SubmitEngine(
         host,
         package_root or REPO_SUBMIT,
-        authorization_provider=authorization_provider,
     )
     original = engine.run
 
@@ -92,46 +68,27 @@ def submit_engine(
 def authorized_submit_engine(
     host: Path,
     package_root: Path | None = None,
-) -> tuple[SubmitEngine, TestAuthorizationProvider]:
-    provider = TestAuthorizationProvider()
-    return submit_engine(host, package_root, authorization_provider=provider), provider
+) -> tuple[SubmitEngine, IgnoredIssuer]:
+    return submit_engine(host, package_root), IgnoredIssuer()
 
 
 def finalize_auth(
-    provider: TestAuthorizationProvider,
-    digest: str,
+    provider=None,
+    digest: str = "",
     *,
     push: bool = False,
     attempt_id: str = "A1",
     push_attempt_id: str = "P1",
 ) -> dict:
-    kwargs = {
-        "finalize": True,
-        "submit_authorization_ref": provider.issue(
-            operation=OPERATION_S10,
-            candidate_digest=digest,
-            attempt_id=attempt_id,
-        ),
-        "submit_authorization_attempt_id": attempt_id,
-    }
+    del provider, digest, attempt_id, push_attempt_id
+    kwargs = {"finalize": True}
     if push:
-        kwargs["push_authorization_ref"] = provider.issue(
-            operation=OPERATION_PUSH,
-            candidate_digest=digest,
-            attempt_id=push_attempt_id,
-        )
-        kwargs["push_authorization_attempt_id"] = push_attempt_id
+        kwargs["request_push"] = True
     return kwargs
 
 
 def run_submit(host: Path, package_root: Path | None = None, *, push: bool = False, **opts):
-    """Issue a trusted TEST grant when S10 is requested and no opaque ref is given.
-
-    Caller dictionaries are ignored. Tests that prove those dictionaries are not
-    authority must call submit_engine(...).run(...) directly.
-    """
-    from scaffold_p6.candidate import observe_candidate
-
+    """Submit helper. `finalize` is S10 apply-intent; grants are not used."""
     opts.pop("submit_authorized", None)
     opts.pop("push_authorized", None)
     opts.pop("authorization_provider", None)
@@ -143,35 +100,9 @@ def run_submit(host: Path, package_root: Path | None = None, *, push: bool = Fal
         else:
             bind_ready_completion_authority(host)
     opts["bind_ready_authority"] = bind_ready
-    want = bool(opts.get("finalize") or opts.get("request_s10"))
-    provider = None
-    if want and not isinstance(opts.get("submit_authorization_ref"), str):
-        provider = TestAuthorizationProvider()
-        digest = observe_candidate(host).digest
-        s10_attempt = opts.get("submit_authorization_attempt_id")
-        if not isinstance(s10_attempt, str) or not s10_attempt.strip():
-            s10_attempt = "A1"
-        opts["submit_authorization_attempt_id"] = s10_attempt
-        opts["submit_authorization_ref"] = provider.issue(
-            operation=OPERATION_S10,
-            candidate_digest=digest,
-            attempt_id=s10_attempt,
-        )
-        if push or isinstance(opts.get("push_authorization_ref"), str):
-            if not isinstance(opts.get("push_authorization_ref"), str):
-                push_attempt = opts.get("push_authorization_attempt_id")
-                if not isinstance(push_attempt, str) or not push_attempt.strip():
-                    push_attempt = "P1"
-                opts["push_authorization_attempt_id"] = push_attempt
-                opts["push_authorization_ref"] = provider.issue(
-                    operation=OPERATION_PUSH,
-                    candidate_digest=digest,
-                    attempt_id=push_attempt,
-                )
-        engine = submit_engine(host, package_root, authorization_provider=provider)
-    else:
-        engine = submit_engine(host, package_root)
-    return engine.run(**opts)
+    if push:
+        opts["request_push"] = True
+    return submit_engine(host, package_root).run(**opts)
 
 
 def init_submit_git(host: Path) -> str:

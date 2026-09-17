@@ -15,10 +15,10 @@ third mode or a fifth Skill. Skill results report `skill_id: develop`,
 does not mean implementation ran. Intake can publish bounded canonical Task
 authority, but never a Develop Session, source mutation, Test result, Commit,
 Push, or Submit authorization. Repair is a Develop mode, not a fifth Skill,
-not Test, and not Submit. Approved bounded migration apply is Task-bound
+not Test, and not Submit. Bounded migration apply is Task-bound
 supporting work, not a fifth mode and not Adoption. Full Plan+Task
-application approval is proven before Session/Task mutation. A no-approval
-preview does not advance Task or Session state. Physical `project.yaml`
+machine binding is proven before Session/Task mutation. A preview without that
+binding does not advance Task or Session state. Physical `project.yaml`
 mutation is not Migration completion; post-validation must be `EXACT` or
 `COMPATIBLE`, and that post-state is the current compatibility result.
 Interrupted apply conforms to P5 `RECOVERY_REQUIRED` recovery, not a
@@ -26,7 +26,7 @@ parallel P7 state machine.
 
 Develop owns task-driven implementation, Task Book progress updates, Develop Sessions, normal task execution, Repair, handoff to Test, and the P3 `IN_PROGRESS` → `READY_FOR_REVIEW` transition. Canonical Task Book writes use expected-revision conditional publication. Stage `IN_PROGRESS` → `COMPLETE` and Task READY use FA2-FND-002 candidate-bound Stage/Task Completion Decisions plus current P6 Evidence; `TEST_PASS` alone never causes either transition. A `READY_FOR_REVIEW` Task is reopened only by a current Stage-targeted `submit_to_develop` handoff. Ordinary intake does not silently reopen a Task already in `READY_FOR_REVIEW`. An explicit no-source-write `refresh_ready_authority` may refresh candidate-stale SATISFIED completion decisions from a current published P6 report without reopening the Task.
 
-Develop MUST NOT invent a Task Book from caller prose, treat `TEST_PASS` as `TASK_COMPLETE` or `READY_FOR_REVIEW`, manufacture `SUBMIT_AUTHORIZED`, finalize a Change Record, Commit, Push, or Refresh. Develop does not invent Migration Plans or rewrite `skills.lock`. Fresh persistent Migration application MUST be initiated as Task-bound work only when approval binds that Plan to the current Task identity, revision, and candidate before durable Develop mutation. Title/goal keywords are not that binding. Understand Plan-only approval is not that authority. A preview that only needs approval does not advance Task/Session state. That is not Adoption and not a fifth Skill.
+Develop MUST NOT invent a Task Book from caller prose, treat `TEST_PASS` as `TASK_COMPLETE` or `READY_FOR_REVIEW`, manufacture S10 apply-intent, finalize a Change Record, Commit, Push, or Refresh. Develop does not invent Migration Plans or rewrite `skills.lock`. Fresh persistent Migration application MUST be initiated as Task-bound work only when machine bindings name that Plan plus the current Task identity, revision, and candidate before durable Develop mutation. Title/goal keywords are not that binding. Understand Plan-only preview is not that authority. A preview that still needs exact Plan+Task binding does not advance Task/Session state. That is not Adoption and not a fifth Skill.
 
 ## task_intake prelude
 

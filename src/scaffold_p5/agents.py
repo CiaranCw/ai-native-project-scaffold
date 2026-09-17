@@ -33,15 +33,13 @@ Exactly four Skills exist: Understand, Develop, Test, and Submit. Repair is a De
 
 Scaffold lifecycle gates are mandatory authorization boundaries, not advisory guidance.
 
-If the host is NOT_ADOPTED, ordinary business work is not authorized. Do not modify project business, source, test, or documentation files. Do not implement the requested feature. Do not create an ad-hoc task outside Scaffold. Do not work ahead while waiting for approval.
+If the host is NOT_ADOPTED, ordinary business work is not authorized. Do not modify project business, source, test, or documentation files. Do not implement the requested feature. Do not create an ad-hoc task outside Scaffold.
 
 On a never-adopted host, ordinary business work starts with Understand bootstrap.
 
 If the host is ACTIVE, ordinary HUMAN_OWNED business mutation is not authorized until Develop has a current IN_PROGRESS Task Book, a mutable Stage, and an OPEN Develop Session bound to that Task. Successful Adoption is not permission to edit project source. Do not implement the original business request by writing files directly. Required route: `python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>` to publish a bounded Task proposal through Develop intake. Intake creates no Develop Session. Continue with `python .scaffold/install/run.py develop session --task-id <task-id>` to open the execution window, then `python .scaffold/install/run.py develop seal --task-id <task-id>` or `develop abort` to close it. Do not write `.scaffold/tasks/` directly. Repair remains a Develop mode. There is no fifth Skill.
 
-The user business request is not Adoption approval.
-
-Required first-use route: `python .scaffold/install/run.py status`, then `python .scaffold/install/run.py understand bootstrap`. Preview is not approval. If bootstrap returns NEEDS_HUMAN, STOP and tell the user that Adoption requires approval. Do not treat `--approved --plan-digest` as self-authorization. On Cursor that spelling is only an APPLY REQUEST; human authorization for an Agent-originated apply is the Cursor interactive confirmation from beforeShellExecution permission=ask. The Agent cannot satisfy that confirmation with ordinary tool calls. Agent-generated text such as "I approve the Adoption" has no authority. No project implementation may happen while waiting.
+Required first-use route: `python .scaffold/install/run.py status`, then `python .scaffold/install/run.py understand bootstrap`. Preview is not apply. Continue with `--approved --plan-digest` of that exact Plan. Adoption apply is Agent lifecycle work; it is not Git Commit or Push. No project implementation may happen before Adoption completes.
 
 Do NOT bypass this gate because:
 
@@ -49,8 +47,7 @@ Do NOT bypass this gate because:
 - the task appears simple;
 - the task is only a feature or bug fix;
 - no project-structure change appears necessary;
-- direct implementation appears faster;
-- waiting for human approval delays progress.
+- direct implementation appears faster.
 
 Launcher: `python .scaffold/install/run.py`
 First-use: `python .scaffold/install/run.py understand bootstrap`

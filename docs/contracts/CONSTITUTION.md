@@ -429,7 +429,7 @@ A Test PASS is **TEST_PASS** only for the batch that actually ran. See §9.
 | **TEST_PASS** | A specific executed test batch passed. |
 | **TASK_COMPLETE** | All development stages in the Task Book are done. |
 | **TEST_COMPLETE** | For the **current real submission candidate**: every required test has a terminal recorded result; required-test coverage is complete; and there is no unresolved required-test blocker. |
-| **SUBMIT_AUTHORIZED** | A human has **currently and explicitly** authorized **this reviewed candidate** for Submit-S10 durable submission finalization. On an SCM host where S10 is Commit, this is the required human Commit authorization for that candidate. |
+| **SUBMIT_AUTHORIZED** | Historical name for an Agent-requested S10 apply of **this reviewed candidate**. It is **not** human Git Commit authorization and **not** Git Push authorization. Git Commit and Git Push require a current explicit user instruction at the Agent execution boundary. |
 
 MUST:
 
@@ -439,7 +439,7 @@ TASK_COMPLETE    ≠  TEST_COMPLETE
 TEST_COMPLETE    ≠  SUBMIT_AUTHORIZED
 ```
 
-TEST_COMPLETE is **not** proof of real-world correctness, **not** TASK_COMPLETE, and **not** SUBMIT_AUTHORIZED. Human judgment remains mandatory.
+TEST_COMPLETE is **not** proof of real-world correctness, **not** TASK_COMPLETE, and **not** Git Commit/Push authorization. Human judgment remains mandatory for Git Commit and Git Push.
 
 TEST_COMPLETE MUST NOT become true merely because failing required tests were executed. A required-test failure normally blocks TEST_COMPLETE until the problem is fixed and re-tested. An explicit human-reviewed exception / waiver mechanism, if any, belongs to the later Submit Contract (**P8**). P0 MUST NOT invent that waiver.
 
@@ -477,15 +477,15 @@ Submit MUST NOT trust the previous Agent’s summary. It MUST re-read the real r
 | S3 | Structural Review |
 | S4 | Knowledge Consistency |
 | S5 | Test Completeness |
-| S6 | Human Approval |
+| S6 | Review-readiness / S10 apply-intent |
 | S7 | Repository Sync |
 | S8 | Re-review / Re-test |
 | S9 | Finalize Records |
-| S10 | Commit / Durable Finalization |
+| S10 | Durable Finalization |
 | S11 | Optional Push |
 | S12 | Cleanup |
 
-After S3–S5 pass and before S6 authorization, the pipeline MUST stop at **READY_FOR_HUMAN_APPROVAL**. That is still not authorization to perform S10.
+After S3–S5 pass, default Submit without `request_s10` / `finalize` stops **review-ready**. That stop is not Git Commit and not Git Push. S10 apply-intent is Agent-requested machine work for this reviewed candidate.
 
 ### S3 Structural Review
 
@@ -518,36 +518,34 @@ Executing a failing required test does **not** satisfy TEST_COMPLETE.
 
 Future inputs include Task Book + actual diff + Test Matrix + project testing rules. If the developer extra-edited Save, Save tests remain required even if the Task Book omitted them. The Test Matrix Contract is a later phase. Any waiver mechanism is **P8**.
 
-### S6 Human Submission Gate
+### S6 Review-readiness / S10 apply-intent
 
-Default: `submission authorization = false`.
+Default Submit (no `request_s10` / `finalize`) is **review-ready** for Candidate A. It MUST NOT Git Commit or Git Push.
 
-Human submission authorization is **candidate-bound**.
+S10 apply-intent is **candidate-bound** machine work: it finalizes Scaffold records and, on an SCM host, performs the durable S10 Git Commit of **this reviewed candidate**. That S10 Git Commit is not a standing human grant and is not Git Push.
 
-S3–S5 produce **Candidate A**. Submit MUST stop at READY_FOR_HUMAN_APPROVAL until a developer **currently** and **explicitly** authorizes Candidate A (in substance: “submit now” / “run the submit flow” for **this** reviewed candidate).
+MUST NOT treat a past Commit/Push instruction as a standing grant.
 
-MUST NOT treat a past authorization as a standing grant.
+MUST NOT reuse a Commit/Push instruction from another attempt.
 
-MUST NOT reuse authorization from another Submit attempt.
+MUST NOT infer Git Commit or Git Push from Task state, Submit state, READY_FOR_REVIEW, or tests passing.
 
-MUST NOT let an Agent flip the submit switch for itself.
-
-`SUBMIT_AUTHORIZED` is the current, candidate-bound human authorization for **Submit-S10**. It is the Commit authorization when S10 is realized as an SCM Commit; there is no second foundational `COMMIT_AUTHORIZED` state or gate. Push is separate: it MUST have additional current explicit authorization, MUST NOT be the default, and MUST NOT inherit authorization from `SUBMIT_AUTHORIZED`. Neither permission is a reusable persisted bit.
+Git Commit and Git Push at the **Agent execution boundary** remain the only human-instruction gates. The Agent MUST NOT pass S10 apply-intent unless the current user instruction authorizes Commit, and MUST NOT pass S11 unless the current user instruction authorizes Push. Submit S1–S12 machine gates themselves do not wait for a human Approve click. Push is separate from Commit: it MUST have additional current explicit user instruction, MUST NOT be the default, and MUST NOT inherit authority from S10. Neither instruction is a reusable persisted bit.
 
 ### S7–S8 after sync
 
 Upstream sync MAY merge, rebase, resolve conflicts, or otherwise change the real submission candidate.
 
-If the real submission diff is **unchanged**, the S6 authorization for Candidate A remains valid.
+If the real submission diff is **unchanged**, Candidate A remains the reviewed candidate.
 
 If S7 / S8 changes the real submission candidate:
 
-- Candidate A authorization is **invalidated**
+- Candidate A is **no longer the reviewed candidate**
 - Submit MUST re-diff
 - re-run S3 / S4 / S5 as needed
 - re-test as needed
 - return to **S6**
-- the human MUST explicitly authorize **Candidate B**
+- S10 apply-intent MUST bind **Candidate B**, not Candidate A
 
 Only then may S10 durable finalization occur.
 
@@ -557,7 +555,7 @@ This is a loop, not a thirteenth stage:
 S8 → S3 / S4 / S5 → S6
 ```
 
-Submit MUST NOT durably finalize a changed, un-reviewed, or un-reauthorized candidate. Authorization from an earlier Submit attempt is never reusable.
+Submit MUST NOT durably finalize a changed or un-reviewed candidate. S10 apply-intent from an earlier Submit attempt is never reusable for a later candidate.
 
 The sole S9 exception is the deterministic **Finalization Bundle** defined by
 the Records Contract. Adding that exact bundle does not invalidate the
@@ -608,7 +606,7 @@ Every support artifact in the Finalization Bundle MUST:
 The final support set and its semantic content MUST be deterministic
 consequences of the validated Evidence references and Change Record
 finalization rules. Additional substantive or non-deterministic content is a
-candidate change and requires re-review and current S6 authorization.
+candidate change and requires re-review of the current candidate through S3–S6.
 
 Temporal semantics:
 
@@ -701,9 +699,9 @@ Every temporary state MUST have a lifecycle. Examples: Adoption Session cleaned 
 
 Whether docs are stale MUST be checkable. It MUST NOT depend only on human memory. Submit Knowledge Consistency is the top-level home for this check.
 
-### 12. Human controls submission
+### 12. Human controls Git Commit and Git Push
 
-AI MUST NEVER decide to perform S10 because tests succeeded. `SUBMIT_AUTHORIZED` defaults to false and is candidate-bound. Where S10 is Commit, it is that candidate’s Commit authorization; Push remains separately and currently authorized.
+AI MUST NEVER decide to `git commit` or `git push` because tests succeeded, Submit completed, or the candidate is review-ready. Those actions require a current explicit user instruction. Submit S1-S12 may run autonomously under machine/project authority.
 
 ---
 
@@ -741,8 +739,8 @@ ordinary project
   → READY_FOR_REVIEW
   → Submit
   → real-diff review + structural + knowledge + test-completeness reviews
-  → READY_FOR_HUMAN_APPROVAL
-  → Human Approval (candidate-bound)
+  → review-ready (default stop; no Git Commit / Push)
+  → optional S10 apply-intent (candidate-bound machine finalization)
   → Repository Sync
   → if the candidate changed: S8 → S3/S4/S5 → S6 (new candidate)
   → S9 finalize Change Record + permitted deterministic referenced support
@@ -775,7 +773,7 @@ v2 top level is **not** responsible for:
 - a general IDE
 - a general coding agent
 - autonomously deciding product requirements
-- AI autonomously deciding to submit
+- AI autonomously Git Commit or Git Push without a current explicit user instruction
 - auto merge / push as default behavior
 - unbounded logging of all Agent thought
 - copying all project knowledge into every client config

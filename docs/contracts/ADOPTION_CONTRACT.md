@@ -109,7 +109,7 @@ Ordinary Project
   → B1 Preflight                 (observe only)
   → B2 Read-Only Discovery       (observe only)
   → B3 Adoption Plan
-  → B4 Human Plan Approval       (plan-candidate-bound)
+  → B4 Exact-plan apply           (plan-candidate-bound)
   → B5 Minimal Adoption Apply    (first allowed mutation)
   → B6 Understand Full / Normalize
   → B7 Activation Validation
@@ -318,42 +318,50 @@ The Plan MUST also list:
 
 ---
 
-## 14. B4 — Human Plan Approval
+## 14. B4 — Exact-plan apply
 
-No host mutation in first-time adoption (B5 or B6) MUST start until a human explicitly approves the Plan candidate.
+No host mutation in first-time adoption (B5 or B6) MUST start until an **exact
+Adoption Plan** has been previewed and then applied. Preview is not apply.
 
-Default: **not authorized**.
+Default: **preview only**.
 
-The approved Plan is the **Adoption Mutation Envelope**. Approval authorizes only the mutations in that candidate — through Apply **and** first-adoption Understand Full — until Activate.
-
-The human MUST be able to see: creates, modifications, preservations, client-entry strategies, unknowns, conflicts, dirty-work presence, and remaining blockers.
-
-Approval is **plan-candidate-bound**.
+The applied Plan is the **Adoption Mutation Envelope**. Apply authorizes only
+the mutations in that candidate — through Apply **and** first-adoption
+Understand Full — until Activate.
 
 A general instruction such as “Adopt this project” or “Run Day-1 Bootstrap”
-authorizes the Agent to **enter** the Bootstrap workflow and produce a preview.
-It is **not** approval of an exact Adoption Plan that did not yet exist when
-that instruction was given. Preview MUST stop and surface the exact `plan_id`,
-`plan_digest`, mutation envelope, ownership changes, managed regions, and
-preserved surfaces. Apply MUST wait for explicit human approval of that exact
-Plan. An Agent MUST NOT convert a generated `plan_id` / digest into “human
-approved” merely because the user previously requested adoption.
+authorizes the Agent to **enter** the Bootstrap workflow, produce a preview,
+and then apply that exact Plan when machine/project preconditions still hold.
+It is **not** Auto-Adoption outside this explicit lifecycle route. `--approved
+--plan-digest` is the compatibility spelling of that apply request. It has no
+Git Commit or Git Push meaning.
 
-If the Plan **materially** changes before B8, previous approval is **invalid**. The human MUST approve the new candidate before any mutation that is outside the old envelope.
+If the Plan **materially** changes before B8, the previous apply request is
+**invalid**. The Agent MUST preview and apply the new candidate before any
+mutation that is outside the old envelope.
 
-If the host **materially** changes after B4 and before B8 in a way that invalidates Plan assumptions or the real candidate, approval is **invalid**. Adoption MUST re-discover, re-plan, and re-approve.
+If the host **materially** changes after preview and before B8 in a way that
+invalidates Plan assumptions or the real candidate, apply is **invalid**.
+Adoption MUST re-discover, re-plan, and apply the current Plan.
 
-Observational discoveries that do not change the envelope MUST NOT require re-approval.
+Observational discoveries that do not change the envelope MUST NOT require
+re-preview.
 
 MUST NOT design concrete authorization field names here.
 
-Adoption MUST NOT auto-commit or auto-push. Human Submit authorization is a later, separate Skill.
+Human approval is **not** an Adoption predicate. Core MUST NOT require a
+trusted grant, approval_origin, or human-confirmation perimeter. If machine
+preconditions fail, Adoption MUST stop fail-closed (`BLOCKED` / re-plan), not
+wait for a human Approve click.
+
+Adoption MUST NOT auto-commit or auto-push. Git Commit and Git Push remain
+later, separately instructed actions.
 
 ---
 
 ## 15. B5 — Minimal Apply
 
-After explicit approval, Apply MAY perform only the minimum host-side integration required for Understand Full and later Scaffold operation, and only inside the approved **Adoption Mutation Envelope**.
+After exact-plan apply, Apply MAY perform only the minimum host-side integration required for Understand Full and later Scaffold operation, and only inside the **Adoption Mutation Envelope**.
 
 Apply MUST NOT:
 
@@ -392,14 +400,14 @@ After minimal Apply, control MUST pass to Understand Full. Adoption MUST NOT col
 
 Understand Full later builds project knowledge, module map, commands, testing knowledge, workflow rules, documentation authority, and the normalized project contract. **P5** implements it.
 
-Understand Full MUST NOT bypass Adoption Plan authorization.
+Understand Full MUST NOT bypass Adoption Plan identity and envelope binding.
 
-If B6 discovers that normalization requires a new file, an existing-file modification, a materially different ownership treatment, a different client-entry strategy, or any other material mutation **outside** the approved envelope:
+If B6 discovers that normalization requires a new file, an existing-file modification, a materially different ownership treatment, a different client-entry strategy, or any other material mutation **outside** the current envelope:
 
 1. STOP before applying that new mutation
 2. update / rebuild the Adoption Plan
-3. invalidate the previous approval
-4. obtain explicit human re-approval
+3. invalidate the previous apply request
+4. preview and apply the current Plan
 5. continue only inside the new envelope
 
 ---

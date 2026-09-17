@@ -99,7 +99,11 @@ from scaffold_p7.unexplained import physical_authority_issues, reconcile_unexpla
 
 
 class DevelopEngine:
-    def __init__(self, host_root: str | Path, package_root: str | Path | None = None):
+    def __init__(
+        self,
+        host_root: str | Path,
+        package_root: str | Path | None = None,
+    ):
         self.root = Path(host_root)
         self.package_root = (
             Path(package_root) if package_root else default_develop_package(self.root)
@@ -688,6 +692,10 @@ class DevelopEngine:
 
     def run(self, mode: str = "normal_task", **opts: Any):
         self.d1_currentness = None
+        opts.pop("authorization_provider", None)
+        opts.pop("approval_origin", None)
+        opts.pop("migration_authorization_ref", None)
+        opts.pop("migration_authorization_attempt_id", None)
         if mode not in DEVELOP_MODES:
             return skill_result(
                 skill_id=SKILL_ID,

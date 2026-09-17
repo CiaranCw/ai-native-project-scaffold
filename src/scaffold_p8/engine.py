@@ -19,14 +19,6 @@ from scaffold_p7.unexplained import (
     reconcile_unexplained_drift,
 )
 
-from scaffold_p8.authorization import (
-    authorization_request,
-    caller_attempt_id,
-    consume_trusted_grant,
-    new_authorization_attempt_id,
-    validate_trusted_grant,
-)
-from scaffold_p8.authorization_provider import OPERATION_PUSH, OPERATION_S10
 from scaffold_p8.cleanup import cleanup_sessions
 from scaffold_p8.completeness import evaluate_completeness
 from scaffold_p8.delta import classify_delta, load_sealed_sessions, observe_real_diff
@@ -66,8 +58,6 @@ class SubmitEngine:
         self,
         host_root: str | Path,
         package_root: str | Path | None = None,
-        *,
-        authorization_provider: Any = None,
     ):
         self.root = Path(host_root)
         self.package_root = (
@@ -77,7 +67,6 @@ class SubmitEngine:
         self.preflight: SubmitPreflight | None = None
         self.project_rules: dict[str, Any] | None = None
         self.s7_currentness: dict[str, Any] | None = None
-        self.authorization_provider = authorization_provider
         if self.package_root.exists():
             loaded = load_package(self.package_root)
             self.skill_version = loaded.ref.skill_version
@@ -86,6 +75,11 @@ class SubmitEngine:
         self.project_rules = None
         self.s7_currentness = None
         opts.pop("authorization_provider", None)
+        opts.pop("approval_origin", None)
+        opts.pop("submit_authorization_ref", None)
+        opts.pop("submit_authorization_attempt_id", None)
+        opts.pop("push_authorization_ref", None)
+        opts.pop("push_authorization_attempt_id", None)
         opts.pop("knowledge_assessment", None)
         if opts.get("cleanup_retry") or mode == "cleanup_retry":
             return self._cleanup_retry(mode=mode or "cleanup_retry", **opts)
@@ -499,41 +493,7 @@ class SubmitEngine:
                 extras={"stage": "S6", "scm_observation": reviewed.data},
             )
         reviewed_currentness = observe_upstream_currentness(self.root)
-        s10_attempt = caller_attempt_id(opts.get("submit_authorization_attempt_id"))
-        if not s10_attempt:
-            s10_attempt = new_authorization_attempt_id(OPERATION_S10)
-        s10_ref = opts.get("submit_authorization_ref")
-        s10_grant = validate_trusted_grant(
-            self.authorization_provider,
-            operation=OPERATION_S10,
-            grant_ref=s10_ref,
-            attempt_id=s10_attempt,
-            candidate_digest=reviewed.digest,
-        )
-        authorized = bool(s10_grant.get("ok"))
-        auth_reason = str(s10_grant.get("reason") or "SUBMIT_AUTHORIZED is missing")
-        request = authorization_request(
-            operation=OPERATION_S10,
-            candidate_digest=reviewed.digest,
-            authorization_attempt_id=s10_attempt,
-            task=task,
-        )
-        if want_s10:
-            if not authorized:
-                return self._blocked(
-                    [auth_reason],
-                    "human",
-                    candidate=reviewed,
-                    project=project,
-                    task=task,
-                    extras={
-                        "stage": "S6",
-                        "ready_for_human_approval": True,
-                        "submit_authorized": False,
-                        "authorization_request": request,
-                        "completeness": _public_completeness(completeness),
-                    },
-                )
+        authorized = bool(want_s10)
 
         sync_hook = opts.get("before_s7") or opts.get("repository_sync")
         if callable(sync_hook):
@@ -558,7 +518,7 @@ class SubmitEngine:
             return self._blocked(
                 [
                     "material Repository Sync candidate change invalidates "
-                    "S6 authorization; return to S3"
+                    "the reviewed candidate; return to S3"
                 ],
                 "submit",
                 candidate=synced,
@@ -598,7 +558,7 @@ class SubmitEngine:
             return self._blocked(
                 [
                     "S7 repository basis changed or is not current; "
-                    "S6 authorization is invalidated and review must return to S3"
+                    "the reviewed candidate is invalidated and review must return to S3"
                 ],
                 "submit",
                 candidate=synced,
@@ -630,8 +590,6 @@ class SubmitEngine:
                     )
             elif not completeness.get("test_complete"):
                 next_route = "test.scoped_verification"
-            elif not authorized:
-                next_route = "human"
             extras = self._result_extras(
                 task=task,
                 candidate=synced,
@@ -640,11 +598,15 @@ class SubmitEngine:
                 structural=structural,
                 knowledge=knowledge,
                 completeness=completeness,
-                authorized=authorized,
+                authorized=False,
                 stage="S6",
             )
-            extras["authorization_request"] = request
-            extras["ready_for_human_approval"] = not authorized
+            extras["ready_for_human_approval"] = False
+            extras["review_ready"] = True
+            extras["s10_requested"] = False
+            extras["s10_apply_intent"] = False
+            extras["commit_requires_explicit_user_instruction"] = True
+            extras["push_requires_explicit_user_instruction"] = True
             return skill_result(
                 skill_id=SKILL_ID,
                 skill_version=self.skill_version,
@@ -788,37 +750,8 @@ class SubmitEngine:
                     materialized=materialization is not None,
                 )
                 return self._pre_durable_blocked(
-                    ["SUBMIT_AUTHORIZED is missing"],
-                    "human",
-                    candidate=observe_candidate(self.root),
-                    project=project,
-                    task=task,
-                    record=record,
-                    recovery=recovery,
-                    stage="S10",
-                    extras={
-                        "s10": {"ok": False, "durable": False},
-                        "s10_durable": False,
-                        "durable_finalization_occurred": False,
-                    },
-                )
-            consumed = consume_trusted_grant(
-                self.authorization_provider,
-                operation=OPERATION_S10,
-                grant_ref=s10_ref,
-                attempt_id=s10_attempt,
-                candidate_digest=reviewed.digest,
-            )
-            if not consumed.get("ok"):
-                recovery = self._abort_pre_durable_s9(
-                    test_engine,
-                    record_id=record_id,
-                    change_path=change_path,
-                    materialized=materialization is not None,
-                )
-                return self._pre_durable_blocked(
-                    [str(consumed.get("reason") or "SUBMIT_AUTHORIZED is missing")],
-                    "human",
+                    ["S10 finalization was interrupted before durable apply"],
+                    "stop",
                     candidate=observe_candidate(self.root),
                     project=project,
                     task=task,
@@ -948,43 +881,19 @@ class SubmitEngine:
 
         finally:
             s10_gate.release()
-        push_ref = opts.get("push_authorization_ref")
-        push_requested = bool(push_ref)
-        push_ok = False
-        push_auth_reason = "Push authorization is missing"
-        if push_requested:
-            push_attempt = caller_attempt_id(opts.get("push_authorization_attempt_id"))
-            pushed_grant = consume_trusted_grant(
-                self.authorization_provider,
-                operation=OPERATION_PUSH,
-                grant_ref=push_ref,
-                attempt_id=push_attempt,
-                candidate_digest=reviewed.digest,
-            )
-            push_ok = bool(pushed_grant.get("ok"))
-            push_auth_reason = str(
-                pushed_grant.get("reason") or "Push authorization is missing"
-            )
+        push_requested = bool(opts.get("request_push"))
         before_s11 = opts.get("before_s11")
         if callable(before_s11):
             before_s11()
         push = push_if_authorized(
             self.root,
-            authorized=push_ok,
+            authorized=push_requested,
             scm_kind=s10.get("kind") or "none",
             s10_ok=True,
             expected_commit=s10.get("commit"),
             expected_branch=s10.get("branch"),
             simulate_failure=bool(opts.get("fail_push")),
         )
-        if push_requested and not push_ok:
-            push = {
-                "performed": False,
-                "ok": False,
-                "reason": push_auth_reason,
-                "expected_s10_commit": s10.get("commit") or "",
-                "expected_s10_branch": s10.get("branch") or "",
-            }
         fail_cleanup_sessions = opts.get("fail_cleanup_sessions")
         fail_cleanup = bool(opts.get("fail_cleanup"))
         cleanup_targets = frozen_cleanup_session_ids(record)
@@ -1035,6 +944,11 @@ class SubmitEngine:
                 "submit_authorized": True,
             }
         )
+        extras["review_ready"] = True
+        extras["s10_requested"] = True
+        extras["s10_apply_intent"] = True
+        extras["commit_requires_explicit_user_instruction"] = True
+        extras["push_requires_explicit_user_instruction"] = True
         extras["durable_finalization_occurred"] = True
         durable_artifacts = [change_path.as_posix()] + [
             (self.root / item["path"]).as_posix()

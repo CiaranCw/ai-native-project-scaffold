@@ -1343,15 +1343,27 @@ Candidate files MAY be replaced before successful S10 durable finalization.
 
 ## 27. Human authorization is not a record permission bit
 
-`SUBMIT_AUTHORIZED` requires **current explicit** human authorization of **this** reviewed candidate (Constitution).
+Git Commit and Git Push require a **current explicit user instruction**. That
+instruction is Agent execution policy, not a persisted record bit.
 
-It is the authorization to perform Submit-S10 durable finalization for that candidate. When an SCM host realizes S10 as Commit, `SUBMIT_AUTHORIZED` is the required human Commit authorization; P3 MUST NOT introduce a second `COMMIT_AUTHORIZED` state or gate. Push remains separately and currently authorized.
+P3 MUST NOT create a reusable YAML boolean such as `submit_authorized: true`
+that an Agent can persist and later reuse as authority to `git commit` or
+`git push`.
 
-P3 MUST NOT create a reusable YAML boolean such as `submit_authorized: true` that an Agent can persist and later reuse as authority to perform S10.
+Submit S1-S12 MAY finalize Scaffold records without that instruction. A record
+MAY retain a **non-authoritative historical statement** that Commit or Push
+later occurred; Git remains physical authority for those facts.
 
-A record MAY later retain a **non-authoritative historical statement** that human authorization occurred, if P8 needs an audit note. That statement MUST NEVER grant future authorization.
+The same principle applies to Adoption Plan apply snapshots (P1): persisted
+history ≠ standing permission.
 
-The same principle applies to Adoption Plan approval snapshots (P1): persisted history ≠ active permission.
+Logical commit decomposition for a compound Task is **version-history planning**.
+It is not a fourth canonical development record, not Stage identity, and not
+Git Commit authority. During development the Agent MUST maintain the grouping
+from Task / Stage / Session / Diff / Change Record facts. After the user
+authorizes Commit, Git is physical authority. If the grouping cannot be
+reconstructed uniquely from those facts, the task-completion report carries
+the recommended plan until Commit; that report is not a grant.
 
 ---
 
@@ -1411,7 +1423,7 @@ No Task-side Change Record back-reference is required or permitted as a contract
 
 After successful S10, a historical Task Book MUST already be understandable without `runtime/`. Durable provenance lives in the Change Record as a compact summary. MUST NOT copy Session hashes or patches into the Task Book.
 
-If P8 chooses to remove or compact operational Session IDs, that mutation MUST occur **before** the candidate is finalized through Submit-S3 / S4 / S5 / S6 review and human authorization.
+If P8 chooses to remove or compact operational Session IDs, that mutation MUST occur **before** the candidate is finalized through Submit-S3 / S4 / S5 / S6 review.
 
 Submit-S9 MUST NOT mutate the Task Book merely for:
 
@@ -1419,7 +1431,7 @@ Submit-S9 MUST NOT mutate the Task Book merely for:
 - a Change Record back-reference
 - cosmetic historical cleanup
 
-This preserves candidate-bound human authorization.
+This preserves candidate-bound S6 review of the exact candidate that S10 may later finalize.
 
 P8 implements cleanup and any pre-review compaction. P3 defines the invariant.
 
@@ -1458,7 +1470,7 @@ The Session MAY remember which Plan candidate was **observed as approved**, for 
 
 A persisted local field MUST NOT be treated as permanent human permission.
 
-On resume, P5 MUST revalidate: Plan identity, host state, approval applicability. P1 remains authoritative. If checks fail: re-discover → re-plan → re-approve.
+On resume, P5 MUST revalidate: Plan identity, host state, and whether an exact-plan apply request still matches. P1 remains authoritative. If checks fail: re-discover → re-plan → exact-plan apply.
 
 ### 29.2 Adoption cleanup
 
@@ -1474,7 +1486,7 @@ MUST NOT silently delete an active/recoverable adoption state.
 
 ## Migration Execution operational artifact
 
-A migration MAY use a bounded operational **Migration Execution** artifact/session so P5 can reason about interruption after Apply begins. It is **not** a fourth canonical development record, not a Change Record replacement, and not development handoff history. P5 owns its exact path/schema and runtime use; fresh persistent Migration application MUST be initiated through Task-bound Develop authority without creating a Migration Record. Understand compatibility may plan and route, and MUST resume an already-begun Execution through P5 recovery. It MUST NOT start a fresh persistent apply from Plan-only approval. Develop application of that Plan is Task-bound: the human approval MUST name the exact `plan_id`, `plan_digest`, `task_id`, `task_revision`, and current `candidate_digest`. The Execution MAY record a supporting `develop_binding` for recovery inspection. It remains an operational artifact, not Task Book / Develop Session / Change Record / Migration Record authority. Any representation MUST remain within P2-approved storage/ownership boundaries and survive process restart while recovery may be required.
+A migration MAY use a bounded operational **Migration Execution** artifact/session so P5 can reason about interruption after Apply begins. It is **not** a fourth canonical development record, not a Change Record replacement, and not development handoff history. P5 owns its exact path/schema and runtime use; fresh persistent Migration application MUST be initiated through Task-bound Develop authority without creating a Migration Record. Understand compatibility may plan and route, and MUST resume an already-begun Execution through P5 recovery. It MUST NOT start a fresh persistent apply from Plan-only preview. Develop application of that Plan is Task-bound: the machine binding MUST name the exact `plan_id`, `plan_digest`, `task_id`, `task_revision`, and current `candidate_digest`. Human approval is not one of those predicates. The Execution MAY record a supporting `develop_binding` for recovery inspection. It remains an operational artifact, not Task Book / Develop Session / Change Record / Migration Record authority. Any representation MUST remain within P2-approved storage/ownership boundaries and survive process restart while recovery may be required.
 
 Minimum representation obligations:
 
@@ -1496,7 +1508,7 @@ Frozen execution states:
 
 | State | Representation meaning |
 | --- | --- |
-| **PREPARED** | Execution context is bound to the plan, source state, lock, generations, target intent, and mutation envelope. This does **not** mean approval is currently granted. Before first mutation, bindings MUST be revalidated and valid current Migration Plan Approval MUST exist. |
+| **PREPARED** | Execution context is bound to the plan, source state, lock, generations, target intent, and mutation envelope. This does **not** mean apply is currently authorized. Before first mutation, bindings MUST be revalidated and a valid current Plan+Task+candidate machine binding MUST exist. |
 | **APPLYING** | Persistent mutation has begun. Checkpoints MUST show completed/remaining approved actions and enough observed expected state for deterministic recovery reasoning. Universal rollback is **not** required. |
 | **VALIDATING** | Approved mutation actions ran, but required post-apply validation has not established successful migration. Normal operation MUST NOT treat migration as complete. |
 | **COMPLETED** | Approved actions and required validation succeeded. P5 may then update/clear applicable P2 maintenance/recovery state and clean temporary execution state according to its lifecycle. |
@@ -1515,7 +1527,7 @@ RECOVERY_REQUIRED → ABORTED only after proven safe reversion/neutralization
 
 Recovery MUST observe the actual host, read checkpoints, and compare both against the approved mutation envelope. A provable expected prefix/checkpoint MAY be resumed by P5 according to the approved recovery protocol. Expected Apply actions moving the host through approved checkpoints do **not** by themselves invalidate approval applicability.
 
-Material unexpected divergence, or a changed remaining mutation envelope/assumption, invalidates the prior Migration Plan Approval’s applicability: re-evaluate compatibility, update/regenerate the plan, and obtain human re-approval before further mutation.
+Material unexpected divergence, or a changed remaining mutation envelope/assumption, invalidates the prior Plan applicability: re-evaluate compatibility, update/regenerate the plan, and apply the current Plan under the current Task/candidate machine binding before further mutation.
 
 The artifact MUST be retained while interruption/recovery reasoning is required and cleaned only according to a lifecycle that does not erase uncertain partial mutation. It MUST NOT duplicate the final submitted-change role of Change Record.
 
@@ -1971,7 +1983,7 @@ Contract-level behavior. No fixtures.
 | **M** Human-only; no Task Book and no Session | Submit still starts. TASK_COMPLETE = NOT APPLICABLE. Provenance typically UNATTRIBUTED. MUST NOT synthesize a Task Book. |
 | **N** Task exists but manual/external changes exceed Task scope | Task Book MUST NOT be silently rewritten. Extra paths still count in the real Diff. Provenance classes apply. P8 reviews/resolves. |
 | **O** Several Task Books enter one Submit candidate | One Change Record MAY list multiple `task_book_ids`. Each listed Task Book SHOULD not be reused afterwards once that Change Record is durable. |
-| **P** Submit sync changes the final Diff after a Change Record candidate existed | Candidate A record MUST NOT ship with Candidate B. Regenerate/revalidate Change Record before the next S10 attempt. Prior S6 authorization is invalid (Constitution). |
+| **P** Submit sync changes the final Diff after a Change Record candidate existed | Candidate A record MUST NOT ship with Candidate B. Regenerate/revalidate Change Record before the next S10 attempt. Prior S6 review of Candidate A does not follow Candidate B (Constitution). |
 | **Q** S10 fails after Change Record was finalized | Record remains a **candidate**. MUST NOT be described as submitted history. No SUBMITTED field may lie. Retry the same finalized representation if the reviewed candidate is unchanged; otherwise regenerate. Completed Develop Sessions remain retained. |
 | **R** SCM Commit succeeds but Push is not authorized | Change Record representation in the Commit is durable as-built. Submit-S12 MUST clean corresponding completed SEALED Sessions. Push remains optional and separately authorized. |
 | **S** Successful S10 cleans Develop Sessions | Submit-S12 MUST delete corresponding completed SEALED Session directories. Task Book is not mutated at S9 for compaction. `develop_session_ids` if still present are advisory and not required. Push not required. |
@@ -1979,7 +1991,7 @@ Contract-level behavior. No fixtures.
 | **U** Sensitive local file touched | MUST NOT store a content patch. Metadata/digest only if safe. Not a secrets product. |
 | **V** External CI/human Test Evidence referenced | Opaque `evidence_ref.locator` only. P6 owns schema/resolution. MUST NOT copy CI logs into Task/Change records. |
 | **W** Stale/open Develop Session exists | MUST NOT silently delete OPEN. Stale detector MAY prompt. OPEN/ABORTED Sessions do not complete a DEVELOP_KNOWN chain. |
-| **X** Adoption interrupted and resumed | Session retained (`INTERRUPTED`/`BLOCKED`) with baseline, plan digest, steps, mutations, pending validation. P5 revalidates Plan identity, host, approval. `observed_approved` is not standing permission. |
+| **X** Adoption interrupted and resumed | Session retained (`INTERRUPTED`/`BLOCKED`) with baseline, plan digest, steps, mutations, pending validation. P5 revalidates Plan identity, host, and exact-plan apply request. `observed_approved` is not standing permission. |
 | **Y** Historical Task Book after Session cleanup | Task Book (Session IDs advisory / not required) + Change Record + repository Diff suffice. MUST NOT require `runtime/develop-sessions/` to understand history. MUST NOT depend on an S9 Task Book mutation. |
 | **Z** Two Agents update the same Task Book from revision N | Atomic conditional publication permits at most one N→N+1 result. The other writer gets conflict/block, re-reads, reconciles/re-plans, and retries as a new mutation. Re-read/re-read/write without CAS or serialization is insufficient. |
 | **AA** No SCM project | `baseline.kind: none` or `unavailable`. No invented SHA or Commit. Digests still assist provenance. P8 provides atomic/conflict-detectable durable S10 finalization whose success survives restart; failure does not create submitted history or cleanup Sessions. S11 is N/A. |
@@ -1993,7 +2005,7 @@ Contract-level behavior. No fixtures.
 | **FND-E04** Git S10 Commit omits a tracked support artifact referenced by the Change Record | The exact bundle was not finalized; fail closed. |
 | **FND-E05** S10 fails or is interrupted after support preparation | Support remains candidate-only, is not durable historical Evidence, and requires deterministic cleanup or recovery. |
 | **FND-E06** Runtime Test-run expires after durable S10 | The Change Record's public P6 locator remains resolvable from the minimal durable support representation. |
-| **FND-E07** Finalization Bundle is introduced | Exactly three canonical records, four Skills, S1–S12, one candidate-bound S6 authorization, and the existing ownership modes remain unchanged. |
+| **FND-E07** Finalization Bundle is introduced | Exactly three canonical records, four Skills, S1–S12, one candidate-bound S6 review, and the existing ownership modes remain unchanged. |
 | **FND2-E01** Normal completion on candidate C | Current authoritative basis plus satisfied required Stage Test Evidence permits P7 to publish `IN_PROGRESS` → `COMPLETE` only with a `SATISFIED` decision for C through Task CAS. |
 | **FND2-E02** Test passes while Stage acceptance is unknown | `TEST_PASS` is not acceptance; decision remains `UNKNOWN` and the Stage does not become `COMPLETE`. |
 | **FND2-E03** Acceptance appears satisfied but a required Test fails | Required `FAIL` prevents Stage completion even when the completion decision is `SATISFIED`. |

@@ -763,9 +763,10 @@ A migration path MUST be:
 - capable of reporting intended persistent mutations
 - blocked if prerequisites are unknown
 
-Actual host mutation requires **explicit human approval of the migration plan** before application.
+Actual host mutation requires **Task-bound Develop application of the
+current Migration Plan**. Human approval is not a Migration predicate.
 
-**Migration Plan Approval** is bound to:
+**Migration Plan binding** is bound to:
 
 - the specific migration plan identity / content
 - source host Project Contract / Scaffold state
@@ -784,24 +785,23 @@ If **before the first migration mutation** any of the following materially chang
 - source / target contract assumptions
 - the migration mutation envelope
 
-then previous Migration Plan Approval is **invalid**.
+then previous Migration Plan binding is **invalid**.
 
 Required flow:
 
 ```text
 re-evaluate compatibility
   → update / regenerate migration plan
-  → explicit human re-approval
-  → apply later in P5 Understand Compatibility
+  → Task-bound Develop apply
 ```
 
-Pure observational information that does **not** alter plan applicability or the mutation envelope MUST NOT automatically require re-approval.
+Pure observational information that does **not** alter plan applicability or the mutation envelope MUST NOT automatically require re-bind.
 
-Migration Plan Approval is **not** P8 `SUBMIT_AUTHORIZED`. Persistent migration changes still require normal Submit and candidate-bound S10 authorization before durable submission finalization.
+Migration Plan binding is **not** Git Commit or Git Push. Persistent migration changes still require normal Submit before review, and a later explicit user instruction before Commit/Push.
 
 ### 25.2 Migration execution and interruption
 
-P5 MUST execute an approved migration through this minimal lifecycle:
+P5 MUST execute a bound migration through this minimal lifecycle:
 
 ```text
 PREPARED → APPLYING → VALIDATING → COMPLETED
@@ -951,7 +951,7 @@ Selected Distribution Release pinned Understand
 
 The intended `develop`, `test`, and `submit` lock entries MUST come from the same coherent Selected Distribution Release/core-package set. The Plan MUST NOT combine a release-pinned Understand with a different actual bootstrap Understand or a mixed-release initial package set.
 
-The Plan remains subject to existing P1 Human Plan Approval. No host metadata or initial lock may be created before P1’s approved mutation stage merely to satisfy preflight.
+The Plan remains subject to existing P1 exact-plan apply. No host metadata or initial lock may be created before P1’s apply mutation stage merely to satisfy preflight.
 
 The initial `skills.lock` MUST contain exact expected versions for **all four** core Skills (`understand`, `develop`, `test`, `submit`) derived from the one coherent Selected Distribution Release/core-package set used for Adoption. Its expected Understand identity/version MUST equal both the release-pinned and actual resolved bootstrap Understand identity/version. Executing only Understand during bootstrap does not permit an Understand-only lock. Mixed-release package sets, version ranges, machine-local paths, secrets, and permission bits remain forbidden.
 
@@ -1008,7 +1008,7 @@ Before a complete authoritative initial `skills.lock` exists, the same revalidat
 - the host is in the current initial Adoption execution/recovery path, not a completed `ACTIVE` host
 - a recoverable current Adoption Session exists and identifies the applicable Adoption Plan
 - the Plan identity/content is recoverable
-- P1 revalidation establishes that the Plan had valid Human Plan Approval and that approval remains applicable; a persisted observed-approval field alone is not permission
+- P1 revalidation establishes that the Plan is still the exact apply candidate and that machine preconditions still hold; a persisted observed-approval field alone is not permission
 - the Plan still binds the exact Selected Distribution Release, exact release-pinned Understand, coherent exact four-Skill core set, exact intended initial `skills.lock`, target contract intent as applicable, and approved mutation envelope
 - observed durable host state is a provable expected prefix/checkpoint of that envelope, or another state P1 recovery can safely reason about without changing approved intent
 - the exact Selected Distribution Release and pinned package identities remain resolvable
@@ -1123,6 +1123,26 @@ Canonical authority is the **Scaffold Distribution package**. Clients are consum
 Claude-specific, Cursor-specific, or Codex-specific copies MUST NOT become independent Skill authorities.
 
 `skills.lock` targets canonical packages, **not** client adapter versions. One project Skill expectation remains client-neutral.
+
+### 30.1 Human authority is Git Commit and Git Push only
+
+A client's UX — a permission prompt, a plan review pane, a confirmation dialog —
+is **not** Scaffold authority.
+
+The only human-instruction gates are **Git Commit** and **Git Push**. They
+require a current explicit user instruction at the Agent execution boundary.
+They MUST NOT be inferred from Task state, Submit state, READY_FOR_REVIEW,
+tests passing, approval files, chat history, or standing permission.
+
+Adoption, Migration, Test, Evidence, Submit S1-S12, Change Record production,
+and review-readiness determination are Agent-autonomous lifecycle operations
+subject to machine/project authority (plan identity, Task/Stage/Session binding,
+candidate currentness, ownership, mutation envelope, evidence binding). They
+MUST NOT wait for an intermediate human Approve click.
+
+Core MUST NOT implement a trusted human-confirmation perimeter, grant issuer,
+or approval_origin for those lifecycle operations. Missing client broker
+support MUST NOT block them.
 
 ---
 

@@ -3,8 +3,9 @@
 Not Adoption. Not a fourth canonical record. Not a second Migration state
 machine. Understand/P5 owns evaluation, Plan construction, Execution
 lifecycle, checkpoints, recovery, and post-migration validation. Develop
-may apply an already-approved Plan only when the human approval binds that
-exact Plan to the current Task identity/revision/candidate.
+may apply a current Plan only when machine bindings hold: exact Plan
+identity plus current Task identity/revision/candidate. Human approval is
+not one of those predicates.
 """
 
 from __future__ import annotations
@@ -69,8 +70,7 @@ def prepare_task_bound_migration_application(
             "task_id": task_id,
             "task_revision": task_revision,
             "candidate_digest": candidate_digest,
-            "required_approval_fields": [
-                "approved",
+            "required_binding_fields": [
                 "plan_id",
                 "plan_digest",
                 "task_id",
@@ -121,51 +121,40 @@ def prepare_task_bound_migration_application(
             ok=False,
             outcome="BLOCKED",
             blockers=[
-                "approved migration apply requires current Task identity, "
+                "migration apply requires current Task identity, "
                 "Task revision, and candidate digest"
             ],
             extras=extras,
-            route="human",
+            route="develop",
             plan=plan,
         )
-    if not approval or not approval.get("approved"):
-        extras["human_action"] = {
-            "observed": (
-                "A bounded Migration Plan is ready. No durable project-local "
-                "state has been changed."
-            ),
-            "why_stopped": "Migration waits for current digest-bound human approval.",
-            "human_action_required": (
-                "Review and approve this exact Migration Plan for this exact "
-                "Task identity, Task revision, and candidate before Develop "
-                "may mutate Task Book, Session, or project.yaml. Task "
-                "title/goal keywords are not authority."
-            ),
-        }
-        return MigrationRun(
-            ok=False,
-            outcome="NEEDS_HUMAN",
-            blockers=["Migration Plan Approval is required and is not SUBMIT_AUTHORIZED"],
-            extras=extras,
-            route="human",
-            plan=plan,
-        )
-    binding_issues = task_application_binding_issues(
-        approval,
-        task_id=str(task_id),
-        task_revision=int(task_revision),
-        candidate_digest=str(candidate_digest),
-    )
-    plan_issues = plan_application_issues(plan, approval)
-    if binding_issues or plan_issues or not application_approval_matches(
+    selector = _machine_application_selector(
         plan,
         approval,
         task_id=str(task_id),
         task_revision=int(task_revision),
         candidate_digest=str(candidate_digest),
+    )
+    binding_issues = task_application_binding_issues(
+        selector,
+        task_id=str(task_id),
+        task_revision=int(task_revision),
+        candidate_digest=str(candidate_digest),
+    )
+    plan_issues = plan_application_issues(plan, selector)
+    if binding_issues or plan_issues or not application_approval_matches(
+        plan,
+        selector,
+        task_id=str(task_id),
+        task_revision=int(task_revision),
+        candidate_digest=str(candidate_digest),
     ):
+        preview = not any(
+            selector.get(key) not in (None, "")
+            for key in ("plan_id", "plan_digest", "digest", "task_id", "candidate_digest")
+        ) and selector.get("task_revision") in (None, "")
         stale = (
-            str(approval.get("task_id") or "") == str(task_id)
+            str(selector.get("task_id") or "") == str(task_id)
             and not plan_issues
             and any("stale" in item for item in binding_issues)
         )
@@ -176,25 +165,29 @@ def prepare_task_bound_migration_application(
                 "state has been changed."
             ),
             "why_stopped": (
-                "Migration application approval is not bound to this Task, "
-                "revision, candidate, and Plan digest."
+                "Preview is not apply. Migration apply requires the exact "
+                "current Plan identity bound to this Task, revision, and "
+                "candidate digest."
             ),
             "human_action_required": (
-                "Re-review and re-approve the current Plan for the current "
-                "Task identity/revision. An unrelated Task cannot carry this "
-                "approval. Title/goal text does not create authority."
+                "Continue with the current Plan+Task+candidate machine "
+                "binding. An unrelated Task cannot carry this binding. "
+                "Title/goal text does not create authority. Git Commit and "
+                "Push remain separately forbidden."
             ),
         }
+        extras["preview_is_not_apply"] = True
+        extras["is_not_human_approval"] = True
         return MigrationRun(
             ok=False,
-            outcome="NEEDS_HUMAN" if stale else "BLOCKED",
+            outcome="NEEDS_HUMAN" if preview or stale else "BLOCKED",
             blockers=issues
             or [
-                "Migration application approval does not match the current "
-                "Plan and Task binding"
+                "exact Migration Plan apply request is required; "
+                "preview is not apply and generated Plan is not permission"
             ],
             extras=extras,
-            route="human",
+            route="develop",
             plan=plan,
         )
     extras["approved_plan_id"] = plan.get("plan_id")
@@ -223,7 +216,7 @@ def execute_task_bound_migration(
     candidate_digest: str | None = None,
     prepared_plan: dict[str, Any] | None = None,
 ) -> MigrationRun:
-    """Apply an already-prepared approved Plan via canonical P5 authority."""
+    """Apply an already-prepared Plan via canonical P5 authority."""
     if prepared_plan is None:
         prepared = prepare_task_bound_migration_application(
             root,
@@ -268,16 +261,25 @@ def execute_task_bound_migration(
             ok=False,
             outcome="BLOCKED",
             blockers=[
-                "current Migration Plan identity differs from the approved Plan; "
+                "current Migration Plan identity differs from the prepared Plan; "
                 "silent plan substitution is not permitted"
             ],
             extras=extras,
-            route="human",
+            route="develop",
             plan=prepared_plan,
         )
     extras["applied_plan_id"] = current.get("plan_id")
     extras["applied_plan_digest"] = current.get("digest")
     extras["plan_identity_held"] = True
+    extras["apply_request"] = {
+        "plan_id": current.get("plan_id"),
+        "plan_digest": current.get("digest"),
+        "task_id": task_id,
+        "task_revision": task_revision,
+        "candidate_digest": candidate_digest,
+        "is_not_human_approval": True,
+        "is_not_commit_or_push": True,
+    }
     develop_binding = normalize_develop_binding(
         {
             "task_id": task_id,
@@ -422,6 +424,33 @@ def _current_plan_context(
         }
         return None, extras, [reason], "human", "NEEDS_HUMAN"
     return plan, extras, [], "caller", "PREPARED"
+
+
+def _machine_application_selector(
+    plan: dict[str, Any],
+    approval: dict[str, Any] | None,
+    *,
+    task_id: str,
+    task_revision: int,
+    candidate_digest: str,
+) -> dict[str, Any]:
+    """Plan/Task/candidate selector. The `approved` flag is not human authority.
+
+    Missing identity is preview, not Auto-Migration. A complete machine
+    selector may set `approved` only as the compatibility spelling of
+    "apply this exact Plan+Task+candidate binding".
+    """
+    del plan, task_id, task_revision, candidate_digest
+    claimed = approval if isinstance(approval, dict) else {}
+    has_identity = any(
+        claimed.get(key) not in (None, "")
+        for key in ("plan_id", "plan_digest", "digest", "task_id", "candidate_digest")
+    ) or claimed.get("task_revision") not in (None, "")
+    if not has_identity:
+        return dict(claimed)
+    selector = dict(claimed)
+    selector["approved"] = True
+    return selector
 
 
 def _execution_develop_binding(snapshot) -> dict[str, Any] | None:

@@ -43,11 +43,11 @@ from scaffold_p5 import yaml_lite
 EXPECTED_PACKAGES = {
     "understand": (
         "2.1.0",
-        "0f04f61cd1de48846e8619a2e05d75f4f06479a8576c03dd924d462c9b0283d8",
+        "c31cecf908ca1fe03d1ee6eb7940227207f6052ae8436f4b1b39f012f3ea3919",
     ),
     "develop": (
         "2.1.0",
-        "0a35bd95894e3baffcee802171b08759db3d00eb60a33db8028784fe6ec9583c",
+        "b3899647323b0f8b3d1e0a314b7ca6c63a25dd108690ab6293749ede5fcf7f9d",
     ),
     "test": (
         "2.0.1",
@@ -55,7 +55,7 @@ EXPECTED_PACKAGES = {
     ),
     "submit": (
         "2.1.0",
-        "672c6ea522792b4cec1e57b9c32c44b3af165519fa905b388e7aa4938e0452ef",
+        "997cb2dd0273a2ef1625c735bd395b5f6b21e27047298ab2a1f167df73f94f06",
     ),
 }
 

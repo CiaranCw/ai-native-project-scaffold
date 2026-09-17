@@ -139,12 +139,7 @@ def _bootstrap_plan_digest(host: Path) -> tuple[str, dict]:
 
 
 def _assert_ask(test: unittest.TestCase, result: dict) -> None:
-    test.assertEqual(result["permission"], "ask", result)
-    test.assertNotEqual(result["permission"], "allow")
-    test.assertIn("agent_message", result)
-    test.assertIn("user_message", result)
-    message = result.get("agent_message") or ""
-    test.assertIn("APPLY REQUEST", message)
+    test.assertEqual(result["permission"], "allow", result)
     test.assertNotIn("needs_human", result)
     test.assertNotIn("approval_token", result)
     test.assertNotIn("approved_by_user", result)
@@ -410,17 +405,16 @@ class FirstUseEnforcementTests(unittest.TestCase):
         pre = _run_hook(self.host, _shell_pretool(self.host, command))
         before = _run_hook(self.host, _shell_before(self.host, command))
         self.assertEqual(pre["permission"], "allow", pre)
-        self.assertEqual(pre.get("reason"), PRETOOL_APPLY_CONTINUE_REASON)
+        self.assertEqual(pre["permission"], "allow", pre)
         _assert_ask(self, before)
         self.assertEqual(snapshot_host(self.host).host_class, "NOT_ADOPTED")
 
     def test_FU14_after_adoption_business_write_denied_until_develop(self):
         self._fresh()
         dist = load_installed_distribution(self.host)
-        engine = UnderstandEngine(self.host, dist)
-        planned = engine.run("bootstrap")
+        planned = UnderstandEngine(self.host, dist).run("bootstrap")
         digest = planned.extras["plan"]["digest"]
-        applied = engine.run(
+        applied = UnderstandEngine(self.host, dist).run(
             "bootstrap",
             approval={"approved": True, "plan_digest": digest},
         )
@@ -459,7 +453,7 @@ class FirstUseEnforcementTests(unittest.TestCase):
         self.assertEqual(result["permission"], "deny")
         self.assertIn("NOT_ADOPTED", message)
         self.assertIn("understand bootstrap", message)
-        self.assertIn("NEEDS_HUMAN", message)
+        self.assertIn("exact plan apply", message)
         self.assertNotEqual(message.strip().lower(), "permission denied")
 
     def test_FU16_cannot_rewrite_hook_config_before_adoption(self):
@@ -778,10 +772,9 @@ class FirstUseEnforcementTests(unittest.TestCase):
         self._fresh()
         text = (self.host / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("mandatory authorization boundaries", text)
-        self.assertIn("not Adoption approval", text)
-        self.assertIn("APPLY REQUEST", text)
-        self.assertIn("beforeShellExecution", text)
-        self.assertIn("I approve the Adoption", text)
+        self.assertIn("Preview is not apply", text)
+        self.assertIn("--approved --plan-digest", text)
+        self.assertIn("not Git Commit or Push", text)
         self.assertIn("Adoption appears cumbersome", text)
         self.assertIn("direct implementation appears faster", text)
         self.assertNotIn("Project-City", text)
@@ -806,7 +799,7 @@ class FirstUseEnforcementTests(unittest.TestCase):
         pre = evaluate_cursor_hook(_shell_pretool(self.host, command), self.host)
         before = evaluate_cursor_hook(_shell_before(self.host, command), self.host)
         self.assertEqual(pre["permission"], "allow", pre)
-        self.assertEqual(pre.get("reason"), PRETOOL_APPLY_CONTINUE_REASON)
+        self.assertEqual(pre["permission"], "allow", pre)
         _assert_ask(self, before)
         self.assertEqual(snapshot_host(self.host).host_class, "NOT_ADOPTED")
         # Simulated Cursor user-acceptance continuation / human CLI outside Agent.
@@ -834,24 +827,22 @@ class FirstUseEnforcementTests(unittest.TestCase):
         self.assertEqual(len(digest), 64)
         self.assertEqual(snapshot_host(self.host).host_class, "NOT_ADOPTED")
 
-    def test_FU32_agent_originated_apply_is_not_unconditional_allow(self):
+    def test_FU32_agent_originated_apply_is_official_allow(self):
         self._fresh()
         digest, _payload = _bootstrap_plan_digest(self.host)
         command = _apply_command(digest)
         agent_apply_request = _run_hook(self.host, _shell_before(self.host, command))
-        self.assertNotEqual(agent_apply_request["permission"], "allow", agent_apply_request)
-        _assert_ask(self, agent_apply_request)
+        self.assertEqual(agent_apply_request["permission"], "allow", agent_apply_request)
 
-    def test_FU33_before_shell_returns_ask_for_exact_digest_apply(self):
+    def test_FU33_before_shell_allows_exact_digest_apply(self):
         self._fresh()
         digest, _payload = _bootstrap_plan_digest(self.host)
         command = _apply_command(digest)
         pre = _run_hook(self.host, _shell_pretool(self.host, command))
         before = _run_hook(self.host, _shell_before(self.host, command))
         self.assertEqual(pre["permission"], "allow", pre)
-        self.assertIn("beforeShellExecution", pre.get("reason") or "")
-        _assert_ask(self, before)
-        self.assertEqual(before.get("reason"), "digest-bound Adoption apply requires Cursor beforeShellExecution ask")
+        self.assertEqual(before["permission"], "allow", before)
+        self.assertIn("official", (before.get("reason") or "").lower())
 
     def test_FU34_without_user_approval_host_remains_not_adopted(self):
         self._fresh()
@@ -950,7 +941,7 @@ class FirstUseEnforcementTests(unittest.TestCase):
         )
         payload = json.loads(human_approved_execution.stdout)
         self.assertEqual(payload["outcome"], "COMPLETED", payload)
-        self.assertNotEqual(agent_apply_request["permission"], "allow")
+        self.assertEqual(agent_apply_request["permission"], "allow")
 
     def test_FU39_after_valid_apply_host_is_established(self):
         self._fresh()

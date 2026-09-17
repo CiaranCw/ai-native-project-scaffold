@@ -72,11 +72,19 @@ from scaffold_p5.understanding import persist_project_understanding
 
 
 class UnderstandEngine:
-    def __init__(self, host_root: str | Path, distribution: Distribution):
+    def __init__(
+        self,
+        host_root: str | Path,
+        distribution: Distribution,
+    ):
         self.root = Path(host_root)
         self.distribution = distribution
 
     def run(self, mode: str, **opts: Any):
+        opts.pop("authorization_provider", None)
+        opts.pop("approval_origin", None)
+        opts.pop("adoption_authorization_ref", None)
+        opts.pop("adoption_authorization_attempt_id", None)
         actual = self.distribution.actual_understand
         if mode not in UNDERSTAND_MODES:
             return skill_result(
@@ -167,7 +175,7 @@ class UnderstandEngine:
                 baseline=_baseline(snapshot),
                 blockers=preflight.blockers,
                 next_route=(
-                    "re-discover / re-plan / P1 human re-approval"
+                    "re-discover / re-plan / exact-plan apply"
                     if snapshot.host_class == "INTERRUPTED_INITIAL_ADOPTION"
                     else "resolve release/package identity"
                 ),
@@ -195,15 +203,17 @@ class UnderstandEngine:
         extras["human_gate"] = adoption_approval_human_gate(plan)
         extras["preview_is_not_approval"] = True
         extras["generic_adoption_intent_is_not_plan_approval"] = True
+        extras["exact_plan_apply_required"] = True
         extras["exact_plan_approval_required"] = True
-        if not approval_matches(plan, opts.get("approval")):
+        authority = self._adoption_apply_requested(plan, opts, extras)
+        if not authority["ok"]:
             return self._base(
                 "bootstrap",
                 "NEEDS_HUMAN",
                 baseline=plan.baseline,
                 mutations="none",
-                blockers=["B4 Human Plan Approval is required; generated Plan is not permission"],
-                next_route="human review of Adoption Plan",
+                blockers=[authority["reason"]],
+                next_route="understand.bootstrap apply of this exact plan",
                 evidence=["B1/B2 read-only; no persistent host mutation"],
                 extras=extras,
             )
@@ -213,8 +223,8 @@ class UnderstandEngine:
                 "NEEDS_HUMAN",
                 baseline=plan.baseline,
                 mutations="none",
-                blockers=["approved Plan is materially stale versus current host"],
-                next_route="re-discover / re-plan / re-approve",
+                blockers=["apply request Plan is materially stale versus current host"],
+                next_route="re-discover / re-plan / exact-plan apply",
                 extras=extras,
             )
         return self._apply_adoption(plan, extra_facts, opts, extras, resume_dir=None)
@@ -235,15 +245,20 @@ class UnderstandEngine:
         extras["human_gate"] = adoption_approval_human_gate(plan)
         extras["preview_is_not_approval"] = True
         extras["generic_adoption_intent_is_not_plan_approval"] = True
+        extras["exact_plan_apply_required"] = True
         extras["exact_plan_approval_required"] = True
-        if not approval_matches(plan, opts.get("approval")):
+        authority = self._adoption_apply_requested(plan, opts, extras)
+        if not authority["ok"]:
             return self._base(
                 "bootstrap",
                 "NEEDS_HUMAN",
                 baseline=plan.baseline,
                 mutations="none",
-                blockers=["persisted observed_approved is not standing permission; re-supply digest-bound approval"],
-                next_route="revalidate Plan approval",
+                blockers=[
+                    "persisted observed_approved is not standing permission; "
+                    + authority["reason"]
+                ],
+                next_route="understand.bootstrap apply of this exact plan",
                 extras=extras,
             )
         session_data = read_yaml(preflight.recovery_session_path)
@@ -257,9 +272,9 @@ class UnderstandEngine:
             return self._base(
                 "bootstrap",
                 "NEEDS_HUMAN",
-                blockers=["host diverged from approved envelope; re-plan required"]
+                blockers=["host diverged from apply envelope; re-plan required"]
                 + divergence,
-                next_route="re-discover / re-plan / P1 human re-approval",
+                next_route="re-discover / re-plan / exact-plan apply",
                 extras=extras,
             )
         session_dir = P(preflight.recovery_session_path).parent
@@ -327,19 +342,20 @@ class UnderstandEngine:
         extras["human_gate"] = adoption_approval_human_gate(replacement)
         extras["preview_is_not_approval"] = True
         extras["generic_adoption_intent_is_not_plan_approval"] = True
+        extras["exact_plan_apply_required"] = True
         extras["exact_plan_approval_required"] = True
         extras["replaces_plan"] = old.plan_id
         extras["authority"] = None
-        if not approval_matches(replacement, opts.get("approval")):
+        if not self._adoption_apply_requested(replacement, opts, extras)["ok"]:
             return self._base(
                 "bootstrap",
                 "NEEDS_HUMAN",
                 baseline=replacement.baseline,
                 mutations="none",
                 blockers=[
-                    "replacement Adoption Plan requires new P1 Human Plan Approval"
+                    "replacement Adoption Plan requires a new exact-plan apply request"
                 ],
-                next_route="review replacement Plan and re-run with its digest-bound approval",
+                next_route="understand.bootstrap apply of the replacement plan",
                 extras=extras,
             )
         session_dir = Path(preflight.recovery_session_path).parent
@@ -351,6 +367,30 @@ class UnderstandEngine:
             extras,
             resume_dir=session_dir,
         )
+
+    def _adoption_apply_requested(
+        self, plan: AdoptionPlan, opts: dict[str, Any], extras: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Exact-plan apply request. Not human approval and not a grant.
+
+        `--approved --plan-digest` selects which previewed Plan to apply. It
+        has no Commit/Push meaning.
+        """
+        extras["apply_request"] = {
+            "plan_id": plan.plan_id,
+            "plan_digest": plan.digest,
+            "is_not_human_approval": True,
+            "is_not_commit_or_push": True,
+        }
+        if not approval_matches(plan, opts.get("approval")):
+            return {
+                "ok": False,
+                "reason": (
+                    "exact Adoption Plan apply request is required; "
+                    "preview is not apply and generated Plan is not permission"
+                ),
+            }
+        return {"ok": True, "reason": ""}
 
     def _apply_adoption(self, plan: AdoptionPlan, extra_facts, opts, extras, resume_dir):
         preserve_truncation = [
@@ -556,7 +596,7 @@ class UnderstandEngine:
                 mutations="bounded",
                 artifacts=artifacts,
                 blockers=["B7 FAIL: actual durable state diverged"] + state_issues,
-                next_route="re-discover / re-plan / P1 human re-approval",
+                next_route="re-discover / re-plan / exact-plan apply",
                 extras=extras,
             )
 
@@ -1272,8 +1312,9 @@ class UnderstandEngine:
                 "observed": "The current Migration Plan is not bound to this host state.",
                 "why_stopped": "Plan bindings changed before Task-bound application.",
                 "human_action_required": (
-                    "Re-evaluate compatibility and re-approve the current Plan "
-                    "through Task-bound Develop application."
+                    "Re-evaluate compatibility, then apply the current Plan "
+                    "through Task-bound Develop. Human approval is not a "
+                    "Migration predicate."
                 ),
             }
             return self._base(
@@ -1281,7 +1322,7 @@ class UnderstandEngine:
                 "NEEDS_HUMAN",
                 mutations="none",
                 compatibility="MIGRATION_REQUIRED",
-                blockers=["migration bindings changed; re-evaluate and re-approve"]
+                blockers=["migration bindings changed; re-evaluate before Develop apply"]
                 + issues,
                 next_route="develop",
                 extras=extras,
@@ -1315,13 +1356,12 @@ class UnderstandEngine:
             ),
             "why_stopped": (
                 "Fresh Migration application is Task-bound Develop work. "
-                "Plan-only approval is not application authority."
+                "Understand does not start a fresh persistent apply."
             ),
             "human_action_required": (
-                "Approve this exact Plan for the current Task identity, Task "
-                "revision, and candidate, then run Develop "
-                "execute_approved_migration. Understand does not start a "
-                "fresh persistent apply."
+                "Continue in Develop with the current Task identity, Task "
+                "revision, and candidate bound to this exact Plan. Human "
+                "approval is not required. Git Commit and Push remain separate."
             ),
         }
         return self._base(
@@ -1387,13 +1427,6 @@ class UnderstandEngine:
             "VALIDATING",
         }:
             return self._base("compatibility", "BLOCKED", blockers=[f"cannot resume from {data.get('status')}"], extras=extras)
-        if not migration_approval_matches(plan, opts.get("approval")):
-            return self._base(
-                "compatibility",
-                "NEEDS_HUMAN",
-                blockers=["resume requires digest-bound Migration Plan Approval revalidation"],
-                extras=extras,
-            )
         if reconcile_execution_checkpoint(
             directory,
             data,
@@ -1416,7 +1449,7 @@ class UnderstandEngine:
                 "BLOCKED",
                 mutations="none",
                 blockers=["unexpected migration divergence"] + recovery_issues,
-                next_route="re-evaluate compatibility → regenerate plan → human re-approval",
+                next_route="re-evaluate compatibility → regenerate plan → Develop apply",
                 extras=extras,
             )
         completed = list(data.get("checkpoints_completed") or [])
@@ -1433,7 +1466,7 @@ class UnderstandEngine:
                     "pre-mutation resume no longer has executable MIGRATION_REQUIRED compatibility evidence"
                 ]
                 + list(current_evaluation.get("blockers") or []),
-                next_route="re-evaluate compatibility → regenerate plan → human re-approval",
+                next_route="re-evaluate compatibility → regenerate plan → Develop apply",
                 extras=extras,
             )
         if not completed:
@@ -1496,7 +1529,7 @@ class UnderstandEngine:
                     mutations="none",
                     blockers=["unexpected migration divergence"]
                     + checkpoint_issues,
-                    next_route="re-evaluate compatibility → regenerate plan → human re-approval",
+                    next_route="re-evaluate compatibility → regenerate plan → Develop apply",
                     extras=extras,
                 )
             if checkpoint_evaluation.get("overall") not in {
