@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -50,16 +51,18 @@ def declared_client_support_paths(root: str | Path) -> tuple[str, ...]:
     """Project-local declared client-support paths from project.yaml clients[]."""
     host = Path(root)
     path = host / PROJECT_YAML_REL
-    try:
-        stat = path.stat()
-        signature: Any = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        signature = None
     key = str(host.resolve()) if host.is_absolute() else str(host)
-    cached = _cache.get(key)
-    if cached is not None and cached[0] == signature:
-        return cached[1]
-    declared = _read_declared(path) if signature is not None else ()
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        signature: Any = None
+        declared: tuple[str, ...] = ()
+    else:
+        signature = hashlib.sha256(payload).digest()
+        cached = _cache.get(key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        declared = _parse_declared(payload)
     _cache[key] = (signature, declared)
     return declared
 
@@ -103,10 +106,10 @@ def reset_cache() -> None:
     _cache.clear()
 
 
-def _read_declared(path: Path) -> tuple[str, ...]:
+def _parse_declared(payload: bytes) -> tuple[str, ...]:
     try:
-        raw = yaml_lite.load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, TypeError):
+        raw = yaml_lite.load(payload.decode("utf-8"))
+    except (UnicodeError, ValueError, TypeError):
         return ()
     if not isinstance(raw, dict):
         return ()

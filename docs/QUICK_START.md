@@ -15,9 +15,11 @@ python src/scaffold_consumer.py import-project --host <project>
 reuses INSTALL / UPDATE / VERIFY / STATUS. It does not adopt the project.
 
 On a never-adopted host, ordinary business work is **not authorized** until
-Understand bootstrap and explicit human approval of that exact Adoption Plan
-complete. The user request is not that approval. On Cursor, Trusted-workspace
-project hooks enforce this as a client adapter. See
+Understand bootstrap applies that exact Adoption Plan. `--approved
+--plan-digest` is the apply-request spelling, not Git Commit or Git Push.
+Only Git Commit and Git Push require a current explicit user instruction.
+On Cursor-profile installs, Trusted-workspace project hooks are a client
+adapter, not Core authority. See
 [CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md) and
 [implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](implementation/FIRST_USE_ENFORCEMENT_DESIGN.md).
 
@@ -43,21 +45,20 @@ a fifth routing engine.
 
 The Agent may stop for explicit human action when:
 
-- first attachment proposes persistent Adoption changes;
-- a VALID host is `MIGRATION_REQUIRED` and a Migration Plan needs approval;
 - Task scope, acceptance, tests, or governance is materially uncertain;
 - Repair target Stages cannot be mapped without guessing;
 - Project Rules conflict with the request;
 - repository currentness is stale, diverged, or unknown;
-- Submit needs current candidate-bound Commit authorization;
-- Push is requested (Push authorization is always separate).
+- Git Commit is requested (current explicit user instruction);
+- Push is requested (always a separate current explicit user instruction).
 
-When first attachment proposes persistent Adoption changes, the Agent must
-stop after preview. “Adopt this project” or “Run Day-1 Bootstrap” is
-authorization to enter Bootstrap, not approval of the exact Adoption Plan
-that preview generated. The human must see `plan_id`, `plan_digest`, mutation
-envelope, ownership changes, managed regions, and preserved surfaces before
-apply.
+When first attachment proposes persistent Adoption changes, the Agent previews
+the Adoption Plan, then applies that exact `plan_id` / `plan_digest` when
+machine preconditions still hold. “Adopt this project” or “Run Day-1
+Bootstrap” authorizes entering Bootstrap and applying that generated Plan; it
+is not Git Commit or Git Push. The Agent must still see `plan_id`,
+`plan_digest`, mutation envelope, ownership changes, managed regions, and
+preserved surfaces before apply.
 
 When stopped, the Agent should explain what it observed, why it stopped, what
 you need to decide, what approval would do, and what remains unchanged.

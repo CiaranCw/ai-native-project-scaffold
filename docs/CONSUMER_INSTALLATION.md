@@ -173,10 +173,10 @@ Install does **not** adopt the project. After install the host stays
 `NOT_ADOPTED`: no `project.yaml`, no `skills.lock`, no Bootstrap complete,
 no READY_FOR_REVIEW.
 
-First-use: Understand bootstrap previews an Adoption Plan and stops for
-explicit human approval of that exact plan digest. `--approved --plan-digest`
-is the apply-request spelling, not proof that a human approved. Only then
-does Scaffold write Adoption/work-plane records. `skills.lock` is that later
+First-use: Understand bootstrap previews an Adoption Plan, then applies that
+exact plan digest. `--approved --plan-digest` is the apply-request spelling,
+not proof of a human grant and not Git Commit/Push. Only then does Scaffold
+write Adoption/work-plane records. `skills.lock` is that later
 expected-identity authority; `install.yaml` is product provenance and does
 not replace it.
 

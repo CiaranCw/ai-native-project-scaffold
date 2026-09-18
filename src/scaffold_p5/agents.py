@@ -55,14 +55,24 @@ First-use: `python .scaffold/install/run.py understand bootstrap`
 Canonical Skill packages: `.scaffold/install/packages/{understand,develop,test,submit}/`
 Runtime: `.scaffold/install/runtime/`
 
-Cursor adapters exist only for those four Skills:
-`.cursor/skills/scaffold-understand/`
-`.cursor/skills/scaffold-develop/`
-`.cursor/skills/scaffold-test/`
-`.cursor/skills/scaffold-submit/`
-
 Do not clone a second Scaffold repository and do not set PYTHONPATH to a developer checkout.
 """
+
+
+def compose_consumer_agents_inner(adapter_block: str = "") -> str:
+    """Core consumer AGENTS body plus optional declared-adapter guidance."""
+    core = CONSUMER_AGENTS_INNER.strip()
+    block = str(adapter_block or "").strip()
+    if not block:
+        return core
+    needle = "Runtime: `.scaffold/install/runtime/`"
+    idx = core.find(needle)
+    if idx < 0:
+        return core + "\n\n" + block
+    at = idx + len(needle)
+    return core[:at] + "\n\n" + block + core[at:]
+
+
 _MARKER = re.compile(
     r"<!--\s*scaffold:managed:([a-z][a-z0-9-]*):(start|end)\s*-->"
 )
@@ -216,7 +226,9 @@ def has_consumer_install_region(text: str) -> bool:
     return not issues and CONSUMER_INSTALL_REGION in spans
 
 
-def apply_consumer_install_region(text: str) -> str | None:
+def apply_consumer_install_region(
+    text: str, *, inner: str | None = None
+) -> str | None:
     """Insert or replace the scaffold-consumer region. Preserve all other text."""
     spans, issues = parse_managed_regions(text)
     if issues:
@@ -225,9 +237,10 @@ def apply_consumer_install_region(text: str) -> str | None:
         return None
     if _anti_integration(_human_surface(text, spans)):
         return None
+    body = CONSUMER_AGENTS_INNER.strip() if inner is None else str(inner).strip()
     block = (
         f"{CONSUMER_REGION_START}\n"
-        f"{CONSUMER_AGENTS_INNER.strip()}\n"
+        f"{body}\n"
         f"{CONSUMER_REGION_END}"
     )
     span = spans.get(CONSUMER_INSTALL_REGION)

@@ -133,12 +133,16 @@ Migration Execution creation):
 approved + plan_id + plan_digest + task_id + task_revision + candidate_digest
 ```
 
-A request that only needs human approval (`NEEDS_HUMAN` preview) does
-not advance Task revision, Stage status, or Session linkage. Invalid
-Plan identity/digest or Task binding is rejected the same way, with
-Task/session/project bytes unchanged.
+The `approved` token is the apply-request spelling of that machine binding,
+not a human grant.
 
-A Plan approval issued for Task A is not reusable through Task B. Stale
+A request that only needs exact Plan+Task machine binding (`NEEDS_HUMAN`
+preview when that binding is absent) does not advance Task revision, Stage
+status, or Session linkage. Invalid Plan identity/digest or Task binding is
+rejected the same way, with Task/session/project bytes unchanged. This is
+not a human Adoption/Migration grant.
+
+A Plan+Task binding issued for Task A is not reusable through Task B. Stale
 Task revision or candidate digest requires re-review. Task title/goal
 keywords such as "migration" are not authority. The supporting Migration
 Execution may record `develop_binding` (`task_id`, `task_revision`,
@@ -163,7 +167,7 @@ VALID host
   → explicit causes (expected vs actual identity, why COMPATIBLE is insufficient)
   → Migration Plan (source, target, envelope, ownership, revalidation)
   → explicit Task / Stage
-  → current Plan+Task application approval
+  → current Plan+Task machine binding
   → Develop starts bounded project.yaml generation through P5
     PREPARED → APPLYING → VALIDATING → COMPLETED
     (interrupt after persistent mutation: VALIDATING or RECOVERY_REQUIRED)

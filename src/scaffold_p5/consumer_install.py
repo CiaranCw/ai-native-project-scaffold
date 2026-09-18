@@ -14,12 +14,12 @@ from typing import Any
 
 from scaffold_p5 import yaml_lite
 from scaffold_p5.agents import (
-    CONSUMER_AGENTS_INNER,
     CONSUMER_INSTALL_REGION,
     CONSUMER_REGION_END,
     CONSUMER_REGION_START,
     apply_consumer_install_region,
     classify_agents_text,
+    compose_consumer_agents_inner,
     has_consumer_install_region,
     parse_managed_regions,
 )
@@ -608,11 +608,17 @@ def manifest_fragment_records(manifest: dict[str, Any] | None) -> list[dict[str,
     return records
 
 
-def expected_region_text(rel: str) -> str | None:
+def expected_region_text(
+    rel: str,
+    profiles: tuple[AdapterProfile, ...] | None = None,
+) -> str | None:
+    if profiles is None:
+        profiles, _issues = resolve_profiles(None)
     if rel == AGENTS_MD:
+        inner = compose_consumer_agents_inner(_agents_adapter_block(profiles))
         return (
             f"{CONSUMER_REGION_START}\n"
-            f"{CONSUMER_AGENTS_INNER.strip()}\n"
+            f"{inner}\n"
             f"{CONSUMER_REGION_END}"
         )
     if rel == GITATTRIBUTES:
@@ -620,8 +626,11 @@ def expected_region_text(rel: str) -> str | None:
     return None
 
 
-def expected_region_digest(rel: str) -> str | None:
-    text = expected_region_text(rel)
+def expected_region_digest(
+    rel: str,
+    profiles: tuple[AdapterProfile, ...] | None = None,
+) -> str | None:
+    text = expected_region_text(rel, profiles)
     if text is None:
         return None
     return sha256_bytes(text.encode("utf-8"))
@@ -746,7 +755,7 @@ def plan_consumer_install(
             payloads[rel] = CURSOR_BODIES[adapter].encode("utf-8")
         payloads[FIRST_USE_RULE_REL] = FIRST_USE_RULE_TEXT.encode("utf-8")
         payloads[HOOK_SCRIPT_REL] = HOOK_SCRIPT_TEXT.encode("utf-8")
-    agents_text, agents_issue = _planned_agents_text(host_path)
+    agents_text, agents_issue = _planned_agents_text(host_path, profiles)
     if agents_issue:
         plan.blockers.append(agents_issue)
         return plan
@@ -951,7 +960,9 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
             continue
         if file_digest(path) != digest:
             drifted.append(rel)
-    region_missing, region_drifted, region_incompat = _managed_region_issues(root, manifest)
+    region_missing, region_drifted, region_incompat = _managed_region_issues(
+        root, manifest, profiles
+    )
     missing.extend(region_missing)
     drifted.extend(region_drifted)
     reasons.extend(region_incompat)
@@ -1844,7 +1855,9 @@ def _slice_between_markers(text: str, start_marker: str, end_marker: str) -> str
 
 
 def _managed_region_issues(
-    host: Path, manifest: dict[str, Any]
+    host: Path,
+    manifest: dict[str, Any],
+    profiles: tuple[AdapterProfile, ...] = (),
 ) -> tuple[list[str], list[str], list[str]]:
     missing: list[str] = []
     drifted: list[str] = []
@@ -1853,7 +1866,7 @@ def _managed_region_issues(
         (row["path"], row["region_id"]): row for row in manifest_region_records(manifest)
     }
     for rel, region_id in REGION_HOST_PATHS.items():
-        expected = expected_region_digest(rel)
+        expected = expected_region_digest(rel, profiles)
         if not expected:
             incompat.append(f"canonical managed region for {rel} is undefined")
             continue
@@ -2002,10 +2015,14 @@ def _git_check_attr_text_issues(host: Path) -> list[str]:
     return issues
 
 
-def _planned_agents_text(host: Path) -> tuple[str | None, str | None]:
+def _planned_agents_text(
+    host: Path,
+    profiles: tuple[AdapterProfile, ...] = (),
+) -> tuple[str | None, str | None]:
+    inner = compose_consumer_agents_inner(_agents_adapter_block(profiles))
     path = host / AGENTS_MD
     if not path.exists():
-        applied = apply_consumer_install_region("")
+        applied = apply_consumer_install_region("", inner=inner)
         return applied, None if applied is not None else "cannot create AGENTS.md consumer region"
     if not path.is_file():
         return None, "AGENTS.md exists and is not a file"
@@ -2016,7 +2033,7 @@ def _planned_agents_text(host: Path) -> tuple[str | None, str | None]:
     state = classify_agents_text(current)
     if state == "unsafe":
         return None, "existing AGENTS.md is unsafe to integrate; refusing overwrite"
-    applied = apply_consumer_install_region(current)
+    applied = apply_consumer_install_region(current, inner=inner)
     if applied is None:
         return None, "existing AGENTS.md cannot receive a scaffold-consumer region"
     return applied, None
@@ -2060,7 +2077,7 @@ def _manifest_from_plan(plan: InstallPlan) -> dict[str, Any]:
     fragments = []
     for row in sorted(plan.files, key=lambda item: item.rel):
         if row.ownership == OWNERSHIP_MANAGED_REGION and row.region_id:
-            digest = expected_region_digest(row.rel)
+            digest = expected_region_digest(row.rel, plan.profiles)
             if not digest:
                 continue
             regions.append(
@@ -2316,6 +2333,25 @@ def _hook_fragment_issues(
 
 def _has_cursor_profile(profiles: tuple[AdapterProfile, ...]) -> bool:
     return any(profile.profile_id == CURSOR_PROFILE for profile in profiles)
+
+
+def _agents_adapter_block(profiles: tuple[AdapterProfile, ...]) -> str:
+    """Declared-adapter AGENTS guidance. Empty when no adapter profile is installed."""
+    dirs: list[str] = []
+    for rel in required_paths(profiles):
+        normalized = rel.replace("\\", "/")
+        if "/skills/" not in normalized:
+            continue
+        directory = normalized.rsplit("/", 1)[0] + "/"
+        if directory not in dirs:
+            dirs.append(directory)
+    if not dirs:
+        return ""
+    listed = "\n".join(f"`{item}`" for item in dirs)
+    return (
+        "Cursor adapters exist only for those four Skills:\n"
+        f"{listed}"
+    )
 
 
 def _required_gitattr_lines(profiles: tuple[AdapterProfile, ...]) -> tuple[str, ...]:

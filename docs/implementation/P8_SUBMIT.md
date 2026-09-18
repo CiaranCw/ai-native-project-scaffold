@@ -28,7 +28,7 @@ S1 intake (READY_FOR_REVIEW Task whose current Stage/Task completion authority h
 → S3 Structural Review (real S2 Diff + ownership/Rules + bounded structural impact)
 → S4 Knowledge Consistency (Understand route if stale or impact-required knowledge is missing)
 → S5 Test Completeness (P6 public reports / TestEngine; project Test policy still applies with no Task)
-→ S6 candidate-bound SUBMIT_AUTHORIZED
+→ S6 candidate-bound S10 apply-intent (`request_s10` / `finalize`; not a human grant)
 → S7 re-observe candidate + configured-upstream currentness
 → S8 loop to S3–S6 if candidate or repository basis changed
 → S9 candidate Change Record + exact deterministic Finalization Bundle
@@ -41,12 +41,12 @@ S9 does not make the Change Record or its deterministic support durable
 history. S10 does. S9 is pre-durable and abortable: it allocates a Change
 Record in memory, PREPARE/materializes required P6 durable Evidence, and only
 then persists the Change Record. Ordinary failure before a durable S10
-boundary (ownership/materialization, Change Record persist, finalization
-candidate observation, or trusted-grant consumption) rolls back only artifacts
-created by that attempt. Failed non-durable S10 after grant consumption aborts
-only support created by that attempt and may leave the non-durable Change
-Record; durable-but-blocked S10 preserves the committed bundle. Failed Push
-does not erase a valid S10 Commit.
+boundary (ownership/materialization, Change Record persist, or finalization
+candidate observation) rolls back only artifacts
+created by that attempt. Failed non-durable S10 after S10 apply-intent
+starts aborts only support created by that attempt and may leave the
+non-durable Change Record; durable-but-blocked S10 preserves the committed
+bundle. Failed Push does not erase a valid S10 Commit.
 
 A stranded non-durable Change Record from a pre-durable S9 failure is recovered
 only through Submit `abandon_pre_durable_change`: plan-first, exact
@@ -82,7 +82,7 @@ ownership. S12 still cleans only linked Develop Sessions. Ordinary P6 runtime
 cleanup may remove a finalized Test run because the durable locator resolves
 independently from its capsule/sidecar representation.
 
-S11 Push is bound to the exact S10 Commit identity and the S10-bound branch, never to a later local HEAD or a later checkout. If publishing that Commit would require force or non-fast-forward semantics, S11 blocks and the remote remains unchanged. An authorized S11 blocker or failure is surfaced as a top-level BLOCKED result; local S10 remains durable. Missing or stale Push authorization does not turn optional Push into a blocker.
+S11 Push is bound to the exact S10 Commit identity and the S10-bound branch, never to a later local HEAD or a later checkout. If publishing that Commit would require force or non-fast-forward semantics, S11 blocks and the remote remains unchanged. An authorized S11 blocker or failure is surfaced as a top-level BLOCKED result; local S10 remains durable. Absent Push request does not turn optional Push into a blocker. Git Push still requires a current explicit user instruction at the Agent execution boundary; Core does not consume a grant object as that instruction.
 
 The final Skill result re-observes the current candidate after S11/S12. That current observation is distinct from the finalized S10 Commit/tree/branch.
 
@@ -99,7 +99,7 @@ test ids and, when a Task is in force, that Task's declared `final_tests` /
 stage `required_tests` identifiers; omitting `selected` cannot suppress a
 Task-declared Test Rule. Hard prohibitions and Rule conflicts block and are
 reported through the Skill result. Rule availability does not grant
-`SUBMIT_AUTHORIZED`, Commit, Push, or source-edit authority.
+S10 apply-intent, Commit, Push, or source-edit authority.
 
 Genuine no-Task Submit is Records §13: P8 reviews the real candidate without
 inventing a Task Book or READY_FOR_REVIEW. Task-dependent gates are
@@ -137,19 +137,37 @@ are not S4 authority.
 
 ## Authorization
 
-S6 does not treat a caller dictionary such as `{granted: true, candidate_digest: C}` as authority. A candidate digest is public project information. Boolean `True` is not a grant.
+Current product rule (PC-R4; contracts remain normative): Submit S1–S12 is
+Agent-autonomous machine-gated work. Git Commit and Git Push require a current
+explicit user instruction at the Agent execution boundary. Core does not
+consume a grant object, `AuthorizationProvider`, trusted one-shot grant, or
+caller dictionary as that instruction.
 
-`SubmitEngine` may receive a host-bound `AuthorizationProvider` at construction. Ordinary `run(..., **opts)` cannot supply or replace that provider. The Skill caller may pass only an opaque `submit_authorization_ref` / `push_authorization_ref` plus the non-authoritative `submit_authorization_attempt_id` / `push_authorization_attempt_id` that the earlier `authorization_request` exposed. Authority is the matching unconsumed grant inside the trusted provider, bound to operation (`S10` vs `PUSH`), attempt identity, and candidate digest. An A1 grant cannot authorize A2. A caller-minted attempt without a matching trusted grant is not authority.
+S6 records candidate-bound S10 apply-intent from `request_s10` / `finalize`
+for this reviewed candidate. It is not a human grant and not Git Push.
+Review-only S1–S6 does not finalize. A caller dictionary such as
+`{granted: true, candidate_digest: C}` is public project information plus a
+boolean; it is not authority. Boolean `True` is not a grant. Engine kwargs
+`authorization_provider`, `submit_authorization_ref`,
+`submit_authorization_attempt_id`, `push_authorization_ref`, and
+`push_authorization_attempt_id` are ignored.
 
-S6 validates the S10 grant and surfaces a non-authoritative `authorization_request` that includes `authorization_attempt_id`. Consumption is atomic and one-shot, immediately before S10 mutation. Review-only S1–S6 does not consume. A consumed grant cannot authorize a retry, even when the candidate is unchanged. A grant for C1 cannot authorize C2. An S10 grant cannot authorize Push, and a Push grant cannot authorize S10.
+S10 apply-intent, Commit, and Push bits are not written into Task Book,
+Change Record, Develop Session, `skills.lock`, `skill.yaml`, `project.yaml`,
+or `AGENTS.md`. Change Record validation still fail-closes if those retired
+grant fields are present.
 
-No provider / no grant remains the human gate. Review-only Submit stays usable. Grants are not written into Task Book, Change Record, Develop Session, `skills.lock`, `skill.yaml`, `project.yaml`, or `AGENTS.md`.
+Historical (superseded): FA-2 Batch 8 described a host-bound
+`AuthorizationProvider` and one-shot trusted grants as the S10/Push human
+gate. That machinery is deleted. Do not treat the historical section in
+[FA2_BATCH8_HUMAN_CONTROL.md](FA2_BATCH8_HUMAN_CONTROL.md) as current
+behavior.
 
 ## S12 cleanup and retry
 
 Durable S10 plus failed S12 is a truthful partial result: top-level is `BLOCKED` or `NEEDS_HUMAN`, never `COMPLETED`. Extras report `stage: S12`, `s10_durable: true`, cleanup blockers, and `cleanup_retry: {operation: cleanup_retry, change_id: ...}`. Cleanup failure does not roll back Git Commit or no-SCM publication.
 
-`mode=cleanup_retry` (or `cleanup_retry={...}`) resumes only incomplete S12 for an already-durable finalization. It does not re-run S1–S10, consume another S10 grant, create another Change Record, or Push. The cleanup target set is frozen on the durable Change Record as `provenance.relevant_develop_session_ids`. Retry inspects only remaining members of that historical set. A Session linked after S10 is outside T. Current Task Book `develop_session_ids` is not historical cleanup authority. Partial cleanup is idempotent. Non-durable S10 never runs S12.
+`mode=cleanup_retry` (or `cleanup_retry={...}`) resumes only incomplete S12 for an already-durable finalization. It does not re-run S1–S10, create another Change Record, or Push. The cleanup target set is frozen on the durable Change Record as `provenance.relevant_develop_session_ids`. Retry inspects only remaining members of that historical set. A Session linked after S10 is outside T. Current Task Book `develop_session_ids` is not historical cleanup authority. Partial cleanup is idempotent. Non-durable S10 never runs S12.
 
 ## S7 repository currentness
 

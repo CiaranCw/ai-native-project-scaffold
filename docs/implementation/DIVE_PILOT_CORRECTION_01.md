@@ -57,13 +57,18 @@ different normative behavior. This candidate is unreleased and is extended
 in place, matching P10's treatment of `understand@2.1.0`. Released
 `test@2.0.0` is not mutated.
 
-## Finding C — Bootstrap exact human approval
+## Finding C — Bootstrap exact-plan apply (historical; superseded by PC-R4)
 
-Generic “Adopt this project” / “Run Day-1 Bootstrap” authorizes preview only.
-It is not approval of an exact Adoption Plan that did not yet exist. Preview
-must surface `plan_id`, `plan_digest`, mutation envelope, ownership changes,
-managed regions, and preserved surfaces. Apply requires explicit digest-bound
-approval of that exact Plan. Agents must not invent human provenance.
+Historical finding: generic “Adopt this project” / “Run Day-1 Bootstrap”
+authorized preview only and required explicit human approval of an exact
+Adoption Plan.
+
+Current behavior: that generic instruction authorizes the Agent to enter
+Bootstrap, preview, and apply the generated `plan_id` / `plan_digest` when
+machine preconditions still hold. `--approved --plan-digest` is the apply
+request, not human Git Commit/Push authority. Agents must not invent Git
+Commit or Push permission from chat intent. Preview is still not apply:
+persistent Adoption mutation uses that exact Plan.
 
 ## Review-package locator completeness
 

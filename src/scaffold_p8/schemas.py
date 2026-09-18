@@ -1,4 +1,4 @@
-"""P8-owned Change Record and authorization validation. Not a Foundation schema file."""
+"""P8-owned Change Record validation. Not a Foundation schema file."""
 
 from __future__ import annotations
 
@@ -421,37 +421,6 @@ def noscms_lineage_shape_issues(data: Any) -> list[str]:
     elif not CHANGE_ID_RE.fullmatch(str(parent_id or "")):
         issues.append("finalization parent_change_id is malformed")
     return issues
-
-
-def parse_authorization(value: Any) -> tuple[bool, str, str | None]:
-    """Current explicit candidate-bound grant. Never persisted as a reusable bit."""
-    if value in (None, False, ""):
-        return False, "SUBMIT_AUTHORIZED is missing", None
-    if value is True:
-        return False, "SUBMIT_AUTHORIZED must bind an explicit candidate", None
-    if not isinstance(value, dict):
-        return False, "SUBMIT_AUTHORIZED is malformed", None
-    if value.get("granted") is not True:
-        return False, "SUBMIT_AUTHORIZED is not granted", None
-    digest = value.get("candidate_digest")
-    if not isinstance(digest, str) or not digest.strip():
-        return False, "SUBMIT_AUTHORIZED is missing candidate binding", None
-    return True, "candidate-bound SUBMIT_AUTHORIZED accepted", digest
-
-
-def parse_push_authorization(value: Any) -> tuple[bool, str, str | None]:
-    if value in (None, False, ""):
-        return False, "Push authorization is missing", None
-    if value is True:
-        return False, "Push authorization must bind an explicit candidate", None
-    if not isinstance(value, dict):
-        return False, "Push authorization is malformed", None
-    if value.get("granted") is not True:
-        return False, "Push authorization is not granted", None
-    digest = value.get("candidate_digest")
-    if not isinstance(digest, str) or not digest.strip():
-        return False, "Push authorization is missing candidate binding", None
-    return True, "candidate-bound Push authorization accepted", digest
 
 
 def _nonempty_text(value: Any) -> bool:

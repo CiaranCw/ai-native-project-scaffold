@@ -22,7 +22,7 @@ the directory and does not grant `.scaffold/ext/`.
 
 Already-adopted hosts use Understand `compatibility` `action="ownership_update"`:
 
-- plan-first, digest-bound, human-approved
+- plan-first, digest-bound exact-plan apply (not a human grant)
 - mutation envelope is `.scaffold/project.yaml` only
 - adds only `.scaffold/ext/test/evidence/: GENERATED`
 - requires ACTIVE executable `project.yaml`, UNKNOWN ownership for that path,
@@ -38,8 +38,7 @@ S9 now:
 3. PREPARE/materializes required P6 durable Evidence
 4. persists the Change Record only after materialization succeeds
 5. observes the finalization candidate
-6. consumes the trusted S10 grant
-7. executes S10
+6. executes S10 when `request_s10` / `finalize` apply-intent is present
 
 Ordinary failure before a durable S10 boundary aborts only artifacts created
 by that attempt (P6 PREPARED coordination and, if present, the non-durable

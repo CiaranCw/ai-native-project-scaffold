@@ -8,6 +8,7 @@ Client-local paths are classified generically from project.yaml.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -199,9 +200,20 @@ class PCR4MigrationAndSubmitAuthorityTests(unittest.TestCase):
             "scaffold_p5/trusted_host.py",
             "scaffold_p5/approval_origin.py",
             "scaffold_p5/authorization.py",
+            "scaffold_p8/authorization.py",
             "scaffold_p8/authorization_provider.py",
         ):
             self.assertFalse((REPO / "src" / rel).is_file(), rel)
+        import scaffold_p8.schemas as schemas
+
+        self.assertFalse(hasattr(schemas, "parse_authorization"))
+        self.assertFalse(hasattr(schemas, "parse_push_authorization"))
+        engine_src = (REPO / "src" / "scaffold_p8" / "engine.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("scaffold_p8.authorization", engine_src)
+        self.assertNotIn("parse_authorization", engine_src)
+        self.assertNotIn("parse_push_authorization", engine_src)
 
     def test_R4_s10_without_finalize_does_not_commit(self):
         from p8_support import init_submit_git, write_submit_host, TASK_A, submit_engine
@@ -359,6 +371,55 @@ class PCR4ClientSupportTests(unittest.TestCase):
         for rel in CLIENT_FILES:
             self.assertNotIn(rel, digests)
 
+    def test_R4_client_support_same_size_rewrite_without_reset(self):
+        path = self.host / ".scaffold" / "project.yaml"
+        yaml_a = (
+            'schema_version: "1"\n'
+            "clients:\n"
+            '  - path: ".cursor/"\n'
+            "    strategy: CLIENT_SUPPORT\n"
+            "    authoritative: false\n"
+        )
+        yaml_b = (
+            'schema_version: "1"\n'
+            "clients:\n"
+            '  - path: ".claude/"\n'
+            "    strategy: CLIENT_SUPPORT\n"
+            "    authoritative: false\n"
+        )
+        self.assertEqual(len(yaml_a.encode("utf-8")), len(yaml_b.encode("utf-8")))
+        path.write_text(yaml_a, encoding="utf-8")
+        self.assertEqual(
+            classify_path(self.host, ".cursor/rules/x.mdc"), CLIENT_SUPPORT
+        )
+        before = path.stat()
+        path.write_text(yaml_b, encoding="utf-8")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = path.stat()
+        self.assertEqual(after.st_size, before.st_size)
+        self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+        self.assertEqual(classify_path(self.host, ".cursor/rules/x.mdc"), PRODUCT)
+        self.assertEqual(
+            classify_path(self.host, ".claude/settings.json"), CLIENT_SUPPORT
+        )
+        self.assertEqual(classify_path(self.host, "src/app.py"), PRODUCT)
+        self.assertEqual(
+            classify_path(self.host, ".scaffold/project.yaml"), SCAFFOLD_AUTHORITY
+        )
+
+    def test_R4_client_support_declaration_removal_without_reset(self):
+        self.assertEqual(
+            classify_path(self.host, ".cursor/rules/scaffold.mdc"), CLIENT_SUPPORT
+        )
+        write_project(self.host, clients=[])
+        self.assertEqual(
+            classify_path(self.host, ".cursor/rules/scaffold.mdc"), PRODUCT
+        )
+        self.assertEqual(classify_path(self.host, "src/app.py"), PRODUCT)
+        self.assertEqual(
+            classify_path(self.host, ".scaffold/project.yaml"), SCAFFOLD_AUTHORITY
+        )
+
 
 class PCR4InstallVerifyTests(unittest.TestCase):
     """M03: completeness follows the declared adapter profile."""
@@ -384,6 +445,10 @@ class PCR4InstallVerifyTests(unittest.TestCase):
             (self.host / ".scaffold/install/install.yaml").read_text(encoding="utf-8")
         )
         self.assertEqual(declared_profiles(manifest), ())
+        agents = (self.host / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertNotIn(".cursor/skills/", agents)
+        self.assertIn("python .scaffold/install/run.py", agents)
+        self.assertIn("Exactly four Skills exist", agents)
 
     def test_R4_21_cursor_profile_verify_checks_cursor_artifacts(self):
         plan = plan_consumer_install(self.host, REPO, adapter_profiles=["cursor"])
@@ -393,6 +458,11 @@ class PCR4InstallVerifyTests(unittest.TestCase):
         verify = verify_consumer_install(self.host)
         self.assertEqual(verify["status"], VERIFY_VALID, verify["reasons"])
         self.assertTrue((self.host / ".cursor/hooks.json").is_file())
+        agents = (self.host / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn(".cursor/skills/scaffold-understand/", agents)
+        self.assertIn(".cursor/skills/scaffold-develop/", agents)
+        self.assertIn(".cursor/skills/scaffold-test/", agents)
+        self.assertIn(".cursor/skills/scaffold-submit/", agents)
         (self.host / ".cursor/rules/scaffold-first-use.mdc").unlink()
         after = verify_consumer_install(self.host)
         self.assertNotEqual(after["status"], VERIFY_VALID)
@@ -448,6 +518,27 @@ class PCR4ObservationScopeTests(unittest.TestCase):
         self.assertEqual(
             _observation_scope("postToolUse"), OBSERVATION_ATTEMPT_SCOPE
         )
+
+
+class PCR4ChangeRecordGuardTests(unittest.TestCase):
+    """Retired grant fields must not persist into Change Records."""
+
+    def test_R4_change_record_rejects_grant_fields(self):
+        from scaffold_p8.schemas import validate_change_record
+
+        issues = validate_change_record(
+            {
+                "submit_authorized": True,
+                "grant_ref": "grant-1",
+                "can_commit": True,
+                "can_push": True,
+            }
+        )
+        blob = " ".join(issues)
+        self.assertIn("must not persist submit_authorized", blob)
+        self.assertIn("must not persist grant_ref", blob)
+        self.assertIn("must not persist can_commit", blob)
+        self.assertIn("must not persist can_push", blob)
 
 
 if __name__ == "__main__":
