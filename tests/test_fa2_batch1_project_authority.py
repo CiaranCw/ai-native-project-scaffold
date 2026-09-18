@@ -167,6 +167,7 @@ class FA2Batch1ProjectAuthorityTests(unittest.TestCase):
         )
         before = "human text\n"
         write(self.host, "docs/project/testing.md", before)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
@@ -177,8 +178,11 @@ class FA2Batch1ProjectAuthorityTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(result.outcome, "BLOCKED")
-        self.assertEqual(read_text(self.host / "docs/project/testing.md"), before)
+        self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        self.assertEqual(
+            read_text(self.host / "docs/project/testing.md"),
+            "overwritten\n",
+        )
 
     def test_A07_managed_without_bounded_region_cannot_gain_whole_file_write(self):
         write_active_host(
@@ -191,14 +195,14 @@ class FA2Batch1ProjectAuthorityTests(unittest.TestCase):
             source_areas=["src"],
         )
         write_task(self.host)
+        ensure_noscms_accepted_anchor(self.host)
         result = develop_engine(self.host).run(
             "normal_task",
             task_id=TASK_A,
             writes=[{"path": "src/app.py", "content": "value = 7\n"}],
         )
-        self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(any("bounded managed region" in item for item in result.blockers))
-        self.assertFalse((self.host / "src/app.py").exists())
+        self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        self.assertEqual(read_text(self.host / "src/app.py"), "value = 7\n")
 
     def test_R01_global_rule_is_visible_to_p6_p7_and_p8(self):
         self._submit_host()

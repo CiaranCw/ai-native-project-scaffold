@@ -2,6 +2,14 @@
 
 PC-CONSUMER-001 correction. Installation/client surface, **not** a fifth Skill.
 
+**Supersession:** uniform `failClosed: true` on observation events
+(`postToolUse`, `postToolUseFailure`, `afterFileEdit`, `afterTabFileEdit`)
+and per-tool `mutation-attempts.yaml` / `EDITOR_MUTATION_TOOLS` allowlist
+authority are superseded by Constitution §6 Lightweight Develop autonomy
+(D-A5, D-A6, D-A11). Interception events may remain fail-closed. Observation
+events MUST NOT be fail-closed. Existing installed consumers with the old
+uniform hook shape remain VERIFY-readable.
+
 Related: [FIRST_USE_WALKTHROUGH.md](FIRST_USE_WALKTHROUGH.md),
 [CONSUMER_INSTALLATION_DESIGN.md](CONSUMER_INSTALLATION_DESIGN.md),
 [../CONSUMER_INSTALLATION.md](../CONSUMER_INSTALLATION.md).
@@ -101,8 +109,11 @@ S3 uses the same path-authority model as Develop.
 - Hook executable: `.scaffold/install/cursor_first_use_hook.py` (fully MANAGED).
 - Shared `.cursor/hooks.json` is mixed-ownership. Scaffold owns only the
   `scaffold-first-use` JSON fragment (`install.yaml` `json_fragments:`).
-- Documented Cursor contract: `version: 1`, `failClosed: true` on Scaffold
-  entries. Deny via `{ "permission": "deny", "agent_message": "..." }`.
+- Documented Cursor contract: `version: 1`. Interception events
+  (`preToolUse`, `beforeShellExecution`, `subagentStart`, `beforeMCPExecution`)
+  MAY register `failClosed: true`. Observation-only events (`postToolUse`,
+  `postToolUseFailure`, `afterFileEdit`, `afterTabFileEdit`) MUST register
+  `failClosed: false`. Deny via `{ "permission": "deny", "agent_message": "..." }`.
   `beforeShellExecution` ASK via `{ "permission": "ask", "user_message": "...",
   "agent_message": "..." }`. Current Cursor docs and local agent-exec map
   that ASK to `ShellHookApprovalRequirement.KIND_FORCE_PROMPT`.

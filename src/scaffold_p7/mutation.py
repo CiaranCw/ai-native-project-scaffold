@@ -7,12 +7,12 @@ from typing import Any
 
 from scaffold_p5.io_util import write_text_atomic
 from scaffold_p5.ownership import (
-    ordinary_business_source,
     path_covered,
     resolve_ownership,
 )
 from scaffold_p5.client_support import is_client_support_path
-from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS, whole_file_mutation_allowed
+from scaffold_p5.scm import git_path_is_tracked
+from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
 
 from scaffold_p7.models import MODULES_YAML
 from scaffold_p7.session import file_sha256, path_kind, record_touch
@@ -101,11 +101,60 @@ def authorize_writes(
                 "path": rel,
                 "ownership": ownership_mode,
                 "ownership_key": resolved.matched_key,
-                "task_scoped": True,
+                "task_scoped": role in {"product", "supporting"},
                 "scope_role": role,
             }
         )
     return MutationPlan(ok=True, writes=authorized, authority=authority)
+
+
+def hard_mutation_boundary_reason(
+    root: Path,
+    rel: str,
+    *,
+    deleting: bool = False,
+) -> str | None:
+    """Cheap hard-boundary denial. Not Task scope, ownership, or tool identity."""
+    normalized = _normalize(rel)
+    if not normalized:
+        return "mutation target path is missing; fail closed"
+    if (
+        normalized.startswith("../")
+        or normalized.startswith("/")
+        or ":" in normalized.split("/", 1)[0]
+    ):
+        return f"{normalized} is outside ordinary local fixture path form"
+    if is_client_support_path(root, normalized):
+        return (
+            f"mutation authority for {normalized} is CONFLICTING: "
+            "declared CLIENT_SUPPORT path is not project product"
+        )
+    if is_protected_governance_path(normalized, root) or normalized in CORE_PROTECTED:
+        return (
+            f"mutation authority for {normalized} is CONFLICTING: "
+            "protected Scaffold governance path"
+        )
+    if deleting:
+        return irrecoverable_deletion_reason(root, normalized)
+    return None
+
+
+def irrecoverable_deletion_reason(root: Path, rel: str) -> str | None:
+    """Deny untracked / no-SCM deletion when the client exposes the target."""
+    normalized = _normalize(rel)
+    dest = Path(root) / normalized
+    if not dest.exists() and not dest.is_symlink():
+        return None
+    tracked = git_path_is_tracked(root, normalized)
+    if tracked is True:
+        return None
+    if tracked is False:
+        return (
+            f"untracked deletion of {normalized} is potentially irrecoverable"
+        )
+    return (
+        f"deletion of {normalized} on a no-SCM host is potentially irrecoverable"
+    )
 
 
 def authorize_path_mutation(
@@ -118,34 +167,18 @@ def authorize_path_mutation(
     require_in_progress: bool = True,
     bounded_region: bool = False,
 ) -> tuple[bool, str, str]:
-    """Canonical path authorization: Task affiliation AND path authority.
+    """Classify Task affiliation and keep genuine governance protection.
 
-    Supporting scope is affiliation, not an ownership override. The adapter
-    may normalize client payloads, but it must not weaken this Core check.
+    Task scope is semantic intent, not a pre-write allowlist. HUMAN_OWNED
+    ordinary project content may be modified when the Task requires it.
+    MANAGED/GENERATED direct edits are allowed and remain review-visible.
+    ``bounded_region`` is retained for callers; it is not a write deny gate.
     """
+    del bounded_region
     normalized = _normalize(rel)
-    if not normalized:
-        return False, "mutation target path is missing; fail closed", ""
-    if (
-        normalized.startswith("../")
-        or normalized.startswith("/")
-        or ":" in normalized.split("/", 1)[0]
-    ):
-        return False, f"{normalized} is outside ordinary local fixture path form", ""
-    if is_client_support_path(root, normalized):
-        return (
-            False,
-            f"mutation authority for {normalized} is CONFLICTING: "
-            "declared CLIENT_SUPPORT path is not project product",
-            "",
-        )
-    if is_protected_governance_path(normalized) or normalized in CORE_PROTECTED:
-        return (
-            False,
-            f"mutation authority for {normalized} is CONFLICTING: "
-            "protected Scaffold governance path",
-            "",
-        )
+    boundary = hard_mutation_boundary_reason(root, normalized)
+    if boundary:
+        return False, boundary, ""
     if require_in_progress and task.get("status") != "IN_PROGRESS":
         return (
             False,
@@ -167,14 +200,15 @@ def authorize_path_mutation(
         role = "supporting"
         affiliation_reason = supporting_reason
     else:
-        return False, product_reason, ""
+        role = "discovered"
+        affiliation_reason = f"{normalized} is a discovered Task dependency"
     host_project = project if isinstance(project, dict) else {}
     ownership = host_project.get("ownership")
     if not isinstance(ownership, dict):
         return False, "project ownership registry is UNKNOWN; mutation is blocked", role
     resolved = resolve_ownership(ownership, normalized)
     if resolved.status == "UNKNOWN":
-        if role == "supporting":
+        if role in {"supporting", "discovered"}:
             return True, affiliation_reason, role
         return False, f"mutation authority for {normalized} is UNKNOWN", role
     if resolved.status != "RESOLVED" or resolved.mode not in OWNERSHIP_MODES:
@@ -183,24 +217,6 @@ def authorize_path_mutation(
             resolved.reason or f"mutation authority for {normalized} is CONFLICTING",
             role,
         )
-    mode = str(resolved.mode)
-    if mode == "HUMAN_OWNED":
-        allowed = ordinary_business_source(
-            normalized, list(host_project.get("source_areas") or [])
-        )
-        if not allowed:
-            return (
-                False,
-                f"HUMAN_OWNED {normalized} requires explicit current business-source "
-                "Task authority",
-                role,
-            )
-        return True, affiliation_reason, role
-    allowed, reason = whole_file_mutation_allowed(
-        ownership, normalized, bounded_region=bounded_region
-    )
-    if not allowed:
-        return False, reason, role
     return True, affiliation_reason, role
 
 

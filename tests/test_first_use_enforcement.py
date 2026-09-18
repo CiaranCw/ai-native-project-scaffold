@@ -42,6 +42,7 @@ from scaffold_p5.first_use import (
     FRAGMENT_ID,
     HOOK_COMMAND,
     HOOK_EVENTS,
+    OBSERVATION_HOOK_EVENTS,
     PRETOOL_APPLY_CONTINUE_REASON,
     REQUIRED_ROUTE_BOOTSTRAP,
     REQUIRED_ROUTE_DEVELOP,
@@ -687,7 +688,10 @@ class FirstUseEnforcementTests(unittest.TestCase):
             found = [item for item in data["hooks"][event] if is_scaffold_hook_command(item)]
             self.assertEqual(len(found), 1, event)
             self.assertEqual(found[0]["command"], HOOK_COMMAND)
-            self.assertTrue(found[0]["failClosed"])
+            if event in OBSERVATION_HOOK_EVENTS:
+                self.assertFalse(found[0]["failClosed"], event)
+            else:
+                self.assertTrue(found[0]["failClosed"], event)
             self.assertEqual(found[0]["timeout"], 60)
             self.assertNotIn("matcher", found[0])
         manifest = yaml_lite.load(

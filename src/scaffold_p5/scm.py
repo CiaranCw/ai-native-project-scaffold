@@ -505,6 +505,43 @@ class _GitBytesResult:
     stderr: bytes
 
 
+def git_head_is_known(root: str | Path) -> bool | None:
+    """Cheap HEAD presence check. Not ``git status`` and not a digest walk.
+
+    Returns True when Git HEAD resolves, False when a Git host cannot
+    resolve HEAD, and None when no Git worktree is present.
+    """
+    host = Path(root)
+    marker = _nearest_git_marker(host)
+    if marker is None:
+        return None
+    result = _run_git(host, "rev-parse", "--verify", "HEAD")
+    if result.ok and str(result.stdout or "").strip():
+        return True
+    return False
+
+
+def git_path_is_tracked(root: str | Path, rel: str) -> bool | None:
+    """Per-path tracked check. Not a whole-tree ``git status``.
+
+    Returns True when Git tracks the path, False when a Git host does not
+    track it, and None when no Git worktree is present or Git cannot answer.
+    """
+    host = Path(root)
+    marker = _nearest_git_marker(host)
+    if marker is None:
+        return None
+    target = str(rel or "").replace("\\", "/").strip().strip("/")
+    if not target:
+        return None
+    result = _run_git(host, "ls-files", "--error-unmatch", "--", target)
+    if result.ok:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
 def _run_git(root: Path, *args: str) -> _GitResult:
     try:
         completed = subprocess.run(

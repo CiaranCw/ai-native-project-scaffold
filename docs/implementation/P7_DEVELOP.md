@@ -34,6 +34,12 @@ Isolated Git worktrees remain out of P9's compressed scope.
 | `entry` | `SKILL.md` |
 | `package_format_version` | `1` |
 
+`develop@2.1.0` remains the unreleased MINOR candidate. SKILL_CONTRACT §11
+makes released `<skill_id>@<skill_version>` immutable; this repository has not
+released `develop@2.1.0` (FA2 Batch 5/9; v2.0 is unreleased). Lightweight
+Develop changes package bytes and therefore the package digest; it does not
+advance the unreleased version. Released `develop@2.0.0` is unmodified.
+
 `requires` remains empty in the live package. Test is invoked through the published `TestEngine` boundary, not as a lock-granted permission. The P4 illustrative `test.execution` requirement is example data, not release data.
 
 `develop.task_intake` is an additive prelude of `normal_task`, not a third
@@ -211,11 +217,13 @@ Session-S0/S1 overlays are compact dirty-path observations where the host can ho
 
 Loading an existing Session fail-closes unless `session.yaml` carries usable task, mode, project, baseline, Session-S0 overlay, and observed candidate binding, and unless `files.yaml` exists and is structurally valid. Raw `status == OPEN` plus a matching `task_id` is not sufficient current editor authority. Hand-written partial Session files do not grant authority.
 
-Editor mutation authority requires an explicit current execution pointer. A raw OPEN Session is durable history/recovery evidence, not a mutation grant. The execution also freezes `open-inventory.yaml` at bind time. Task scope says WHERE a Task may change; `files.yaml` records successful observed mutations and `mutation-attempts.yaml` records pending/failed authorizations. Scope is not provenance. In-scope editor evolution remains valid only when the path has successful observed provenance from the current execution. New product-scope or supporting-scope paths without an observed mutation, and outside-scope drift, fail closed. Inherited dirty files that are unchanged since open remain distinct and do not false-fail. Open-inventory bytes are physical starting observation, not proof that those bytes were legitimate or accepted.
+Editor mutation authority requires an explicit current execution pointer. A raw OPEN Session is durable history/recovery evidence, not a mutation grant. The execution also freezes `open-inventory.yaml` at bind time. Task scope is semantic intent, not a pre-write allowlist. `files.yaml` is the durable Session change set. Physical reconciliation (`reconcile_session_changes`) diffs live execution-workspace bytes against S0 and writes `mutation_state: reconciled`. A successful observation MAY enrich a row as `observed_success`. Both count as legitimate physical attribution when `after_digest` matches live bytes. Hook provenance is not required. Legacy `mutation-attempts.yaml` MAY remain readable; `authorized_pending` rows MUST NOT poison seal. Inherited dirty files that are unchanged since open remain distinct and do not false-fail. Open-inventory bytes are physical starting observation, not proof that those bytes were legitimate or accepted.
 
-Client recording model: Cursor `preToolUse` authorizes a mutation attempt and writes a durable pending transaction (`authorized_pending` in `mutation-attempts.yaml`). That row is not mutation provenance: it does not explain the path, does not let seal stamp live bytes as execution-produced, and does not make P8 `DEVELOP_KNOWN`. Successful `postToolUse` observes the actual filesystem post-state (digest or absence) and records `observed_success` into `files.yaml`. `postToolUseFailure` fails/cancels the pending row and leaves no whitelist. `afterFileEdit` / `afterTabFileEdit` may complete a unique pending authorization that belongs to the **current** Develop execution and the same normalized path; they must not attach a replayed/late event to whichever Session happens to be current, and an ambiguous match is ignored as provenance. Delete success is source-absent. Move/Rename success is source-absent plus destination observed. Unresolved pending rows fail closed at seal; they are never upgraded by hashing whatever bytes exist at seal time. Same-path rewrite after a successful observation is out-of-band drift. Same-path rewrite after failure or with no terminal event is unexplained / unresolved, never `DEVELOP_KNOWN`. After seal the pointer is removed and no editor authority remains. Submit reviews the sealed historical delta without reopening execution.
+**Superseded (pre-autonomy fail-closed mutation model):** the prior client recording model that treated Cursor `preToolUse` as a durable `authorized_pending` transaction, required `postToolUse` / `afterFileEdit` to mint `observed_success`, denied unknown editor tool names, and fail-closed unresolved pending rows at seal. That model is replaced by Constitution §6 D-A1–D-A11. Observation hooks are optional. Their timeout, invalid observation, ambiguous event, unknown tool, or missing event MUST NOT revert a valid source mutation, deny ordinary Develop, poison Session, or block seal merely because observation was absent. Physical truth outranks hook history.
 
-Hard live mutation enforcement is validated for the supported Cursor hook surface registered in the Scaffold fragment (`preToolUse`, `postToolUse`, `postToolUseFailure`, `afterFileEdit`, `afterTabFileEdit`, plus the existing shell/subagent/MCP gates). Cursor environments do not all expose identical hook coverage; cloud-agent / early read-only surfaces may omit some hooks. Those environments cannot claim the same live mutation-enforcement guarantee. Unrecorded changes still fail closed at Develop seal where provenance reconciliation observes them. This is input to a later Client Adapter Capability Matrix; this package does not implement multi-client or Cursor-cloud portability.
+Cheap pre-write interception, where a client exposes `preToolUse` / `beforeShellExecution` or equivalent, MAY prevent workspace escape, protected Scaffold governance / `.git` / `AGENTS.md` / `.gitattributes` / declared `CLIENT_SUPPORT`, destructive SCM operations, and irrecoverable (untracked or no-SCM) deletion. Tracked SCM deletion is recoverable and is not a general Develop blocker. Scaffold MUST NOT claim a pre-write guarantee that is impossible without a client/OS interception surface. Observation events MUST NOT be registered `failClosed`.
+
+Ordinary editor tool identity is not mutation authority. Pre-write irrecoverable-deletion protection can be applied only where the adapter/interception event exposes enough information to classify the operation as a deletion (for example a known Delete/Move/Rename payload with a target path). An unknown tool name that semantically deletes content may not be identifiable as deletion before execution. That limitation does not weaken post-reconciliation physical truth: deletions still appear in `files.yaml` against S0.
 
 `DevelopEngine.run` still requires exact candidate match when resuming a Session by `session_id` without the current execution pointer.
 
@@ -223,10 +231,10 @@ Unsuccessful started Sessions terminate as `ABORTED`. It does not invent extra s
 
 FA2-FND-005: ABORT means this Session is not trustworthy as a completed
 Develop result. ABORT does NOT mean current workspace bytes are accepted,
-that successful `observed_success` mutations never occurred, or that
-unexplained drift may be forgotten. `observed_success` provenance remains
-attribution after abort and is not `DEVELOP_KNOWN`. Pending authorization
-is not upgraded to provenance. Candidate acceptance does not occur.
+that successful `observed_success` / `reconciled` mutations never occurred, or that
+unexplained drift may be forgotten. Physical attribution remains
+attribution after abort and is not `DEVELOP_KNOWN`. Legacy pending
+authorization is not upgraded to provenance. Candidate acceptance does not occur.
 
 Abort MUST remain an escape path: persist unresolved physical truth, then
 proceed. Drift MUST NOT make abort impossible.

@@ -20,8 +20,10 @@ OPEN_INVENTORY_NAME = "open-inventory.yaml"
 MUTATION_ATTEMPTS_NAME = "mutation-attempts.yaml"
 MUTATION_PENDING = "authorized_pending"
 MUTATION_OBSERVED = "observed_success"
+MUTATION_RECONCILED = "reconciled"
 MUTATION_FAILED = "failed"
 MUTATION_CANCELLED = "cancelled"
+PHYSICAL_ATTRIBUTION_STATES = frozenset({MUTATION_OBSERVED, MUTATION_RECONCILED})
 INVENTORY_SKIP_DIRS = frozenset(
     {".git", ".scaffold", "__pycache__", "test-runs"}
 )
@@ -252,6 +254,30 @@ def persist_mutation_attempts(
     )
 
 
+def persist_files_yaml(directory: Path, files: list[dict[str, Any]]) -> None:
+    write_yaml_atomic(directory / "files.yaml", {"files": list(files)})
+
+
+def is_physical_attribution(row: dict[str, Any] | None) -> bool:
+    """True when files.yaml bytes are legitimate Session attribution.
+
+    Hook-enriched ``observed_success`` and physically reconciled rows both
+    count when they describe live bytes. Pending/failed/cancelled never do.
+    """
+    if not isinstance(row, dict):
+        return False
+    state = str(row.get("mutation_state") or "").strip()
+    if state in {MUTATION_PENDING, MUTATION_FAILED, MUTATION_CANCELLED}:
+        return False
+    if state in PHYSICAL_ATTRIBUTION_STATES:
+        return True
+    if row.get("change_kind") == "deleted":
+        return True
+    if row.get("after_kind") == "missing" and not row.get("after_digest"):
+        return False
+    return isinstance(row.get("after_digest"), str) and bool(row.get("after_digest"))
+
+
 def record_touch(
     directory: Path,
     files: list[dict[str, Any]],
@@ -265,6 +291,7 @@ def record_touch(
     was_preexisting_dirty: bool,
     stage_ids: list[str],
     mutation_state: str = MUTATION_OBSERVED,
+    extra: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     entry = {
         "path": rel,
@@ -279,9 +306,11 @@ def record_touch(
         "stage_ids": list(stage_ids),
         "mutation_state": mutation_state,
     }
+    if extra:
+        entry.update(extra)
     updated = [row for row in files if row.get("path") != rel]
     updated.append(entry)
-    write_yaml_atomic(directory / "files.yaml", {"files": updated})
+    persist_files_yaml(directory, updated)
     return updated
 
 

@@ -349,17 +349,10 @@ def path_digest(root: Path, rel: str) -> str:
 
 
 def _successful_develop_touch(item: dict[str, Any]) -> bool:
-    """Only successful observed Develop mutations are DEVELOP_KNOWN-eligible."""
-    state = str(item.get("mutation_state") or "").strip()
-    if state in {"authorized_pending", "failed", "cancelled"}:
-        return False
-    if state == "observed_success":
-        return True
-    if item.get("change_kind") == "deleted":
-        return True
-    if item.get("after_kind") == "missing" and not item.get("after_digest"):
-        return False
-    return isinstance(item.get("after_digest"), str) and bool(item.get("after_digest"))
+    """Successful observed or reconciled Develop mutations are DEVELOP_KNOWN-eligible."""
+    from scaffold_p7.session import is_physical_attribution
+
+    return is_physical_attribution(item)
 
 
 def _path_state(root: Path, rel: str) -> tuple[str, str | None]:

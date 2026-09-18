@@ -16,7 +16,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scaffold_p5.host_state import snapshot_host
+from scaffold_p5.host_state import (
+    ADOPTION_SESSIONS,
+    AGENTS_MD,
+    COMMANDS_YAML,
+    MIGRATION_EXECS,
+    MODULES_YAML,
+    PROJECT_YAML,
+    SKILLS_LOCK,
+    TESTS_YAML,
+    classify_host,
+    inspect_adoption_recovery,
+    inspect_lock,
+    inspect_migration_recovery,
+    inspect_project,
+    snapshot_host,
+)
 from scaffold_p5.io_util import sha256_bytes
 
 
@@ -41,6 +56,12 @@ HOOK_EVENTS = (
     "beforeMCPExecution",
     "afterFileEdit",
     "afterTabFileEdit",
+)
+OBSERVATION_HOOK_EVENTS = frozenset(
+    {"postToolUse", "postToolUseFailure", "afterFileEdit", "afterTabFileEdit"}
+)
+INTERCEPTION_HOOK_EVENTS = frozenset(
+    {"preToolUse", "beforeShellExecution", "subagentStart", "beforeMCPExecution"}
 )
 OWNERSHIP_MANAGED_JSON_FRAGMENT = "MANAGED_JSON_FRAGMENT"
 
@@ -256,9 +277,10 @@ DEVELOP_DENY_MESSAGE = (
     ".scaffold/tasks/ directly."
 )
 DEVELOP_USER_DENY_MESSAGE = (
-    "Scaffold Develop gate blocked a project mutation that is outside the "
-    "current Task product or supporting scope, or that has no current "
-    "Develop Task, mutable Stage, and OPEN Session."
+    "Scaffold Develop gate blocked a project mutation that crosses a hard "
+    "boundary (workspace escape, protected Scaffold governance, destructive "
+    "SCM, or irrecoverable deletion), or that has no current Develop Task, "
+    "mutable Stage, and OPEN Session."
 )
 RECOVERY_DENY_MESSAGE = (
     "Project mutation is blocked because this adopted host is degraded or "
@@ -288,15 +310,19 @@ If the host is NOT_ADOPTED, ordinary project mutation is not authorized.
 
 Required route: `python .scaffold/install/run.py understand bootstrap`.
 
-If the host is ACTIVE / ESTABLISHED_HOST, ordinary HUMAN_OWNED business
-mutation is not authorized until Develop has a current IN_PROGRESS Task
-Book, a mutable Stage, and an OPEN Develop Session bound to that Task.
-Mutation is then authorized only inside that Task's product or supporting
-scope. An OPEN Session is not a repository-global unlock.
+If the host is ACTIVE / ESTABLISHED_HOST, ordinary project mutation is
+not authorized until Develop has a current IN_PROGRESS Task Book, a
+mutable Stage, and an OPEN Develop Session bound to that Task. Task
+scope is semantic intent, not a pre-write file allowlist. An OPEN
+Session is not a repository-global unlock.
 
 Required route: `python .scaffold/install/run.py enter develop
 --intake-json-b64 <envelope>`, then continue with
 `python .scaffold/install/run.py develop session --task-id <task-id>`.
+
+Observation hooks (postToolUse / afterFileEdit and equivalents) are
+optional. Their absence or failure must not stop ordinary in-workspace
+Develop. Physical reconciliation is the Session change set.
 
 Degraded adopted hosts (consistency, prior footprint, unresolved recovery)
 deny ordinary mutation. Recover with status / verify / understand
@@ -359,27 +385,52 @@ if __name__ == "__main__":
 '''
 
 
-def scaffold_hook_entry() -> dict[str, Any]:
+def scaffold_hook_entry(event: str | None = None) -> dict[str, Any]:
+    fail_closed = event not in OBSERVATION_HOOK_EVENTS
     return {
         "command": HOOK_COMMAND,
-        "failClosed": True,
+        "failClosed": fail_closed,
         "timeout": HOOK_TIMEOUT_SECONDS,
     }
 
 
 def canonical_hook_fragment() -> dict[str, Any]:
-    entry = scaffold_hook_entry()
     return {
         "schema": "scaffold-managed-json-fragment/v1",
         "fragment_id": FRAGMENT_ID,
         "path": HOOKS_JSON_REL,
-        "events": {event: [entry] for event in HOOK_EVENTS},
+        "events": {event: [scaffold_hook_entry(event)] for event in HOOK_EVENTS},
+    }
+
+
+def legacy_canonical_hook_fragment() -> dict[str, Any]:
+    """Pre-autonomy uniform failClosed=true fragment. Still VERIFY-readable."""
+    entry = {
+        "command": HOOK_COMMAND,
+        "failClosed": True,
+        "timeout": HOOK_TIMEOUT_SECONDS,
+    }
+    return {
+        "schema": "scaffold-managed-json-fragment/v1",
+        "fragment_id": FRAGMENT_ID,
+        "path": HOOKS_JSON_REL,
+        "events": {event: [dict(entry)] for event in HOOK_EVENTS},
     }
 
 
 def expected_hook_fragment_digest() -> str:
     payload = json.dumps(
         canonical_hook_fragment(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return sha256_bytes(payload.encode("utf-8"))
+
+
+def legacy_hook_fragment_digest() -> str:
+    payload = json.dumps(
+        legacy_canonical_hook_fragment(),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
@@ -396,10 +447,22 @@ def is_scaffold_hook_command(item: Any) -> bool:
     ) or "cursor_first_use_hook.py" in command
 
 
-def first_use_decision(host: str | Path) -> dict[str, Any]:
-    """Authoritative first-use mutation decision from existing host state."""
+def first_use_decision(
+    host: str | Path,
+    *,
+    cheap: bool = False,
+) -> dict[str, Any]:
+    """Authoritative first-use mutation decision from existing host state.
+
+    ``cheap=True`` is the editor hot path: no whole-project inventory, Git
+    status, or candidate observation. Full ``snapshot_host`` remains the
+    status/preflight authority.
+    """
     try:
-        snapshot = snapshot_host(host)
+        if cheap:
+            snapshot = _cheap_host_snapshot(host)
+        else:
+            snapshot = snapshot_host(host)
         host_class = str(snapshot.host_class or "")
         known = True
         reason = "existing Scaffold lifecycle authority"
@@ -452,7 +515,9 @@ def first_use_decision(host: str | Path) -> dict[str, Any]:
         )
     from scaffold_p7.develop_authority import resolve_current_develop_authority
 
-    authority = resolve_current_develop_authority(Path(host))
+    authority = resolve_current_develop_authority(
+        Path(host), require_provenance=False
+    )
     if not authority.ok:
         return _block_decision(
             host_class=host_class,
@@ -482,6 +547,7 @@ def first_use_decision(host: str | Path) -> dict[str, Any]:
             "session_id": authority.session_id,
             "mutable_stage_ids": list(authority.mutable_stage_ids),
         },
+        "current_authority": authority,
     }
 
 
@@ -500,12 +566,12 @@ def evaluate_cursor_hook(
     host_root = resolve_hook_host(data, host)
     if host_root is None:
         return _deny(UNKNOWN_DENY_MESSAGE, reason="host root could not be resolved")
-    authority = first_use_decision(host_root)
+    authority = first_use_decision(host_root, cheap=True)
     policy = str(authority.get("gate_policy") or GATE_FAIL_CLOSED)
     deny_message = authority.get("agent_message") or AGENT_DENY_MESSAGE
     deny_user = authority.get("user_message") or USER_DENY_MESSAGE
     if policy == GATE_DEVELOP:
-        deny_when = "outside current Develop Task/Stage/Session scope"
+        deny_when = "without current Develop Task/Stage/Session or across a hard boundary"
     elif policy == GATE_RECOVERY:
         deny_when = "before host recovery"
     elif policy == GATE_FAIL_CLOSED:
@@ -555,6 +621,7 @@ def evaluate_cursor_hook(
             event,
             tool_name,
             policy=policy,
+            authority=authority,
         )
     if policy != GATE_DEVELOP:
         return _deny(
@@ -562,28 +629,30 @@ def evaluate_cursor_hook(
             reason=f"{tool_name or event or 'tool'} is not authorized {deny_when}",
             user_message=deny_user,
         )
-    if tool_name not in EDITOR_MUTATION_TOOLS:
-        return _deny(
-            deny_message,
-            reason=f"{tool_name or event or 'tool'} is not authorized {deny_when}",
-            user_message=deny_user,
-        )
     paths, path_error = _mutation_target_paths(data, host_root)
-    if path_error:
+    if path_error and "outside the host" in path_error:
         return _deny(deny_message, reason=path_error, user_message=deny_user)
-    from scaffold_p7.develop_authority import (
-        authorize_mutation_paths,
-        record_pending_mutation,
-    )
+    if path_error:
+        paths = []
+    from scaffold_p7.develop_authority import authorize_mutation_paths
 
-    allowed, detail = authorize_mutation_paths(host_root, paths)
+    current_authority = authority.get("current_authority")
+    allowed, detail = authorize_mutation_paths(
+        host_root,
+        paths,
+        authority=current_authority,
+        deleting=False,
+    )
     if allowed:
-        record_pending_mutation(
-            host_root,
-            paths,
-            tool_name=tool_name,
-            tool_use_id=_tool_use_id(data),
-        )
+        deletion_paths = _deletion_target_paths(tool_name, data, host_root, paths)
+        if deletion_paths:
+            allowed, detail = authorize_mutation_paths(
+                host_root,
+                deletion_paths,
+                authority=current_authority,
+                deleting=True,
+            )
+    if allowed:
         return _allow(detail)
     return _deny(deny_message, reason=detail, user_message=deny_user)
 
@@ -595,12 +664,11 @@ def _handle_mutation_terminal(
     tool_name: str,
     *,
     policy: str,
+    authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Record terminal/after-file observations. Never manufacture provenance."""
+    """Record terminal/after-file observations. Never manufacture authority."""
     if policy != GATE_DEVELOP:
         return _allow("terminal mutation observation without current Develop authority")
-    if tool_name and tool_name not in EDITOR_MUTATION_TOOLS and event in TERMINAL_EVENTS:
-        return _allow("non-editor-mutation terminal event")
     from scaffold_p7.develop_authority import (
         fail_authorized_mutation,
         observe_authorized_mutation,
@@ -625,12 +693,8 @@ def _handle_mutation_terminal(
             tool_use_id=tool_use_id,
             state=state,
         )
-        return _allow("mutation attempt failed; no execution provenance")
+        return _allow("mutation observation failed; physical reconciliation remains authoritative")
     if path_error:
-        if event != "postToolUse" or not tool_use_id:
-            return _allow(
-                "after-file event has no compatible current pending authorization"
-            )
         paths = []
     _recorded, detail = observe_authorized_mutation(
         host_root,
@@ -638,6 +702,7 @@ def _handle_mutation_terminal(
         tool_name=tool_name,
         tool_use_id=tool_use_id,
         observation_scope=_observation_scope(event),
+        authority=(authority or {}).get("current_authority") if isinstance(authority, dict) else None,
     )
     return _allow(detail)
 
@@ -773,6 +838,9 @@ def resolve_hook_host(
         found = _find_install_root(resolved)
         if found is not None:
             return found
+        found = _find_project_root(resolved)
+        if found is not None:
+            return found
     return None
 
 
@@ -805,19 +873,30 @@ def hook_main(
     del argv
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
+    raw = ""
+    event = ""
     try:
         raw = decode_hook_stdin(stdin)
         payload = json.loads(raw or "{}")
         if not isinstance(payload, dict):
             raise ValueError("hook payload is not an object")
+        event = _hook_event(payload)
         result = evaluate_cursor_hook(payload)
         _write_hook_result(stdout, result)
         return 0
     except (json.JSONDecodeError, ValueError, TypeError, OSError, AttributeError, KeyError):
+        if event in OBSERVATION_HOOK_EVENTS or _raw_looks_like_observation(raw):
+            result = _allow("invalid observation is non-blocking")
+            _write_hook_result(stdout, result)
+            return 0
         result = _deny(UNKNOWN_DENY_MESSAGE, reason="invalid or unusable hook input")
         _write_hook_result(stdout, result)
         return 2
     except Exception:
+        if event in OBSERVATION_HOOK_EVENTS or _raw_looks_like_observation(raw):
+            result = _allow("observation hook failure is non-blocking")
+            _write_hook_result(stdout, result)
+            return 0
         result = _deny(UNKNOWN_DENY_MESSAGE, reason="hook adapter failure")
         _write_hook_result(stdout, result)
         return 2
@@ -841,11 +920,10 @@ def merge_scaffold_hooks(existing: Any | None) -> dict[str, Any]:
         data["hooks"] = hooks
     if not isinstance(hooks, dict):
         raise ValueError("hooks.json hooks field is not an object")
-    entry = scaffold_hook_entry()
     for event in HOOK_EVENTS:
         current = hooks.get(event)
         if current is None:
-            hooks[event] = [dict(entry)]
+            hooks[event] = [scaffold_hook_entry(event)]
             continue
         if not isinstance(current, list):
             raise ValueError(f"hooks.json {event} is not a list")
@@ -854,12 +932,12 @@ def merge_scaffold_hooks(existing: Any | None) -> dict[str, Any]:
         for item in current:
             if is_scaffold_hook_command(item):
                 if not inserted:
-                    kept.append(dict(entry))
+                    kept.append(scaffold_hook_entry(event))
                     inserted = True
                 continue
             kept.append(item)
         if not inserted:
-            kept.insert(0, dict(entry))
+            kept.insert(0, scaffold_hook_entry(event))
         hooks[event] = kept
     return data
 
@@ -885,7 +963,6 @@ def inspect_scaffold_hook_fragment(
     if not isinstance(hooks, dict):
         incompat.append(".cursor/hooks.json hooks field is malformed")
         return None, missing, drifted, incompat
-    expected_entry = scaffold_hook_entry()
     events: dict[str, list[dict[str, Any]]] = {}
     for event in HOOK_EVENTS:
         arr = hooks.get(event)
@@ -903,10 +980,10 @@ def inspect_scaffold_hook_fragment(
             missing.append(HOOKS_JSON_REL)
             continue
         item = found[0]
-        if not isinstance(item, dict) or not _hook_entry_matches(item, expected_entry):
+        if not isinstance(item, dict) or not _hook_entry_matches(item, event=event):
             drifted.append(HOOKS_JSON_REL)
             continue
-        events[event] = [expected_entry]
+        events[event] = [_normalized_hook_entry(item, event)]
     if missing or drifted or incompat:
         return None, sorted(set(missing)), sorted(set(drifted)), incompat
     fragment = {
@@ -1271,6 +1348,30 @@ def _mutation_gate_policy(snapshot: Any) -> str:
     return GATE_RECOVERY
 
 
+def _deletion_target_paths(
+    tool_name: str,
+    payload: dict[str, Any],
+    host: Path,
+    paths: list[str],
+) -> list[str]:
+    """Paths the client is asking to remove. Cheap; no project scan."""
+    if tool_name in {"Delete", "DeleteFile"}:
+        return list(paths)
+    if tool_name not in {"Move", "Rename"}:
+        return []
+    tool_input = _tool_input_object(payload)
+    raw = (
+        payload.get("old_path")
+        or tool_input.get("old_path")
+        or payload.get("src")
+        or tool_input.get("src")
+    )
+    rel, error = _relative_mutation_path(host, raw)
+    if error or not rel:
+        return []
+    return [rel]
+
+
 def _mutation_target_paths(
     payload: dict[str, Any],
     host: Path,
@@ -1360,13 +1461,92 @@ def _find_install_root(start: Path) -> Path | None:
     return None
 
 
-def _hook_entry_matches(item: dict[str, Any], expected: dict[str, Any]) -> bool:
-    extra = set(item) - set(expected)
+def _find_project_root(start: Path) -> Path | None:
+    current = start
+    if current.is_file():
+        current = current.parent
+    for _ in range(8):
+        if (current / ".scaffold" / "project.yaml").is_file():
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def _normalized_hook_entry(item: dict[str, Any], event: str) -> dict[str, Any]:
+    fail_closed = item.get("failClosed")
+    if event in OBSERVATION_HOOK_EVENTS:
+        fail_closed = bool(fail_closed)
+    else:
+        fail_closed = True
+    return {
+        "command": HOOK_COMMAND,
+        "failClosed": fail_closed,
+        "timeout": HOOK_TIMEOUT_SECONDS,
+    }
+
+
+def _hook_entry_matches(item: dict[str, Any], event: str | None = None, expected: dict[str, Any] | None = None) -> bool:
+    wanted = expected if expected is not None else scaffold_hook_entry(event)
+    extra = set(item) - {"command", "failClosed", "timeout"}
     if extra:
         return False
-    return (
-        str(item.get("command") or "").strip().replace("\\", "/") == expected["command"]
-        and item.get("failClosed") is True
-        and int(item.get("timeout") or 0) == expected["timeout"]
-        and "matcher" not in item
+    command = str(item.get("command") or "").strip().replace("\\", "/")
+    if command != wanted["command"]:
+        return False
+    if int(item.get("timeout") or 0) != wanted["timeout"]:
+        return False
+    if "matcher" in item:
+        return False
+    fail_closed = item.get("failClosed")
+    if event in OBSERVATION_HOOK_EVENTS:
+        return fail_closed in {True, False}
+    return fail_closed is True
+
+
+def _raw_looks_like_observation(raw: str) -> bool:
+    text = str(raw or "")
+    return any(name in text for name in OBSERVATION_HOOK_EVENTS)
+
+
+_CHEAP_IDENTITY_RELS = (
+    MODULES_YAML,
+    COMMANDS_YAML,
+    TESTS_YAML,
+    AGENTS_MD,
+    SKILLS_LOCK,
+)
+
+
+def _cheap_host_snapshot(host: str | Path):
+    """Lifecycle class without whole-project inventory or Git status.
+
+    Reads bounded authority files and small recovery directories so the
+    established recovery gate (missing authoritative skills.lock, unresolved
+    Adoption/Migration evidence, RECOVERY_REQUIRED) still fail-closes.
+    """
+    from types import SimpleNamespace
+
+    root = Path(host)
+    view = inspect_project(root / PROJECT_YAML)
+    lock = inspect_lock(root / SKILLS_LOCK)
+    adoption_recovery = inspect_adoption_recovery(root / ADOPTION_SESSIONS)
+    migration_recovery = inspect_migration_recovery(root / MIGRATION_EXECS)
+    files = [rel for rel in _CHEAP_IDENTITY_RELS if (root / rel).exists()]
+    host_class, context, _blockers, _evidence = classify_host(
+        root,
+        files,
+        view,
+        lock,
+        adoption_recovery,
+        migration_recovery,
+    )
+    project = view.data if isinstance(view.data, dict) else None
+    lifecycle = str((project or {}).get("lifecycle") or "") if project else None
+    return SimpleNamespace(
+        host_class=host_class,
+        project=project,
+        lifecycle=lifecycle,
+        preflight_context=context,
     )

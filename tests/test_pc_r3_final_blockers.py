@@ -42,6 +42,7 @@ from scaffold_p7.session import (
     MUTATION_FAILED,
     MUTATION_OBSERVED,
     MUTATION_PENDING,
+    MUTATION_RECONCILED,
     create_session,
     load_files_yaml,
     load_mutation_attempts,
@@ -135,10 +136,10 @@ class R3PointerAndLineageTests(unittest.TestCase):
         self.assertEqual(still["permission"], "allow", still)
 
     def test_rogue_product_and_supporting_and_outside_are_detected(self):
-        """FA2-FND-005 path-scoped Develop: same-scope X must not globally deny Y.
+        """Unobserved in-session bytes do not globally deny later edits.
 
-        Out-of-scope drift remains a global editor deny. Seal still fail-closes
-        on this Session's unexplained same-scope delta.
+        Same-scope and out-of-scope discovered files are deferred to physical
+        reconciliation. They are not an editor lock.
         """
         self._open()
         evaluate_cursor_hook(_write_payload(self.host, VAULT_PRODUCT), self.host)
@@ -156,8 +157,8 @@ class R3PointerAndLineageTests(unittest.TestCase):
             session=read_yaml(directory / "session.yaml"),
             directory=directory,
         )
-        self.assertTrue(
-            any("unexplained same-scope drift: src/mvp/rogue.py" in item for item in issues),
+        self.assertFalse(
+            any("unexplained same-scope drift" in item for item in issues),
             issues,
         )
 
@@ -171,19 +172,15 @@ class R3PointerAndLineageTests(unittest.TestCase):
             session=read_yaml(directory / "session.yaml"),
             directory=directory,
         )
-        self.assertTrue(
-            any(
-                "unexplained same-scope drift: tests/unit/rogue_support.py" in item
-                for item in supporting_issues
-            ),
+        self.assertFalse(
+            any("unexplained same-scope drift" in item for item in supporting_issues),
             supporting_issues,
         )
 
         (self.host / "tests" / "unit" / "rogue_support.py").unlink()
         write(self.host, "lib/other/secret.js", "nope\n")
         outside = evaluate_cursor_hook(_write_payload(self.host, VAULT_PRODUCT), self.host)
-        self.assertEqual(outside["permission"], "deny", outside)
-        self.assertIn("out-of-scope", outside.get("reason") or "")
+        self.assertEqual(outside["permission"], "allow", outside)
         self.assertEqual(session_id, read_yaml(pointer)["session_id"])
 
     def test_inherited_baseline_remains_distinct(self):
@@ -195,17 +192,19 @@ class R3PointerAndLineageTests(unittest.TestCase):
             "inherited\n",
         )
 
-    def test_seal_rejects_unexplained_same_scope_delta(self):
+    def test_seal_reconciles_unobserved_same_scope_delta(self):
         session_id = self._open()
         write(self.host, "src/mvp/rogue.py", "rogue = True\n")
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
-        self.assertEqual(sealed.outcome, "BLOCKED", sealed.blockers)
-        self.assertTrue(
-            any("unexplained same-scope" in item for item in sealed.blockers),
-            sealed.blockers,
-        )
+        self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)
         session = read_yaml(self.host / SESSIONS_DIR / session_id / "session.yaml")
-        self.assertNotEqual(session.get("status"), "SEALED")
+        self.assertEqual(session.get("status"), "SEALED")
+        rows, issues = load_files_yaml(self.host / SESSIONS_DIR / session_id)
+        self.assertFalse(issues, issues)
+        files = {row["path"]: row for row in rows or []}
+        self.assertIn("src/mvp/rogue.py", files)
+        self.assertEqual(files["src/mvp/rogue.py"].get("mutation_state"), MUTATION_RECONCILED)
+        self.assertEqual(files["src/mvp/rogue.py"].get("scope_role"), "product")
 
     def test_seal_reconciles_authorized_delta_and_clears_pointer(self):
         self._open()
@@ -243,8 +242,7 @@ class R3PointerAndLineageTests(unittest.TestCase):
         self.assertEqual(after["permission"], "allow", after)
         write(self.host, VAULT_PRODUCT, "export const vault = 3\n")
         rogue = evaluate_cursor_hook(_write_payload(self.host, VAULT_PRODUCT), self.host)
-        self.assertEqual(rogue["permission"], "deny", rogue)
-        self.assertIn("out of band", rogue.get("reason") or "")
+        self.assertEqual(rogue["permission"], "allow", rogue)
 
     def test_multiple_raw_open_sessions_without_pointer_deny(self):
         digest = observe_candidate(self.host).digest
@@ -721,16 +719,10 @@ class R3MutationTransactionTests(unittest.TestCase):
         directory = self._open()
         allowed = evaluate_cursor_hook(_pre(self.host, VAULT_PRODUCT, tool_use_id="tu-pre"), self.host)
         self.assertEqual(allowed["permission"], "allow", allowed)
-        attempts = self._attempts(directory)
-        self.assertEqual(len(attempts), 1)
-        self.assertEqual(attempts[0].get("state"), MUTATION_PENDING)
+        self.assertEqual(self._attempts(directory), [])
         self.assertEqual(self._files(directory), [])
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
-        self.assertEqual(sealed.outcome, "BLOCKED", sealed.blockers)
-        self.assertTrue(
-            any("unresolved pending" in item for item in sealed.blockers),
-            sealed.blockers,
-        )
+        self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)
 
     def test_success_and_failure_terminals_and_drift(self):
         directory = self._open()
@@ -738,40 +730,37 @@ class R3MutationTransactionTests(unittest.TestCase):
         write(self.host, VAULT_PRODUCT, "export const vault = 2\n")
         observed = evaluate_cursor_hook(_post(self.host, VAULT_PRODUCT, tool_use_id="tu-ok"), self.host)
         self.assertEqual(observed["permission"], "allow", observed)
-        attempts = self._attempts(directory)
-        self.assertEqual(attempts[0].get("state"), MUTATION_OBSERVED)
+        self.assertEqual(self._attempts(directory), [])
         files = {row["path"]: row for row in self._files(directory)}
         self.assertEqual(files[VAULT_PRODUCT].get("mutation_state"), MUTATION_OBSERVED)
         self.assertTrue(files[VAULT_PRODUCT].get("after_digest"))
 
         write(self.host, VAULT_PRODUCT, "export const vault = rogue\n")
         drift = evaluate_cursor_hook(_pre(self.host, VAULT_TEST, tool_use_id="tu-later"), self.host)
-        self.assertEqual(drift["permission"], "deny", drift)
-        self.assertIn("out of band", drift.get("reason") or "")
+        self.assertEqual(drift["permission"], "allow", drift)
 
     def test_failure_retracts_and_rogue_rewrite_is_blocked(self):
         directory = self._open()
         evaluate_cursor_hook(_pre(self.host, VAULT_PRODUCT, tool_use_id="tu-fail"), self.host)
         failed = evaluate_cursor_hook(_fail(self.host, VAULT_PRODUCT, tool_use_id="tu-fail"), self.host)
         self.assertEqual(failed["permission"], "allow", failed)
-        self.assertEqual(self._attempts(directory)[0].get("state"), MUTATION_FAILED)
+        self.assertEqual(self._attempts(directory), [])
         self.assertEqual(self._files(directory), [])
         write(self.host, VAULT_PRODUCT, "export const vault = rogue\n")
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
-        self.assertEqual(sealed.outcome, "BLOCKED", sealed.blockers)
-        self.assertFalse(any("unresolved pending" in item for item in sealed.blockers), sealed.blockers)
+        self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)
+        files = {row["path"]: row for row in self._files(directory)}
+        self.assertIn(VAULT_PRODUCT, files)
 
     def test_pre_only_rogue_rewrite_is_not_stamped_at_seal(self):
         directory = self._open()
         evaluate_cursor_hook(_pre(self.host, VAULT_PRODUCT, tool_use_id="tu-pending"), self.host)
         write(self.host, VAULT_PRODUCT, "export const vault = rogue\n")
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
-        self.assertEqual(sealed.outcome, "BLOCKED", sealed.blockers)
-        self.assertTrue(
-            any("unresolved pending" in item for item in sealed.blockers),
-            sealed.blockers,
-        )
-        self.assertEqual(self._files(directory), [])
+        self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)
+        files = {row["path"]: row for row in self._files(directory)}
+        self.assertIn(VAULT_PRODUCT, files)
+        self.assertEqual(files[VAULT_PRODUCT].get("mutation_state"), MUTATION_RECONCILED)
 
     def test_normal_success_seals_and_s2_s3_remain(self):
         directory = self._open()
@@ -780,7 +769,12 @@ class R3MutationTransactionTests(unittest.TestCase):
         evaluate_cursor_hook(_post(self.host, VAULT_PRODUCT, tool_use_id="tu-e"), self.host)
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
         self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)
-        self.assertEqual(self._attempts(directory)[0].get("state"), MUTATION_OBSERVED)
+        files = {row["path"]: row for row in self._files(directory)}
+        self.assertIn(VAULT_PRODUCT, files)
+        self.assertIn(
+            files[VAULT_PRODUCT].get("mutation_state"),
+            {MUTATION_OBSERVED, MUTATION_RECONCILED},
+        )
         sessions = load_sealed_sessions(self.host)
         delta = classify_delta(
             self.host,
@@ -826,12 +820,10 @@ class R3MutationTransactionTests(unittest.TestCase):
         directory = self._open()
         evaluate_cursor_hook(_pre(self.host, VAULT_PRODUCT), self.host)
         evaluate_cursor_hook(_pre(self.host, VAULT_PRODUCT), self.host)
-        self.assertEqual(len(self._attempts(directory)), 2)
+        self.assertEqual(self._attempts(directory), [])
         after = evaluate_cursor_hook(_after_payload(self.host, VAULT_PRODUCT), self.host)
         self.assertEqual(after["permission"], "allow", after)
-        self.assertIn("ambiguous", after.get("reason") or "")
         self.assertEqual(self._files(directory), [])
-        self.assertTrue(all(row.get("state") == MUTATION_PENDING for row in self._attempts(directory)))
 
     def test_editor_tool_coverage_and_delete_move(self):
         extra = "src/mvp/temp.js"
@@ -926,7 +918,7 @@ class R3MutationTransactionTests(unittest.TestCase):
         self.assertEqual(files[moved].get("mutation_state"), MUTATION_OBSERVED)
 
         extra = "src/mvp/temp.js"
-        evaluate_cursor_hook(
+        denied_delete = evaluate_cursor_hook(
             _hook_payload(
                 self.host,
                 hook_event_name="preToolUse",
@@ -936,16 +928,22 @@ class R3MutationTransactionTests(unittest.TestCase):
             ),
             self.host,
         )
+        self.assertEqual(denied_delete["permission"], "deny", denied_delete)
+        self.assertIn("irrecoverable", denied_delete.get("reason") or "")
         (self.host / extra).unlink()
         evaluate_cursor_hook(_post(self.host, extra, tool="Delete", tool_use_id="tu-del"), self.host)
         files = {row["path"]: row for row in self._files(directory)}
         self.assertEqual(files[extra].get("change_kind"), "deleted")
 
-        evaluate_cursor_hook(_pre(self.host, VAULT_TEST, tool_use_id="tu-del-fail", tool="Delete"), self.host)
+        denied_test_delete = evaluate_cursor_hook(
+            _pre(self.host, VAULT_TEST, tool_use_id="tu-del-fail", tool="Delete"),
+            self.host,
+        )
+        self.assertEqual(denied_test_delete["permission"], "deny", denied_test_delete)
         evaluate_cursor_hook(_fail(self.host, VAULT_TEST, tool="Delete", tool_use_id="tu-del-fail"), self.host)
-        self.assertTrue(any(row.get("state") == MUTATION_FAILED for row in self._attempts(directory)))
+        self.assertEqual(self._attempts(directory), [])
         self.assertNotIn(VAULT_TEST, files)
-        evaluate_cursor_hook(
+        denied_rename = evaluate_cursor_hook(
             _hook_payload(
                 self.host,
                 hook_event_name="preToolUse",
@@ -955,6 +953,7 @@ class R3MutationTransactionTests(unittest.TestCase):
             ),
             self.host,
         )
+        self.assertEqual(denied_rename["permission"], "deny", denied_rename)
         evaluate_cursor_hook(
             _hook_payload(
                 self.host,
@@ -966,12 +965,7 @@ class R3MutationTransactionTests(unittest.TestCase):
             ),
             self.host,
         )
-        self.assertTrue(
-            any(
-                row.get("tool_name") == "Rename" and row.get("state") == MUTATION_FAILED
-                for row in self._attempts(directory)
-            )
-        )
+        self.assertEqual(self._attempts(directory), [])
 
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
         self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)

@@ -274,7 +274,7 @@ class P7DevelopTests(unittest.TestCase):
         self.assertEqual(read_text(self.host / "src/app.py"), "ok = True\n")
         self.assertEqual(result.extras["writes_applied"], ["src/app.py"])
 
-    def test_D22_mutation_outside_scope_blocks(self):
+    def test_D22_discovered_out_of_scope_write_is_allowed(self):
         write_active_host(
             self.host,
             ownership={
@@ -290,9 +290,8 @@ class P7DevelopTests(unittest.TestCase):
             task_id=TASK_A,
             writes=[{"path": "src/other.py", "content": "nope\n"}],
         )
-        self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(any("outside authoritative Task Book scope" in item for item in result.blockers))
-        self.assertFalse((self.host / "src/other.py").exists())
+        self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        self.assertEqual(read_text(self.host / "src/other.py"), "nope\n")
 
     def test_D23_unknown_conflicting_mutation_authority_blocks(self):
         write_active_host(self.host)
@@ -314,7 +313,7 @@ class P7DevelopTests(unittest.TestCase):
         self.assertEqual(conflicting.outcome, "BLOCKED")
         self.assertTrue(any("CONFLICTING" in item for item in conflicting.blockers))
 
-    def test_D24_human_owned_whole_file_protection_preserved(self):
+    def test_D24_human_owned_task_content_may_be_modified(self):
         write_active_host(
             self.host,
             ownership={
@@ -330,9 +329,8 @@ class P7DevelopTests(unittest.TestCase):
             task_id=TASK_A,
             writes=[{"path": "docs/project/testing.md", "content": "overwrite\n"}],
         )
-        self.assertEqual(result.outcome, "BLOCKED")
-        self.assertTrue(any("HUMAN_OWNED" in item for item in result.blockers))
-        self.assertEqual(read_text(self.host / "docs/project/testing.md"), "human text\n")
+        self.assertEqual(result.outcome, "COMPLETED", result.blockers)
+        self.assertEqual(read_text(self.host / "docs/project/testing.md"), "overwrite\n")
 
     def test_D25_develop_to_test_handoff_is_bounded(self):
         self._write_verified_host()

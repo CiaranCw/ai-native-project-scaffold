@@ -264,8 +264,7 @@ class R4Maj008UnexplainedDriftTests(unittest.TestCase):
         authority = resolve_current_develop_authority(self.host)
         self.assertTrue(authority.ok, authority.reason)
         allowed, reason = authorize_mutation_paths(self.host, [B_FILE])
-        self.assertFalse(allowed)
-        self.assertTrue(reason)
+        self.assertTrue(allowed, reason)
 
     def test_06_external_no_hook_mutation_detected_at_next_boundary(self):
         _git_develop_host(self.host)
@@ -409,8 +408,8 @@ class R4Maj008UnexplainedDriftTests(unittest.TestCase):
         _git_develop_host(self.host)
         session_id = _open(self.host)
         write(self.host, APP, "value = rogue\n")
-        sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
-        self.assertEqual(sealed.outcome, "BLOCKED", sealed.blockers)
+        aborted = develop_engine(self.host).abort_develop_execution(task_id=TASK_A)
+        self.assertEqual(aborted.outcome, "COMPLETED", aborted.blockers)
         self.assertIn(APP, unexplained_path_map(self.host))
         session = read_yaml(self.host / SESSIONS_DIR / session_id / "session.yaml")
         session["status"] = "SEALED"
@@ -514,13 +513,16 @@ class R4Maj008UnexplainedDriftTests(unittest.TestCase):
         sealed = develop_engine(self.host).seal_develop_execution(task_id=TASK_A)
         self.assertEqual(sealed.outcome, "COMPLETED", sealed.blockers)
 
-    def test_21_out_of_scope_drift_still_blocks_and_x_keeps_authority(self):
+    def test_21_out_of_scope_drift_does_not_block_in_scope_edit(self):
         _git_develop_host(self.host)
         _open(self.host)
         write(self.host, "lib/secret.py", "nope\n")
         allowed, reason = authorize_mutation_paths(self.host, [APP])
-        self.assertFalse(allowed)
-        self.assertIn("out-of-scope", reason)
+        self.assertTrue(allowed, reason)
+        discovered, discovered_reason = authorize_mutation_paths(
+            self.host, ["lib/secret.py"]
+        )
+        self.assertTrue(discovered, discovered_reason)
 
 
 class R4Maj008FocusedCorrectionTests(unittest.TestCase):

@@ -30,7 +30,7 @@ from scaffold_p5.schemas import (
 from scaffold_p5.scm import observe_scm
 from scaffold_p6.candidate import is_ext_support_path, RUNTIME_PREFIX
 from scaffold_p7.models import SESSIONS_DIR, TASKS_DIR
-from scaffold_p7.session import MUTATION_OBSERVED, file_sha256, load_files_yaml, path_kind
+from scaffold_p7.session import file_sha256, load_files_yaml, path_kind
 
 
 UNEXPLAINED_REL = ".scaffold/ext/develop/unexplained.yaml"
@@ -166,14 +166,37 @@ def inspect_drift_authority(root: str | Path) -> dict[str, Any]:
 
 def physical_authority_issues(root: str | Path) -> list[str]:
     """Mutation requires known accepted truth and usable drift authority."""
+    issues = cheap_physical_authority_issues(root)
+    if issues:
+        return issues
     anchor = resolve_accepted_anchor(root)
     if not anchor.get("ok"):
         return list(anchor.get("blockers") or ["accepted physical authority is UNKNOWN"])
+    return []
+
+
+def cheap_physical_authority_issues(root: str | Path) -> list[str]:
+    """Durable drift/anchor presence without git status or workspace digest."""
     inspected = inspect_drift_authority(root)
     if inspected.get("state") == STATE_AUTHORITY_UNUSABLE:
         return list(inspected.get("blockers") or ["durable drift authority is unusable"])
     if inspected.get("state") == STATE_NEVER_INITIALIZED:
         return ["cross-session develop authority is not initialized"]
+    from scaffold_p5.scm import git_head_is_known
+
+    known = git_head_is_known(root)
+    if known is True:
+        return []
+    if known is False:
+        return ["Git accepted-anchor HEAD is UNKNOWN"]
+    from scaffold_p8.noscms import load_noscms_baseline
+
+    loaded = load_noscms_baseline(Path(root))
+    if not loaded.get("ok"):
+        return list(
+            loaded.get("blockers")
+            or ["accepted physical authority is UNKNOWN"]
+        )
     return []
 
 
@@ -489,16 +512,9 @@ def _current_byte_attributed(
 
 
 def _is_observed_success(item: dict[str, Any]) -> bool:
-    state = str(item.get("mutation_state") or "").strip()
-    if state in {"authorized_pending", "failed", "cancelled"}:
-        return False
-    if state == MUTATION_OBSERVED:
-        return True
-    if item.get("change_kind") == "deleted":
-        return True
-    if item.get("after_kind") == KIND_MISSING and not item.get("after_digest"):
-        return False
-    return isinstance(item.get("after_digest"), str) and bool(item.get("after_digest"))
+    from scaffold_p7.session import is_physical_attribution
+
+    return is_physical_attribution(item)
 
 
 def _manifest_after(item: dict[str, Any]) -> tuple[str, str | None]:

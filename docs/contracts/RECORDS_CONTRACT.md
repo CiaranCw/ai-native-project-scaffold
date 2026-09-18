@@ -946,10 +946,15 @@ For every Develop-touched path, the Session MUST be capable of recording:
 | `before_digest` / `after_digest` | When applicable |
 | `change_kind` | `created` \| `modified` \| `deleted` \| `type_changed` |
 | `was_preexisting_dirty` | Path already dirty/untracked at Session-S0 **before** this Session’s first mutation |
+| `mutation_state` | `observed_success` when a successful observation enriched the row; `reconciled` when physical reconciliation wrote the row. Both are legitimate physical attribution when `after_digest` matches live bytes. Hook provenance is not required. |
 | `patch_ref` | Optional relative patch file |
 | `stage_ids` | Relevant Stage(s), if a Task Book exists |
 
 MUST NOT store huge file bodies in the manifest.
+
+`mutation-attempts.yaml` is not a canonical record and is not Session
+authority. Legacy files MAY remain readable. Unresolved `authorized_pending`
+rows MUST NOT block seal.
 
 ### 17.4 Optional patches
 

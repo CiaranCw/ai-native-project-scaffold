@@ -129,7 +129,8 @@ class TaskSupportingDeltaTests(unittest.TestCase):
             task=self.task,
             project=self.project,
         )
-        self.assertFalse(undeclared.ok)
+        self.assertTrue(undeclared.ok, undeclared.blockers)
+        self.assertEqual(undeclared.authority[0]["scope_role"], "discovered")
         governance, issues = prepare_proposal(
             {
                 **_vault_proposal(),
@@ -287,14 +288,16 @@ class TaskSupportingDeltaTests(unittest.TestCase):
             task=self.task,
             project=project,
         )
-        self.assertFalse(managed.ok, managed.blockers)
+        self.assertTrue(managed.ok, managed.blockers)
+        self.assertEqual(managed.authority[0]["ownership"], "MANAGED")
         human = authorize_writes(
             self.host,
             writes=[{"path": VAULT_TOOL, "content": "console.log('no')\n"}],
             task=self.task,
             project=project,
         )
-        self.assertFalse(human.ok, human.blockers)
+        self.assertTrue(human.ok, human.blockers)
+        self.assertEqual(human.authority[0]["ownership"], "HUMAN_OWNED")
         structural = review_structure(
             root=self.host,
             task=self.task,
@@ -304,7 +307,9 @@ class TaskSupportingDeltaTests(unittest.TestCase):
             },
             project=project,
         )
-        self.assertFalse(structural["structural_review_pass"], structural["blockers"])
+        modes = {row["path"]: row["ownership"] for row in structural["ownership_authority"]}
+        self.assertEqual(modes.get(VAULT_TEST), "MANAGED")
+        self.assertEqual(modes.get(VAULT_TOOL), "HUMAN_OWNED")
 
     def test_hook_and_p7_share_path_authorization(self):
         from scaffold_p7.mutation import authorize_path_mutation
@@ -317,13 +322,14 @@ class TaskSupportingDeltaTests(unittest.TestCase):
         )
         self.assertTrue(allowed, reason)
         self.assertEqual(role, "supporting")
-        denied, _reason, _role = authorize_path_mutation(
+        discovered, discovered_reason, discovered_role = authorize_path_mutation(
             self.host,
             UNDECLARED,
             task=self.task,
             project=self.project,
         )
-        self.assertFalse(denied)
+        self.assertTrue(discovered, discovered_reason)
+        self.assertEqual(discovered_role, "discovered")
 
 
 if __name__ == "__main__":

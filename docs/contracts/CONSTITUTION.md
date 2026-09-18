@@ -225,6 +225,24 @@ success does not automatically satisfy the Task criterion.
 | **D2 Implement** | Implement the current stage; sync necessary docs; local verification |
 | **D3 Validate** | Invoke Test Skill; publish the candidate-bound Stage Completion Decision and Task progress through P3 conditional publication; if incomplete, stale, unknown, or acceptance unmet, continue Develop ↔ Test; do **not** mark READY_FOR_REVIEW merely because tests executed |
 
+### Lightweight Develop autonomy
+
+Develop is **outcome-constrained** and **process-light**. Scaffold constrains durable truth, destructive / irreversible boundaries, completion claims, candidate / Evidence currentness, unexplained physical drift, and Commit / Push. It MUST NOT micromanage implementation strategy, tool sequence, edit granularity, file count, exploratory source edits, mutation order, or model reasoning.
+
+| Principle | Rule |
+| --- | --- |
+| **D-A1** | Outcome-constrained, process-light. |
+| **D-A2** | Prefer post-validation where physical truth can reliably detect or recover. |
+| **D-A3** | Cheap hard boundaries (workspace escape, protected Scaffold governance, destructive SCM, irrecoverable deletion) MAY be enforced only where a client interception surface exists. Do not perform expensive project scans in that path. |
+| **D-A4** | Physical filesystem / SCM truth is the Session change set (`files.yaml`). |
+| **D-A5** | Observation is not authority. Develop lifecycle correctness MUST NOT depend on observation hooks (`postToolUse`, `postToolUseFailure`, `afterFileEdit`, `afterTabFileEdit` and equivalents). Those events are optional. Their absence or failure MUST NOT stop ordinary in-workspace Develop. A client adapter MAY provide a cheap pre-write safety boundary (`preToolUse`, `beforeShellExecution`, or equivalent). Absence of such interception MUST NOT make Develop unusable, and Scaffold MUST NOT claim a pre-write guarantee that is impossible without a client/OS interception surface. |
+| **D-A6** | No durable per-tool authorization record. Legacy `mutation-attempts.yaml` MAY remain readable; unresolved pending rows MUST NOT block seal. |
+| **D-A7** | Task `scope.paths` / `scope.modules` are semantic intent, not a pre-write allowlist. Discovered paths MAY be modified; out-of-scope changes become review findings. |
+| **D-A8** | Ownership guides implementation/review. HUMAN_OWNED ordinary project content MAY be modified when the Task requires it. MANAGED content has an owner mechanism that Agents SHOULD prefer/respect; Task-relevant direct MANAGED/GENERATED edits MAY occur and MUST remain review-visible. Genuine Scaffold governance remains protected where interception exists. |
+| **D-A9** | Free implementation + strict completion. P6 candidate/Evidence currentness, Test PASS/COMPLETE, P8 physical Diff, READY_FOR_REVIEW, and Commit/Push MUST NOT be lightened. |
+| **D-A10** | Multi-file edits are first-class. MUST NOT assume one edit = one file or serialize Agent edits for bookkeeping. |
+| **D-A11** | Per-write / pre-write cost MUST NOT scale with whole-project size. Whole-project observation occurs at Session open/resume, checkpoint, seal, Test, and Submit — not on every edit. |
+
 ### Candidate currentness and the Task control plane
 
 P6 remains the **single owner** of candidate identity. Its candidate digest

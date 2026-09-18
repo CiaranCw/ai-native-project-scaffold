@@ -261,8 +261,8 @@ Exact field grammar is later work.
 2. **Embedded managed regions** (only for MANAGED files): explicit begin/end bounds with a unique id.
 
 Whole-file GENERATED: Scaffold MAY regenerate the artifact per Contract.  
-Whole-file HUMAN_OWNED: Scaffold MAY read/reference; MUST NOT overwrite without explicit human instruction.  
-MANAGED: Scaffold MUST NOT edit outside approved regions.
+Whole-file HUMAN_OWNED: Scaffold MAY read/reference. Ordinary HUMAN_OWNED project content (including tests, docs, configuration, and equivalent Task-relevant files) MAY be modified when a current Develop Task requires it. Unrelated human content is preserved; the touch is recorded and reviewed. Protected Scaffold governance paths remain protected. Scaffold MUST NOT overwrite HUMAN_OWNED content merely to normalize style or line endings.  
+MANAGED: Scaffold SHOULD prefer and respect the owner/region mechanism. Task-relevant direct modifications MAY occur during Develop; they MUST remain visible through physical reconciliation and Submit review. MANAGED classification does not make ordinary Task-relevant project work immutable. Protected Scaffold authority paths remain protected.
 
 Registry and markers MUST agree. If markers are missing, corrupt, overlapping, or ids collide: **CONFLICTING**. MUST NOT guess. Human resolution or Understand Refresh.
 

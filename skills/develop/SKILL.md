@@ -66,8 +66,10 @@ to the current project, task, mode, and workspace/candidate context. Load
 applicable global/module/path/test Project Rules and resolve the path through
 the project ownership registry. Test-specific Rules follow the Task's declared
 test identifiers even when the caller omits `selected`. A current Task-scoped
-instruction may authorize HUMAN_OWNED ordinary business source; it does not
-override a hard Rule or MANAGED-region boundary. Invoke Test only through its
+instruction may authorize HUMAN_OWNED ordinary project content when the
+Task requires it, including tests, docs, configuration, and equivalent
+paths. It does not override a hard Rule or protected Scaffold governance
+boundary. Invoke Test only through its
 public boundary with a bounded handoff, or consume an already published durable
 P6 `report_id`. Caller report dictionaries are not Test authority. The two
 paths are mutually exclusive.

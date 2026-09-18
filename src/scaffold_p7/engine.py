@@ -30,6 +30,7 @@ from scaffold_p7.develop_authority import (
     load_execution_pointer,
     mutable_stage_ids,
     raw_open_sessions_for_task,
+    reconcile_session_changes,
 )
 from scaffold_p7.handoff import (
     build_develop_to_test,
@@ -596,6 +597,12 @@ class DevelopEngine:
                     session=session,
                     session_directory=loaded,
                 )
+            reconcile_session_changes(
+                self.root,
+                loaded,
+                task=task,
+                session=session,
+            )
             reconcile_unexplained_drift(self.root, boundary="seal")
             physical = physical_authority_issues(self.root)
             if physical:
@@ -1799,6 +1806,12 @@ class DevelopEngine:
             else:
                 next_route = "human"
 
+        reconcile_session_changes(
+            self.root,
+            bound.directory,
+            task=task,
+            session=session,
+        )
         reconcile_unexplained_drift(self.root, boundary="seal")
         physical = physical_authority_issues(self.root)
         if physical:

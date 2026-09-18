@@ -50,6 +50,7 @@ from scaffold_p5.first_use import (
     first_use_decision,
     inspect_scaffold_hook_fragment,
     is_scaffold_hook_command,
+    legacy_hook_fragment_digest,
     merge_scaffold_hooks,
     parse_always_apply_rule,
 )
@@ -2303,8 +2304,9 @@ def _hook_fragment_issues(
     }
     rec = recorded.get((HOOKS_JSON_REL, FRAGMENT_ID))
     expected = expected_hook_fragment_digest()
+    accepted = {expected, legacy_hook_fragment_digest()}
     path = host / HOOKS_JSON_REL
-    if rec is not None and rec["digest"] != expected:
+    if rec is not None and rec["digest"] not in accepted:
         missing.append(HOOKS_JSON_REL)
     if not path.is_file():
         missing.append(HOOKS_JSON_REL)
@@ -2326,7 +2328,7 @@ def _hook_fragment_issues(
         live = json.dumps(
             fragment, sort_keys=True, separators=(",", ":"), ensure_ascii=True
         )
-        if sha256_bytes(live.encode("utf-8")) != expected:
+        if sha256_bytes(live.encode("utf-8")) not in accepted:
             drifted.append(HOOKS_JSON_REL)
     return sorted(set(missing)), sorted(set(drifted)), incompat
 

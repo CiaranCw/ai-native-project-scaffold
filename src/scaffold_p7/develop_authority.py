@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from scaffold_p5.io_util import read_yaml, write_yaml_atomic
+from scaffold_p5.ownership import resolve_ownership
 from scaffold_p6.candidate import observe_candidate
 from scaffold_p7.models import SESSIONS_DIR
 from scaffold_p7.mutation import (
-    authorize_path_mutation,
-    is_protected_governance_path,
+    hard_mutation_boundary_reason,
     overlay_path_set,
     path_in_scope,
     path_in_supporting_scope,
@@ -26,19 +26,26 @@ from scaffold_p7.session import (
     MUTATION_FAILED,
     MUTATION_OBSERVED,
     MUTATION_PENDING,
+    MUTATION_RECONCILED,
     OPEN_INVENTORY_NAME,
     execution_workspace_digests,
     file_sha256,
+    is_physical_attribution,
     load_files_yaml,
     load_mutation_attempts,
     load_open_inventory,
     path_kind,
+    persist_files_yaml,
     persist_mutation_attempts,
     record_touch,
     snapshot_open_inventory,
 )
 from scaffold_p7.tasks import resolve_task
-from scaffold_p7.unexplained import physical_authority_issues, reconcile_unexplained_drift
+from scaffold_p7.unexplained import (
+    cheap_physical_authority_issues,
+    physical_authority_issues,
+    reconcile_unexplained_drift,
+)
 
 
 EXECUTION_POINTER_REL = ".scaffold/runtime/develop-execution.yaml"
@@ -60,6 +67,17 @@ class CurrentDevelopAuthority:
     role: str = ""
     lineage_digest: str = ""
     directory: Path | None = None
+
+
+@dataclass
+class SessionReconciliation:
+    ok: bool
+    files: list[dict[str, Any]] = field(default_factory=list)
+    in_scope: list[str] = field(default_factory=list)
+    supporting: list[str] = field(default_factory=list)
+    discovered: list[str] = field(default_factory=list)
+    ownership: dict[str, str] = field(default_factory=dict)
+    blockers: list[str] = field(default_factory=list)
 
 
 def resolve_current_develop_authority(
@@ -122,33 +140,170 @@ def authorize_mutation_paths(
     paths: list[str],
     *,
     authority: CurrentDevelopAuthority | None = None,
+    deleting: bool = False,
 ) -> tuple[bool, str]:
-    """Authorize editor mutation targets through canonical P7 path authority."""
+    """Cheap editor hard-boundary check. Not per-tool durable authorization."""
     host = Path(root)
-    current = authority or resolve_current_develop_authority(host)
+    current = authority or resolve_current_develop_authority(
+        host, require_provenance=False
+    )
     if not current.ok or current.task is None:
         return False, current.reason
     if not paths:
-        return False, "mutation target path is missing; fail closed"
-    _status, _reasons, project = inspect_host_project(host)
-    if not isinstance(project, dict):
-        return False, "project ownership registry is UNKNOWN; mutation is blocked"
+        return True, "path-free editor mutation is deferred to physical reconciliation"
     for rel in paths:
         normalized = str(rel or "").replace("\\", "/").strip().strip("/")
-        if not normalized:
-            return False, "mutation target path is missing; fail closed"
-        if is_protected_governance_path(normalized, host):
-            return False, f"{normalized} is protected Scaffold governance"
-        allowed, reason, _role = authorize_path_mutation(
-            host,
-            normalized,
-            task=current.task,
-            project=project,
-            require_in_progress=True,
+        reason = hard_mutation_boundary_reason(
+            host, normalized, deleting=deleting
         )
-        if not allowed:
+        if reason:
             return False, reason
     return True, current.reason
+
+
+def reconcile_session_changes(
+    root: str | Path,
+    directory: Path,
+    *,
+    task: dict[str, Any],
+    session: dict[str, Any] | None = None,
+) -> SessionReconciliation:
+    """Adopt live execution-workspace bytes as the Session change set.
+
+    Compares current physical truth to the Session open-inventory S0 anchor,
+    writes ``files.yaml``, and classifies scope/ownership. Hook history is
+    not required. Preexisting S0 dirt that has not changed is not attributed.
+    Session/S0 overlay is required; a missing Session fails closed rather
+    than recording ``was_preexisting_dirty=False``.
+    """
+    host = Path(root)
+    if session is None:
+        session, session_issues = _session_mapping_from_directory(directory)
+        if session_issues or session is None:
+            return SessionReconciliation(
+                ok=False,
+                blockers=session_issues
+                or ["Develop Session is missing; reconciliation cannot classify preexisting dirt"],
+            )
+    elif not isinstance(session, dict):
+        return SessionReconciliation(
+            ok=False,
+            blockers=["Develop Session mapping is unusable"],
+        )
+    inventory = load_open_inventory(directory)
+    if inventory is None:
+        return SessionReconciliation(
+            ok=False,
+            blockers=["Develop execution open inventory is missing"],
+        )
+    files, file_issues = load_files_yaml(directory)
+    if file_issues or files is None:
+        return SessionReconciliation(
+            ok=False,
+            blockers=file_issues or ["Develop Session files.yaml is unusable"],
+        )
+    current = execution_workspace_digests(host)
+    existing = {
+        str(row.get("path") or "").replace("\\", "/").strip().strip("/"): row
+        for row in files
+        if isinstance(row, dict) and row.get("path")
+    }
+    overlay = overlay_path_set(session)
+    stages = mutable_stage_ids(task)
+    _status, _reasons, project = inspect_host_project(host)
+    ownership_registry = (
+        project.get("ownership") if isinstance(project, dict) else None
+    )
+    changed: set[str] = set()
+    for path, digest in current.items():
+        if inventory.get(path) != digest:
+            changed.add(path)
+    for path in inventory:
+        if path not in current:
+            changed.add(path)
+    rows: list[dict[str, Any]] = []
+    in_scope: list[str] = []
+    supporting: list[str] = []
+    discovered: list[str] = []
+    ownership_map: dict[str, str] = {}
+    for path in sorted(changed):
+        dest = host / path
+        before_digest = inventory.get(path)
+        after_digest = current.get(path)
+        before_kind = "regular_file" if before_digest else "missing"
+        after_kind = path_kind(dest) if after_digest else "missing"
+        if after_kind == "missing" or after_digest is None:
+            change_kind = "deleted"
+            after_kind = "missing"
+            after_digest = None
+        elif before_digest is None:
+            change_kind = "created"
+        elif after_kind != before_kind:
+            change_kind = "type_changed"
+        else:
+            change_kind = "modified"
+        prior = existing.get(path)
+        mutation_state = MUTATION_RECONCILED
+        if (
+            is_physical_attribution(prior)
+            and str(prior.get("mutation_state") or "") == MUTATION_OBSERVED
+            and str(prior.get("after_digest") or "") == str(after_digest or "")
+        ):
+            mutation_state = MUTATION_OBSERVED
+            if prior.get("before_digest") and not before_digest:
+                before_digest = prior.get("before_digest")
+            if prior.get("before_kind"):
+                before_kind = str(prior.get("before_kind"))
+            if prior.get("change_kind") in {
+                "created",
+                "modified",
+                "deleted",
+                "type_changed",
+            }:
+                change_kind = str(prior.get("change_kind"))
+        role = _execution_scope_role(host, path, task)
+        if role == "product":
+            in_scope.append(path)
+        elif role == "supporting":
+            supporting.append(path)
+        else:
+            discovered.append(path)
+            role = "discovered"
+        mode = "UNKNOWN"
+        if isinstance(ownership_registry, dict):
+            resolved = resolve_ownership(ownership_registry, path)
+            if resolved.status == "RESOLVED" and resolved.mode:
+                mode = str(resolved.mode)
+            elif resolved.status == "CONFLICTING":
+                mode = "CONFLICTING"
+        ownership_map[path] = mode
+        dirty = bool(path in overlay or (prior or {}).get("was_preexisting_dirty"))
+        rows.append(
+            {
+                "path": path,
+                "change_kind": change_kind,
+                "was_preexisting_dirty": dirty,
+                "before_kind": before_kind,
+                "after_kind": after_kind,
+                "before_digest": before_digest,
+                "after_digest": after_digest,
+                "content_class": "text",
+                "patch_ref": None,
+                "stage_ids": list(stages),
+                "mutation_state": mutation_state,
+                "scope_role": role,
+                "ownership": mode,
+            }
+        )
+    persist_files_yaml(directory, rows)
+    return SessionReconciliation(
+        ok=True,
+        files=rows,
+        in_scope=in_scope,
+        supporting=supporting,
+        discovered=discovered,
+        ownership=ownership_map,
+    )
 
 
 def bind_current_execution(
@@ -341,10 +496,11 @@ def execution_provenance_issues(
     directory: Path,
     for_seal: bool = False,
 ) -> list[str]:
-    """Compare workspace files to open inventory + observed mutation provenance.
+    """Compare workspace files to open inventory + Session files.yaml.
 
-    Task scope says WHERE a Task may change. files.yaml records successful
-    observed Develop mutations. Pending authorization is not provenance.
+    Physical attribution is ``observed_success`` or ``reconciled`` when the
+    after-digest matches live bytes. Legacy pending mutation-attempts never
+    block seal. Unobserved live changes are adopted by reconcile at seal.
     """
     del session
     host = Path(root)
@@ -354,16 +510,12 @@ def execution_provenance_issues(
     files, file_issues = load_files_yaml(directory)
     if file_issues or files is None:
         return file_issues or ["Develop Session files.yaml is unusable"]
-    attempts, attempt_issues = load_mutation_attempts(directory)
-    if attempt_issues or attempts is None:
-        return attempt_issues or ["Develop Session mutation-attempts.yaml is unusable"]
     current = execution_workspace_digests(host)
     recorded = {
         str(row.get("path") or "").replace("\\", "/").strip().strip("/"): row
         for row in files
-        if isinstance(row, dict) and row.get("path") and _is_observed_success(row)
+        if isinstance(row, dict) and row.get("path") and is_physical_attribution(row)
     }
-    pending_paths = _attempt_paths(attempts, MUTATION_PENDING)
     issues: list[str] = []
     for path, digest in current.items():
         rec = recorded.get(path)
@@ -380,11 +532,9 @@ def execution_provenance_issues(
                     f"authorized path {path} changed out of band after execution recording"
                 )
             continue
-        if path in pending_paths:
-            if for_seal:
-                issues.append(f"unresolved pending mutation authorization: {path}")
-            continue
         if opened == digest:
+            continue
+        if not for_seal:
             continue
         role = _execution_scope_role(host, path, task)
         if role in {"product", "supporting"}:
@@ -404,35 +554,30 @@ def execution_provenance_issues(
                 f"authorized path {path} is missing after execution recording"
             )
             continue
-        if path in pending_paths:
-            if for_seal:
-                issues.append(f"unresolved pending mutation authorization: {path}")
+        if not for_seal:
             continue
         role = _execution_scope_role(host, path, task)
         if role in {"product", "supporting"}:
             issues.append(f"unexplained same-scope deletion: {path}")
         else:
             issues.append(f"out-of-scope deletion: {path}")
-    if for_seal:
-        for path in sorted(pending_paths):
-            marker = f"unresolved pending mutation authorization: {path}"
-            if marker not in issues:
-                issues.append(marker)
     return issues
 
 
 _EDITOR_NONBLOCKING_PREFIXES = (
     "unexplained same-scope drift:",
     "unexplained same-scope deletion:",
+    "out-of-scope drift:",
+    "out-of-scope deletion:",
 )
 
 
 def editor_blocking_provenance_issues(issues: list[str]) -> list[str]:
     """Same-scope unexplained drift is durable, not a global Develop lock.
 
-    Out-of-scope drift, out-of-band authorized-path changes, and seal-time
-    unresolved pending rows remain blocking. Mutation of the drifted path
-    itself still requires normal scope/ownership authority.
+    Out-of-scope discovered dependencies are review findings, not editor locks.
+    Out-of-band authorized-path changes remain blocking. Legacy pending
+    mutation-attempt rows never block.
     """
     return [
         item
@@ -451,7 +596,9 @@ def record_pending_mutation(
 ) -> None:
     """Record preToolUse authorization. This is not mutation provenance."""
     host = Path(root)
-    current = authority or resolve_current_develop_authority(host)
+    current = authority or resolve_current_develop_authority(
+        host, require_provenance=False
+    )
     if not current.ok or current.directory is None or current.session is None:
         return
     attempts, attempt_issues = load_mutation_attempts(current.directory)
@@ -496,69 +643,71 @@ def observe_authorized_mutation(
     tool_name: str = "",
     tool_use_id: str = "",
     observation_scope: str = OBSERVATION_ATTEMPT_SCOPE,
+    authority: CurrentDevelopAuthority | None = None,
+    event: str | None = None,
 ) -> tuple[bool, str]:
-    """Resolve a pending authorization from a generic client mutation observation.
+    """Optionally enrich files.yaml from a client observation.
 
-    ``single_path`` reports exactly one materialized path and may resolve one
-    path of a wider pending attempt. ``attempt_scope`` reports the completion
-    of the whole authorized attempt.
+    Observation is not authority. Missing, failed, or ambiguous events do not
+    deny ordinary Develop and do not revert source. Physical reconciliation
+    remains the Session change set.
     """
+    del tool_name, event
     host = Path(root)
-    current = resolve_current_develop_authority(host, require_provenance=False)
+    current = authority or resolve_current_develop_authority(
+        host, require_provenance=False
+    )
     if not current.ok or current.directory is None or current.session is None:
-        return False, current.reason or "no current Develop execution binding"
+        return True, "terminal mutation observation without current Develop authority"
+    event_paths = _normalize_paths(paths)
     attempts, attempt_issues = load_mutation_attempts(current.directory)
     if attempt_issues or attempts is None:
-        return False, (attempt_issues or ["mutation-attempts.yaml is unusable"])[0]
-    event_paths = _normalize_paths(paths)
-    after_event = observation_scope == OBSERVATION_SINGLE_PATH
+        attempts = []
     matched, ambiguous = _match_pending_attempt(
         attempts,
         session_id=current.session_id,
         tool_use_id=str(tool_use_id or "").strip(),
         paths=event_paths,
-        require_unique_path=after_event,
+        require_unique_path=observation_scope == OBSERVATION_SINGLE_PATH,
     )
     if ambiguous:
-        return False, "single-path mutation observation is ambiguous; ignored as provenance"
-    if matched is None:
-        return False, "no compatible current pending mutation authorization"
-    observe_paths = list(matched.get("paths") or []) if not after_event else event_paths
-    observe_paths = [rel for rel in _normalize_paths(observe_paths) if rel in set(matched.get("paths") or [])]
-    if after_event and not observe_paths:
-        return False, "no compatible current pending mutation authorization"
-    if not observe_paths:
+        return True, "ambiguous mutation observation ignored; physical reconciliation remains authoritative"
+    observe_paths = event_paths
+    if not observe_paths and matched is not None:
         observe_paths = _normalize_paths(list(matched.get("paths") or []))
-    recorded_after = dict(matched.get("after") or {})
+    if not observe_paths:
+        return True, "no compatible observation; physical reconciliation remains authoritative"
     files, file_issues = load_files_yaml(current.directory)
     if file_issues or files is None:
-        return False, (file_issues or ["files.yaml is unusable"])[0]
+        return True, "files.yaml is unusable; physical reconciliation remains authoritative"
     overlay = overlay_path_set(current.session)
     stages = list(current.mutable_stage_ids)
+    inventory = load_open_inventory(current.directory) or {}
+    updated = list(files)
+    before_map = matched.get("before") if isinstance(matched, dict) else {}
+    if not isinstance(before_map, dict):
+        before_map = {}
+    recorded_after: dict[str, Any] = {}
     for rel in observe_paths:
         dest = host / rel
-        recorded_after[rel] = {
-            "kind": path_kind(dest),
-            "digest": file_sha256(dest),
-        }
-    matched["after"] = recorded_after
-    pending_paths = _normalize_paths(list(matched.get("paths") or []))
-    if after_event and any(rel not in recorded_after for rel in pending_paths):
-        persist_mutation_attempts(current.directory, attempts)
-        return True, "single-path observation recorded against current pending authorization"
-    updated = list(files)
-    before_map = matched.get("before") if isinstance(matched.get("before"), dict) else {}
-    for rel in pending_paths:
-        dest = host / rel
-        after_info = recorded_after.get(rel) or {
-            "kind": path_kind(dest),
-            "digest": file_sha256(dest),
-        }
+        after_kind = path_kind(dest)
+        after_digest = file_sha256(dest)
+        recorded_after[rel] = {"kind": after_kind, "digest": after_digest}
         before_info = before_map.get(rel) if isinstance(before_map.get(rel), dict) else {}
-        before_kind = str(before_info.get("kind") or path_kind(dest))
-        before_digest = before_info.get("digest")
-        after_kind = str(after_info.get("kind") or path_kind(dest))
-        after_digest = after_info.get("digest")
+        if isinstance(before_info, dict) and before_info.get("kind"):
+            before_kind = str(before_info.get("kind"))
+            before_digest = before_info.get("digest")
+        elif inventory.get(rel):
+            before_kind = "regular_file"
+            before_digest = inventory.get(rel)
+        else:
+            before_kind = "missing"
+            before_digest = None
+        if after_kind == "missing":
+            if rel not in inventory and before_kind == "missing":
+                continue
+        elif after_digest == inventory.get(rel) and not before_info:
+            continue
         if after_kind == "missing":
             change_kind = "deleted"
         elif before_kind == "missing":
@@ -567,6 +716,9 @@ def observe_authorized_mutation(
             change_kind = "type_changed"
         else:
             change_kind = "modified"
+        extra = {}
+        if current.task is not None:
+            extra["scope_role"] = _execution_scope_role(host, rel, current.task)
         updated = record_touch(
             current.directory,
             updated,
@@ -579,10 +731,13 @@ def observe_authorized_mutation(
             was_preexisting_dirty=rel in overlay,
             stage_ids=stages,
             mutation_state=MUTATION_OBSERVED,
+            extra=extra or None,
         )
-    matched["state"] = MUTATION_OBSERVED
-    matched["observed_at"] = _iso_utc()
-    persist_mutation_attempts(current.directory, attempts)
+    if matched is not None:
+        matched["after"] = recorded_after
+        matched["state"] = MUTATION_OBSERVED
+        matched["observed_at"] = _iso_utc()
+        persist_mutation_attempts(current.directory, attempts)
     return True, "observed successful Develop mutation"
 
 
@@ -594,15 +749,15 @@ def fail_authorized_mutation(
     tool_use_id: str = "",
     state: str = MUTATION_FAILED,
 ) -> tuple[bool, str]:
-    """Retract a pending authorization after a failed/cancelled tool attempt."""
+    """Observation failure never reverts source and never poisons Session."""
     del tool_name
     host = Path(root)
     current = resolve_current_develop_authority(host, require_provenance=False)
     if not current.ok or current.directory is None:
-        return False, current.reason or "no current Develop execution binding"
+        return True, "terminal mutation observation without current Develop authority"
     attempts, attempt_issues = load_mutation_attempts(current.directory)
     if attempt_issues or attempts is None:
-        return False, (attempt_issues or ["mutation-attempts.yaml is unusable"])[0]
+        return True, "mutation attempt failed; no execution provenance"
     matched, ambiguous = _match_pending_attempt(
         attempts,
         session_id=current.session_id,
@@ -611,7 +766,7 @@ def fail_authorized_mutation(
         require_unique_path=False,
     )
     if ambiguous or matched is None:
-        return False, "no compatible current pending mutation authorization"
+        return True, "mutation attempt failed; no execution provenance"
     matched["state"] = state if state in {MUTATION_FAILED, MUTATION_CANCELLED} else MUTATION_FAILED
     matched["failed_at"] = _iso_utc()
     persist_mutation_attempts(current.directory, attempts)
@@ -655,20 +810,11 @@ def _execution_scope_role(root: Path, rel: str, task: dict[str, Any]) -> str:
     in_product, _reason = path_in_scope(rel, scope, modules)
     if in_product:
         return "product"
-    return "outside"
+    return "discovered"
 
 
 def _is_observed_success(row: dict[str, Any]) -> bool:
-    state = str(row.get("mutation_state") or "").strip()
-    if state in {MUTATION_PENDING, MUTATION_FAILED, MUTATION_CANCELLED}:
-        return False
-    if state == MUTATION_OBSERVED:
-        return True
-    if row.get("change_kind") == "deleted":
-        return True
-    if row.get("after_kind") == "missing" and not row.get("after_digest"):
-        return False
-    return isinstance(row.get("after_digest"), str) and bool(row.get("after_digest"))
+    return is_physical_attribution(row)
 
 
 def _normalize_paths(paths: list[str] | tuple[str, ...]) -> list[str]:
@@ -824,7 +970,12 @@ def _authority_from_session(
             mutable_stage_ids=stage_ids,
             directory=directory,
         )
-    physical = physical_authority_issues(host)
+    physical: list[str] = []
+    provenance: list[str] = []
+    if require_provenance:
+        physical = physical_authority_issues(host)
+    else:
+        physical = cheap_physical_authority_issues(host)
     if physical:
         return CurrentDevelopAuthority(
             ok=False,
@@ -836,21 +987,22 @@ def _authority_from_session(
             mutable_stage_ids=stage_ids,
             directory=directory,
         )
-    provenance = execution_provenance_issues(
-        host, task=task, session=session, directory=directory
-    )
-    blocking = editor_blocking_provenance_issues(provenance)
-    if require_provenance and blocking:
-        return CurrentDevelopAuthority(
-            ok=False,
-            reason=blocking[0],
-            task=task,
-            session=session,
-            session_id=session_id,
-            task_id=task_id,
-            mutable_stage_ids=stage_ids,
-            directory=directory,
+    if require_provenance:
+        provenance = execution_provenance_issues(
+            host, task=task, session=session, directory=directory
         )
+        blocking = editor_blocking_provenance_issues(provenance)
+        if blocking:
+            return CurrentDevelopAuthority(
+                ok=False,
+                reason=blocking[0],
+                task=task,
+                session=session,
+                session_id=session_id,
+                task_id=task_id,
+                mutable_stage_ids=stage_ids,
+                directory=directory,
+            )
     return CurrentDevelopAuthority(
         ok=True,
         reason="current Develop execution Session authorizes scoped mutation",
@@ -862,6 +1014,26 @@ def _authority_from_session(
         lineage_digest=str(session.get("observed_candidate_digest") or ""),
         directory=directory,
     )
+
+
+def _session_mapping_from_directory(
+    directory: Path,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    path = directory / "session.yaml"
+    if not path.is_file():
+        return None, [
+            "Develop Session is missing; reconciliation cannot classify preexisting dirt"
+        ]
+    try:
+        data = read_yaml(path)
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return None, ["Develop Session is malformed or unreadable"]
+    if not isinstance(data, dict):
+        return None, ["Develop Session mapping is unusable"]
+    issues = validate_develop_session(data, expected_id=directory.name)
+    if issues:
+        return None, ["Develop Session is malformed"] + issues
+    return data, []
 
 
 def _iso_utc() -> str:
