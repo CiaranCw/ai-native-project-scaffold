@@ -35,7 +35,7 @@ RECORD_BAD = "change-20260830T120300Z-dddd4444"
 EXPECTED_PACKAGES = {
     "understand": (
         "2.1.0",
-        "c31cecf908ca1fe03d1ee6eb7940227207f6052ae8436f4b1b39f012f3ea3919",
+        "0ea535526de6c5e5378b6ce49b912ad456088647465859e2959b771071f19a57",
     ),
     "develop": (
         "2.1.0",

@@ -178,7 +178,13 @@ exact plan digest. `--approved --plan-digest` is the apply-request spelling,
 not proof of a human grant and not Git Commit/Push. Only then does Scaffold
 write Adoption/work-plane records. `skills.lock` is that later
 expected-identity authority; `install.yaml` is product provenance and does
-not replace it.
+not replace it. Consumer UPDATE installs new package bytes and does **not**
+rewrite `skills.lock`. If compatibility then reports `UNKNOWN` because an
+installed VALID package identity differs from the lock, continue with
+`python .scaffold/install/run.py understand compatibility --action
+lock_update --new-expected <json>` and apply that exact `--plan-digest`.
+That is the explicit Understand authority transition. It is not Git
+Commit/Push and is not a silent update side-effect.
 
 On Cursor, Trusted-workspace project hooks deny ordinary project mutation
 while `NOT_ADOPTED`. The official digest-bound apply command is not

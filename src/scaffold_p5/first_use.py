@@ -9,6 +9,7 @@ beforeShellExecution permission=ask.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import shlex
@@ -226,6 +227,8 @@ FAIL_CLOSED_RUN_ARGV = {
     ("first-use",): "first-use",
 }
 INTAKE_POSITIONALS = frozenset({("enter", "develop"), ("develop", "intake")})
+COMPATIBILITY_RUN_ARGV = ("understand", "compatibility")
+COMPATIBILITY_PUBLIC_ACTIONS = frozenset({"evaluate", "lock_update"})
 
 SHELL_ALLOW = "allow"
 SHELL_DENY = "deny"
@@ -327,6 +330,13 @@ Develop. Physical reconciliation is the Session change set.
 Degraded adopted hosts (consistency, prior footprint, unresolved recovery)
 deny ordinary mutation. Recover with status / verify / understand
 compatibility or refresh.
+
+On an adopted host, `python .scaffold/install/run.py understand
+compatibility` evaluates expected vs installed identity. An explicit
+lock update is `--action lock_update --new-expected <json>` (or
+`--new-expected-b64`) then the same command with that exact
+`--plan-digest`. That apply is Agent lifecycle work. It is not
+`--approved` Adoption apply and not Git Commit or Push.
 
 Successful Adoption is not permission to edit project source. Repair
 remains a Develop mode. There is no fifth Skill.
@@ -782,10 +792,18 @@ def classify_first_use_shell(
                 intake_error = _intake_flag_error(flags)
                 if intake_error:
                     return SHELL_DENY, intake_error
+            compat_error = _compatibility_flag_error(positional, flags)
+            if compat_error:
+                return SHELL_DENY, compat_error
             if flags.get("approved") and positional not in BOOTSTRAP_ARGV:
                 return SHELL_DENY, "approval flags are only valid on Understand bootstrap"
             if flags.get("plan_digest") and not flags.get("approved"):
-                return SHELL_DENY, "plan digest without --approved is not an official apply command"
+                lock_update_apply = (
+                    positional == COMPATIBILITY_RUN_ARGV
+                    and flags.get("action") == "lock_update"
+                )
+                if not lock_update_apply:
+                    return SHELL_DENY, "plan digest without --approved is not an official apply command"
             if flags.get("approved") and flags.get("plan_digest"):
                 return SHELL_ALLOW, ASK_APPLY_REASON
             return SHELL_ALLOW, "official first-use Scaffold lifecycle command"
@@ -1286,6 +1304,24 @@ def _split_runner_flags(
             flags["intake_json_b64"] = rest[i + 1]
             i += 2
             continue
+        if token == "--action":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--action requires evaluate or lock_update"
+            flags["action"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--new-expected":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--new-expected requires a JSON object"
+            flags["new_expected"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--new-expected-b64":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--new-expected-b64 requires a base64 payload"
+            flags["new_expected_b64"] = rest[i + 1]
+            i += 2
+            continue
         if token.startswith("-"):
             return tuple(), flags, f"unsupported launcher flag {token}"
         positional.append(token)
@@ -1301,6 +1337,59 @@ def _runner_argv_for_policy(policy: str) -> dict[tuple[str, ...], str]:
     if policy == GATE_FAIL_CLOSED:
         return FAIL_CLOSED_RUN_ARGV
     return ALLOWED_RUN_ARGV
+
+
+def _compatibility_flag_error(
+    positional: tuple[str, ...],
+    flags: dict[str, Any],
+) -> str | None:
+    action = flags.get("action")
+    has_expected = bool(flags.get("new_expected") or flags.get("new_expected_b64"))
+    has_compat_flag = action is not None or has_expected
+    if (
+        flags.get("plan_digest")
+        and not flags.get("approved")
+        and positional == COMPATIBILITY_RUN_ARGV
+    ):
+        has_compat_flag = True
+    if not has_compat_flag:
+        return None
+    if positional != COMPATIBILITY_RUN_ARGV:
+        return "compatibility flags are only valid on understand compatibility"
+    if action is None:
+        if has_expected:
+            return "--new-expected requires --action lock_update"
+        if flags.get("plan_digest") and not flags.get("approved"):
+            return "--plan-digest is only valid with --action lock_update on understand compatibility"
+        return None
+    if action not in COMPATIBILITY_PUBLIC_ACTIONS:
+        return f"unsupported compatibility action {action}"
+    if has_expected and action != "lock_update":
+        return "--new-expected is only valid with --action lock_update"
+    if flags.get("plan_digest") and not flags.get("approved") and action != "lock_update":
+        return "--plan-digest is only valid with --action lock_update on understand compatibility"
+    if flags.get("new_expected") and flags.get("new_expected_b64"):
+        return "provide only one of --new-expected or --new-expected-b64"
+    raw_json = flags.get("new_expected")
+    if raw_json is not None:
+        try:
+            payload = json.loads(raw_json)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return "new-expected JSON is not parseable"
+        if not isinstance(payload, dict) or not payload:
+            return "new-expected JSON must be a nonempty object"
+    raw_b64 = flags.get("new_expected_b64")
+    if raw_b64 is not None:
+        if not INTAKE_B64_RE.fullmatch(str(raw_b64)):
+            return "new-expected base64 is malformed"
+        try:
+            decoded = base64.b64decode(str(raw_b64), validate=True).decode("utf-8")
+            payload = json.loads(decoded)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
+            return "new-expected base64 is malformed"
+        if not isinstance(payload, dict) or not payload:
+            return "new-expected JSON must be a nonempty object"
+    return None
 
 
 def _intake_flag_error(flags: dict[str, Any]) -> str | None:

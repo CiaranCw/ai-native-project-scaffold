@@ -45,4 +45,16 @@ Default `refresh` with no action remains GENERATED/MANAGED host-knowledge refres
 
 ## compatibility
 
-Evaluate package validity then exactly one of `EXACT`, `COMPATIBLE`, `MIGRATION_REQUIRED`, `INCOMPATIBLE`, `UNKNOWN`. Do not silently rewrite `skills.lock`. Lock update and project migration are distinct. Compatibility owns Plan construction and the canonical Migration Execution lifecycle/recovery implementation. It MUST NOT start a fresh persistent Migration from Plan-only approval; fresh apply is Task-bound Develop work. After successful Migration validation, current compatibility is the post-migration `EXACT` or `COMPATIBLE` result; pre-migration `MIGRATION_REQUIRED` is historical, not current authority.
+Evaluate package validity then exactly one of `EXACT`, `COMPATIBLE`, `MIGRATION_REQUIRED`, `INCOMPATIBLE`, `UNKNOWN`. Do not silently rewrite `skills.lock`. Lock update and project migration are distinct.
+
+Installed launcher:
+
+```text
+python .scaffold/install/run.py understand compatibility
+python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json>
+python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json> --plan-digest <hex>
+```
+
+`--new-expected` is a JSON object of core Skill id to `{skill_version, package_digest}` and optional `package_format_version`. `--new-expected-b64` carries the same object. The new expected identity MUST resolve to one currently installed VALID package. Preview is not apply; continue with that exact `--plan-digest`. The apply request is Agent-autonomous lifecycle work. It is not `--approved` Adoption apply and not Git Commit or Push. Consumer UPDATE does not rewrite `skills.lock`.
+
+Compatibility owns Plan construction and the canonical Migration Execution lifecycle/recovery implementation. It MUST NOT start a fresh persistent Migration from Plan-only approval; fresh apply is Task-bound Develop work. After successful Migration validation, current compatibility is the post-migration `EXACT` or `COMPATIBLE` result; pre-migration `MIGRATION_REQUIRED` is historical, not current authority.

@@ -60,6 +60,13 @@ is not Git Commit or Git Push. The Agent must still see `plan_id`,
 `plan_digest`, mutation envelope, ownership changes, managed regions, and
 preserved surfaces before apply.
 
+Consumer UPDATE does not rewrite `skills.lock`. If Understand compatibility
+is `UNKNOWN` because expected package identity differs from an installed
+VALID package, continue with
+`python .scaffold/install/run.py understand compatibility --action
+lock_update --new-expected <json>` and apply that exact `--plan-digest`.
+Do not edit `skills.lock` by hand.
+
 When stopped, the Agent should explain what it observed, why it stopped, what
 you need to decide, what approval would do, and what remains unchanged.
 

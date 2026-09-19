@@ -43,7 +43,7 @@ from scaffold_p5 import yaml_lite
 EXPECTED_PACKAGES = {
     "understand": (
         "2.1.0",
-        "c31cecf908ca1fe03d1ee6eb7940227207f6052ae8436f4b1b39f012f3ea3919",
+        "0ea535526de6c5e5378b6ce49b912ad456088647465859e2959b771071f19a57",
     ),
     "develop": (
         "2.1.0",
@@ -78,6 +78,19 @@ def _install(host: Path, dist: Path = REPO, mode: str = "install"):
             "blockers": list(plan.blockers),
         }
     return plan, apply_consumer_install(plan)
+
+
+def _dry_plan_existing_consumer(host: Path):
+    """Plan against an already-installed sibling without mutating it.
+
+    Fresh source identity requires UPDATE, not a second INSTALL.
+    """
+    plan = plan_consumer_install(host, REPO, mode="install")
+    if not plan.allowed and any(
+        "use update" in str(item) for item in plan.blockers
+    ):
+        plan = plan_consumer_install(host, REPO, mode="update")
+    return plan
 
 
 def _clone_host(host: Path, dest: Path) -> Path:
@@ -589,7 +602,7 @@ class ProjectCityDryInstallTests(unittest.TestCase):
         self.assertTrue(impeccable.is_file())
         agents = (CONSUMER_PILOT / "AGENTS.md").read_text(encoding="utf-8")
         original_attrs = (CONSUMER_PILOT / ".gitattributes").read_text(encoding="utf-8")
-        plan = plan_consumer_install(CONSUMER_PILOT, REPO, mode="install")
+        plan = _dry_plan_existing_consumer(CONSUMER_PILOT)
         public = plan_to_public_dict(plan)
         self.assertTrue(plan.allowed, public)
         self.assertNotIn(".agents/skills/impeccable/SKILL.md", public["added"])
@@ -966,7 +979,7 @@ class ConsumerInstallationC02GitRoundTripTests(unittest.TestCase):
         if not CONSUMER_PILOT.is_dir():
             self.skipTest("consumer-pilot workspace is not present")
         attrs = (CONSUMER_PILOT / ".gitattributes").read_text(encoding="utf-8")
-        plan = plan_consumer_install(CONSUMER_PILOT, REPO, mode="install")
+        plan = _dry_plan_existing_consumer(CONSUMER_PILOT)
         public = plan_to_public_dict(plan)
         self.assertTrue(plan.allowed, public)
         self.assertTrue(public["gitattributes"]["human_body_preserved"])
@@ -1374,7 +1387,7 @@ class ConsumerInstallationC03RegionOwnershipTests(unittest.TestCase):
         attrs = (CONSUMER_PILOT / ".gitattributes").read_text(encoding="utf-8")
         impeccable = CONSUMER_PILOT / ".agents" / "skills" / "impeccable" / "SKILL.md"
         impeccable_bytes = impeccable.read_bytes()
-        plan = plan_consumer_install(CONSUMER_PILOT, REPO, mode="install")
+        plan = _dry_plan_existing_consumer(CONSUMER_PILOT)
         public = plan_to_public_dict(plan)
         self.assertTrue(plan.allowed, public)
         ownership = {row.rel: row.ownership for row in plan.files}

@@ -455,9 +455,21 @@ dependencies, and runtime/client facts before identity can be EXACT.
 Lock-update planning accepts only core Skill keys and exact identities that
 resolve to one intrinsically VALID package. It constructs and validates the
 complete four-Skill result, exposes per-change compatibility/migration impact,
-requires digest-bound approval, writes atomically, then re-inspects the lock
-before reporting completion. A mixed explicit lock update removes stale
-single-release provenance.
+requires digest-bound apply of that exact Plan, writes atomically, then
+re-inspects the lock before reporting completion. A mixed explicit lock update
+removes stale single-release provenance.
+
+The public consumer surface is the installed launcher:
+
+```text
+python .scaffold/install/run.py understand compatibility
+python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json>
+python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json> --plan-digest <hex>
+```
+
+`--plan-digest` is the existing Plan currentness token. It is not a human
+grant and is not Git Commit or Push. Consumer UPDATE does not rewrite
+`skills.lock`.
 
 Persisting `NEEDS_MIGRATION` is reported as a bounded `project.yaml` mutation
 only when `project.yaml` ownership authorizes a whole-file write. An

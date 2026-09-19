@@ -41,6 +41,8 @@ If the host is ACTIVE, ordinary HUMAN_OWNED business mutation is not authorized 
 
 Required first-use route: `python .scaffold/install/run.py status`, then `python .scaffold/install/run.py understand bootstrap`. Preview is not apply. Continue with `--approved --plan-digest` of that exact Plan. Adoption apply is Agent lifecycle work; it is not Git Commit or Push. No project implementation may happen before Adoption completes.
 
+If Understand compatibility reports `UNKNOWN` because `skills.lock` expected identity does not match an installed VALID package, do not edit `skills.lock` by hand and do not treat consumer UPDATE as a lock rewrite. Continue with `python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json>`, then apply that exact `--plan-digest`. `--new-expected-b64` is the same payload. That lock-update apply is Agent lifecycle work; it is not Git Commit or Push and is not `--approved` Adoption apply.
+
 Do NOT bypass this gate because:
 
 - Adoption appears cumbersome;

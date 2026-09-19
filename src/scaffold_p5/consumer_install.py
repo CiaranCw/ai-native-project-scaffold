@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import shutil
@@ -36,6 +37,7 @@ from scaffold_p5.adapter_profiles import (
 from scaffold_p5.distribution import Distribution, load_distribution, load_fixture_distribution
 from scaffold_p5.engine import UnderstandEngine
 from scaffold_p5.first_use import (
+    COMPATIBILITY_PUBLIC_ACTIONS,
     FIRST_USE_RULE_REL,
     FIRST_USE_RULE_TEXT,
     FRAGMENT_ID,
@@ -255,7 +257,14 @@ python .scaffold/install/run.py understand bootstrap
 python .scaffold/install/run.py understand full
 python .scaffold/install/run.py understand refresh
 python .scaffold/install/run.py understand compatibility
+python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json>
+python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json> --plan-digest <hex>
 ```
+
+Do not silently rewrite `skills.lock`. Consumer UPDATE does not change
+project-local expected identity. Explicit compatibility lock-update is
+the supported authority transition. Preview, then apply that exact plan
+digest. That apply is Agent lifecycle work, not Git Commit or Push.
 
 Do not use an external Distribution checkout.
 """,
@@ -1278,7 +1287,10 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-digest", dest="plan_digest", default=None)
     parser.add_argument("--intake-json", default=None)
     parser.add_argument("--intake-json-b64", default=None)
-    args, _rest = parser.parse_known_args(argv)
+    parser.add_argument("--action", default=None)
+    parser.add_argument("--new-expected", dest="new_expected", default=None)
+    parser.add_argument("--new-expected-b64", dest="new_expected_b64", default=None)
+    args, rest = parser.parse_known_args(argv)
     target = Path(args.host)
     intake_allowed = (
         (args.command == "enter" and (args.mode or "") == "develop")
@@ -1292,6 +1304,49 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                     "blockers": [
                         "--intake-json / --intake-json-b64 is only valid on "
                         "enter develop or develop intake"
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1
+    compatibility_mode = args.command == "understand" and (args.mode or "") == "compatibility"
+    if rest and compatibility_mode:
+        print(
+            json.dumps(
+                {
+                    "outcome": "BLOCKED",
+                    "blockers": [
+                        "unsupported compatibility arguments: " + " ".join(rest)
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1
+    if compatibility_mode and args.approved:
+        print(
+            json.dumps(
+                {
+                    "outcome": "BLOCKED",
+                    "blockers": [
+                        "approval flags are only valid on Understand bootstrap"
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1
+    if (
+        args.action or args.new_expected or args.new_expected_b64
+    ) and not compatibility_mode:
+        print(
+            json.dumps(
+                {
+                    "outcome": "BLOCKED",
+                    "blockers": [
+                        "--action / --new-expected is only valid on "
+                        "understand compatibility"
                     ],
                 },
                 indent=2,
@@ -1344,7 +1399,18 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     if args.command == "understand":
         mode = args.mode or "bootstrap"
         opts: dict[str, Any] = {}
-        if args.approved:
+        if mode == "compatibility":
+            compat_opts, compat_error = _compatibility_launcher_opts(args)
+            if compat_error:
+                print(
+                    json.dumps(
+                        {"outcome": "BLOCKED", "blockers": [compat_error]},
+                        indent=2,
+                    )
+                )
+                return 1
+            opts.update(compat_opts)
+        elif args.approved:
             # Subject selector only. It names which Plan is presented to the
             # human; it is never proof that the human approved it.
             opts["approval"] = {
@@ -1419,6 +1485,59 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     result = SubmitEngine(target, package).run(task_id=args.task_id)
     print(json.dumps(result_dict(result), indent=2, default=str))
     return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
+
+
+def _parse_new_expected_cli(
+    raw_json: str | None,
+    raw_b64: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    if raw_json and raw_b64:
+        return None, "provide only one of --new-expected or --new-expected-b64"
+    text = raw_json
+    if raw_b64:
+        try:
+            text = base64.b64decode(str(raw_b64), validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None, "new-expected base64 is malformed"
+    if text is None:
+        return None, None
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None, "new-expected JSON is not parseable"
+    if not isinstance(payload, dict) or not payload:
+        return None, "new-expected JSON must be a nonempty object"
+    return payload, None
+
+
+def _compatibility_launcher_opts(args: argparse.Namespace) -> tuple[dict[str, Any], str | None]:
+    """Map public compatibility flags onto existing Understand engine opts.
+
+    `--plan-digest` is the digest-bound apply token. It is not a human grant
+    and is not Git Commit or Push.
+    """
+    action = args.action or "evaluate"
+    if action not in COMPATIBILITY_PUBLIC_ACTIONS:
+        return {}, f"unsupported compatibility action {action}"
+    new_expected, expected_error = _parse_new_expected_cli(
+        args.new_expected,
+        args.new_expected_b64,
+    )
+    if expected_error:
+        return {}, expected_error
+    if new_expected is not None and action != "lock_update":
+        return {}, "--new-expected is only valid with --action lock_update"
+    if args.plan_digest and action != "lock_update":
+        return {}, "--plan-digest is only valid with --action lock_update"
+    opts: dict[str, Any] = {"action": action}
+    if new_expected is not None:
+        opts["new_expected"] = new_expected
+    if action == "lock_update" and args.plan_digest:
+        opts["approval"] = {
+            "approved": True,
+            "plan_digest": args.plan_digest,
+        }
+    return opts, None
 
 
 def _run_understand(
