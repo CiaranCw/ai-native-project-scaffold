@@ -131,7 +131,20 @@ Scaffold-owned regions/fragments does.
 
 ## How do I update it?
 
-From a newer Distribution checkout:
+From an already-installed project, the official self-update command is:
+
+```text
+python .scaffold/install/run.py consumer update --distribution <Scaffold-distribution>
+```
+
+The current host is implicit. `--distribution` is a read/inspect source, not a
+writable workspace target. Update rewrites only MANAGED install files, Scaffold
+managed regions, and the Scaffold hook fragment. It does **not** rewrite
+`skills.lock`, Task Books, Sessions, or product source. Do not copy install
+files by hand. Do not execute Distribution source scripts such as
+`src/scaffold_consumer.py` from inside the Consumer as the in-host update path.
+
+From a newer Distribution checkout, the operator command remains:
 
 ```text
 python src/scaffold_consumer.py update --host <project-root>

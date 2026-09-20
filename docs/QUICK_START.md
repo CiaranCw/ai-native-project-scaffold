@@ -60,9 +60,13 @@ is not Git Commit or Git Push. The Agent must still see `plan_id`,
 `plan_digest`, mutation envelope, ownership changes, managed regions, and
 preserved surfaces before apply.
 
-Consumer UPDATE does not rewrite `skills.lock`. If Understand compatibility
-is `UNKNOWN` because expected package identity differs from an installed
-VALID package, continue with
+Consumer UPDATE does not rewrite `skills.lock`. After a Consumer is installed,
+self-update from that host is
+`python .scaffold/install/run.py consumer update --distribution
+<Scaffold-distribution>`. The current host is implicit. Do not copy install
+files by hand and do not execute Distribution source scripts from inside the
+Consumer. If Understand compatibility is `UNKNOWN` because expected package
+identity differs from an installed VALID package, continue with
 `python .scaffold/install/run.py understand compatibility --action
 lock_update --new-expected <json>` and apply that exact `--plan-digest`.
 Do not edit `skills.lock` by hand.

@@ -53,6 +53,9 @@ Do NOT bypass this gate because:
 
 Launcher: `python .scaffold/install/run.py`
 First-use: `python .scaffold/install/run.py understand bootstrap`
+Self-update: `python .scaffold/install/run.py consumer update --distribution <distribution>`
+
+Installed self-update refreshes this host's managed runtime, packages, launcher, and adapters from a validated Scaffold Distribution. The current host is implicit. It does not rewrite `skills.lock`, Task Books, Sessions, or product source.
 
 Canonical Skill packages: `.scaffold/install/packages/{understand,develop,test,submit}/`
 Runtime: `.scaffold/install/runtime/`

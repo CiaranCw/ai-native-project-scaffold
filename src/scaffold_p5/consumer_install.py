@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import json
 import re
@@ -39,12 +40,10 @@ from scaffold_p5.engine import UnderstandEngine
 from scaffold_p5.first_use import (
     COMPATIBILITY_PUBLIC_ACTIONS,
     FIRST_USE_RULE_REL,
-    FIRST_USE_RULE_TEXT,
     FRAGMENT_ID,
     HOOK_COMMAND,
     HOOK_EVENTS,
     HOOK_SCRIPT_REL,
-    HOOK_SCRIPT_TEXT,
     HOOKS_JSON_REL,
     OWNERSHIP_MANAGED_JSON_FRAGMENT,
     dumps_hooks_json,
@@ -753,18 +752,23 @@ def plan_consumer_install(
             )
             return plan
 
+    generated, generated_issues = _distribution_generated_texts(dist_path)
+    if generated_issues:
+        plan.blockers.extend(generated_issues)
+        return plan
     payloads: dict[str, bytes] = {}
     _add_runtime_payloads(dist_path, payloads)
     _add_package_payloads(dist_path, payloads)
     payloads[f"{RELEASES_DIR}/installed.yaml"] = _release_yaml_bytes(plan.skills)
-    payloads[RUNNER_REL] = RUNNER_TEXT.encode("utf-8")
+    payloads[RUNNER_REL] = generated["RUNNER_TEXT"].encode("utf-8")
     payloads[INSTALL_GITIGNORE_REL] = INSTALL_GITIGNORE_TEXT.encode("utf-8")
     if _has_cursor_profile(profiles):
+        bodies = generated["CURSOR_BODIES"]
         for adapter in CURSOR_ADAPTERS:
             rel = f".cursor/skills/{adapter}/SKILL.md"
-            payloads[rel] = CURSOR_BODIES[adapter].encode("utf-8")
-        payloads[FIRST_USE_RULE_REL] = FIRST_USE_RULE_TEXT.encode("utf-8")
-        payloads[HOOK_SCRIPT_REL] = HOOK_SCRIPT_TEXT.encode("utf-8")
+            payloads[rel] = str(bodies[adapter]).encode("utf-8")
+        payloads[FIRST_USE_RULE_REL] = generated["FIRST_USE_RULE_TEXT"].encode("utf-8")
+        payloads[HOOK_SCRIPT_REL] = generated["HOOK_SCRIPT_TEXT"].encode("utf-8")
     agents_text, agents_issue = _planned_agents_text(host_path, profiles)
     if agents_issue:
         plan.blockers.append(agents_issue)
@@ -1264,7 +1268,16 @@ def distribution_cli(argv: list[str] | None = None) -> int:
 def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     argv = list(argv or [])
     host = install_root.parent.parent
-    parser = argparse.ArgumentParser(description="Installed Scaffold runtime")
+    parser = argparse.ArgumentParser(
+        description="Installed Scaffold runtime",
+        epilog=(
+            "Self-update: python .scaffold/install/run.py consumer update "
+            "--distribution <path>\n"
+            "The current host is implicit. Consumer update does not rewrite "
+            "skills.lock."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "command",
         nargs="?",
@@ -1278,6 +1291,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             "status",
             "enter",
             "first-use",
+            "consumer",
         ],
     )
     parser.add_argument("mode", nargs="?", default=None)
@@ -1290,6 +1304,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     parser.add_argument("--action", default=None)
     parser.add_argument("--new-expected", dest="new_expected", default=None)
     parser.add_argument("--new-expected-b64", dest="new_expected_b64", default=None)
+    parser.add_argument("--distribution", default=None)
     args, rest = parser.parse_known_args(argv)
     target = Path(args.host)
     intake_allowed = (
@@ -1353,6 +1368,28 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             )
         )
         return 1
+    consumer_update = args.command == "consumer" and (args.mode or "") == "update"
+    if args.command == "consumer" and _argv_has_flag(argv, "--host"):
+        return _print_installed_blocked(
+            [
+                "consumer update does not accept --host; the current host is implicit"
+            ]
+        )
+    if args.distribution and not consumer_update:
+        print(
+            json.dumps(
+                {
+                    "outcome": "BLOCKED",
+                    "blockers": [
+                        "--distribution is only valid on consumer update"
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 1
+    if args.command == "consumer":
+        return _run_installed_consumer(host, args, rest)
     if args.command == "verify":
         payload = verify_consumer_install(target)
         print(json.dumps(payload, indent=2))
@@ -1485,6 +1522,45 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     result = SubmitEngine(target, package).run(task_id=args.task_id)
     print(json.dumps(result_dict(result), indent=2, default=str))
     return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
+
+
+def _print_installed_blocked(blockers: list[str]) -> int:
+    print(json.dumps({"outcome": "BLOCKED", "blockers": blockers}, indent=2))
+    return 1
+
+
+def _run_installed_consumer(
+    implicit_host: Path,
+    args: argparse.Namespace,
+    rest: list[str],
+) -> int:
+    """Installed self-update bridge. Reuses canonical plan/apply; current host only."""
+    if rest:
+        return _print_installed_blocked(
+            ["unsupported consumer arguments: " + " ".join(rest)]
+        )
+    action = args.mode or ""
+    if action != "update":
+        return _print_installed_blocked(
+            [f"unsupported consumer action {action or '(missing)'}"]
+        )
+    if args.task_id or args.approved or args.plan_digest:
+        return _print_installed_blocked(
+            ["consumer update does not accept bootstrap, Task, or approval flags"]
+        )
+    if not args.distribution:
+        return _print_installed_blocked(
+            ["consumer update requires --distribution"]
+        )
+    dist = Path(args.distribution)
+    plan = plan_consumer_install(implicit_host, dist, mode="update")
+    public = plan_to_public_dict(plan)
+    if not plan.allowed:
+        print(json.dumps({"outcome": "BLOCKED", **public}, indent=2))
+        return 1
+    result = apply_consumer_install(plan)
+    print(json.dumps({**result, "plan": public}, indent=2))
+    return 0 if result.get("outcome") == "COMPLETED" else 1
 
 
 def _parse_new_expected_cli(
@@ -1807,6 +1883,64 @@ def _cursor_adapter_issues(host: Path, manifest: dict[str, Any]) -> list[str]:
             "scaffold-understand/develop/test/submit"
         )
     return issues
+
+
+def _argv_has_flag(argv: list[str], name: str) -> bool:
+    prefix = name + "="
+    return any(token == name or token.startswith(prefix) for token in argv)
+
+
+def _module_constants(path: Path, names: tuple[str, ...]) -> dict[str, Any]:
+    """Read module-level string/dict constants from a Distribution source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    wanted = set(names)
+    found: dict[str, Any] = {}
+    for node in tree.body:
+        value_node = None
+        targets: list[ast.AST] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+            value_node = node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+            value_node = node.value
+        else:
+            continue
+        for target in targets:
+            if not isinstance(target, ast.Name) or target.id not in wanted:
+                continue
+            found[target.id] = ast.literal_eval(value_node)
+    return found
+
+
+def _distribution_generated_texts(dist_root: Path) -> tuple[dict[str, Any], list[str]]:
+    """Install generated launcher/hook/rule texts from the Distribution source."""
+    issues: list[str] = []
+    ci_path = dist_root / "src" / "scaffold_p5" / "consumer_install.py"
+    fu_path = dist_root / "src" / "scaffold_p5" / "first_use.py"
+    try:
+        ci = _module_constants(ci_path, ("RUNNER_TEXT", "CURSOR_BODIES"))
+        fu = _module_constants(fu_path, ("FIRST_USE_RULE_TEXT", "HOOK_SCRIPT_TEXT"))
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError) as exc:
+        return {}, [f"Distribution generated install texts are unreadable: {type(exc).__name__}"]
+    required = {
+        "RUNNER_TEXT": ci.get("RUNNER_TEXT"),
+        "CURSOR_BODIES": ci.get("CURSOR_BODIES"),
+        "FIRST_USE_RULE_TEXT": fu.get("FIRST_USE_RULE_TEXT"),
+        "HOOK_SCRIPT_TEXT": fu.get("HOOK_SCRIPT_TEXT"),
+    }
+    for name, value in required.items():
+        if not isinstance(value, str) and name != "CURSOR_BODIES":
+            issues.append(f"Distribution {name} is missing or not a string")
+        elif name == "CURSOR_BODIES":
+            if not isinstance(value, dict) or any(
+                adapter not in value or not isinstance(value.get(adapter), str)
+                for adapter in CURSOR_ADAPTERS
+            ):
+                issues.append("Distribution CURSOR_BODIES is missing required adapter texts")
+        elif not str(value).strip():
+            issues.append(f"Distribution {name} is empty")
+    return required, issues
 
 
 def _add_runtime_payloads(dist_root: Path, payloads: dict[str, bytes]) -> None:

@@ -184,6 +184,7 @@ GATE_DEVELOP = "develop"
 GATE_RECOVERY = "recovery"
 GATE_FAIL_CLOSED = "fail_closed"
 REQUIRED_ROUTE_RECOVERY = "understand.compatibility"
+CONSUMER_UPDATE_RUN_ARGV = ("consumer", "update")
 ALLOWED_RUN_ARGV = {
     (): "verify",
     ("verify",): "verify",
@@ -193,6 +194,7 @@ ALLOWED_RUN_ARGV = {
     ("enter", "status"): "enter",
     ("understand",): "understand.bootstrap",
     ("understand", "bootstrap"): "understand.bootstrap",
+    CONSUMER_UPDATE_RUN_ARGV: "consumer.update",
 }
 POST_ADOPTION_RUN_ARGV = {
     **ALLOWED_RUN_ARGV,
@@ -225,6 +227,7 @@ FAIL_CLOSED_RUN_ARGV = {
     ("verify",): "verify",
     ("status",): "status",
     ("first-use",): "first-use",
+    CONSUMER_UPDATE_RUN_ARGV: "consumer.update",
 }
 INTAKE_POSITIONALS = frozenset({("enter", "develop"), ("develop", "intake")})
 COMPATIBILITY_RUN_ARGV = ("understand", "compatibility")
@@ -337,6 +340,12 @@ lock update is `--action lock_update --new-expected <json>` (or
 `--new-expected-b64`) then the same command with that exact
 `--plan-digest`. That apply is Agent lifecycle work. It is not
 `--approved` Adoption apply and not Git Commit or Push.
+
+Installed Consumer self-update is
+`python .scaffold/install/run.py consumer update --distribution <path>`.
+It is install/runtime maintenance for this host. The current host is
+implicit. It is not Develop product mutation and does not rewrite
+`skills.lock`.
 
 Successful Adoption is not permission to edit project source. Repair
 remains a Develop mode. There is no fifth Skill.
@@ -795,6 +804,9 @@ def classify_first_use_shell(
             compat_error = _compatibility_flag_error(positional, flags)
             if compat_error:
                 return SHELL_DENY, compat_error
+            consumer_error = _consumer_flag_error(positional, flags)
+            if consumer_error:
+                return SHELL_DENY, consumer_error
             if flags.get("approved") and positional not in BOOTSTRAP_ARGV:
                 return SHELL_DENY, "approval flags are only valid on Understand bootstrap"
             if flags.get("plan_digest") and not flags.get("approved"):
@@ -1322,6 +1334,12 @@ def _split_runner_flags(
             flags["new_expected_b64"] = rest[i + 1]
             i += 2
             continue
+        if token == "--distribution":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--distribution requires a Distribution path"
+            flags["distribution"] = rest[i + 1]
+            i += 2
+            continue
         if token.startswith("-"):
             return tuple(), flags, f"unsupported launcher flag {token}"
         positional.append(token)
@@ -1337,6 +1355,35 @@ def _runner_argv_for_policy(policy: str) -> dict[tuple[str, ...], str]:
     if policy == GATE_FAIL_CLOSED:
         return FAIL_CLOSED_RUN_ARGV
     return ALLOWED_RUN_ARGV
+
+
+def _consumer_flag_error(
+    positional: tuple[str, ...],
+    flags: dict[str, Any],
+) -> str | None:
+    has_distribution = flags.get("distribution") is not None
+    if positional == CONSUMER_UPDATE_RUN_ARGV:
+        if flags.get("action") or flags.get("new_expected") or flags.get("new_expected_b64"):
+            return "compatibility flags are only valid on understand compatibility"
+        if flags.get("approved") or flags.get("plan_digest"):
+            return "approval flags are only valid on Understand bootstrap"
+        if flags.get("intake_json") or flags.get("intake_json_b64"):
+            return "intake JSON flags are only valid on enter develop or develop intake"
+        if flags.get("task_id"):
+            return "--task-id is not valid on consumer update"
+        if flags.get("host") is not None:
+            return "consumer update does not accept --host; the current host is implicit"
+        if not has_distribution:
+            return "consumer update requires --distribution"
+        dist = str(flags.get("distribution") or "").strip()
+        if not dist or dist.startswith("-"):
+            return "--distribution requires a Distribution path"
+        return None
+    if has_distribution:
+        return "--distribution is only valid on consumer update"
+    if positional and positional[0] == "consumer":
+        return "unsupported consumer action"
+    return None
 
 
 def _compatibility_flag_error(
