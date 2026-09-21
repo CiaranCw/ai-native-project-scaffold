@@ -436,17 +436,19 @@ def _declared_commands_fact(
     scripts = data.get("scripts") if isinstance(data, dict) else None
     if not isinstance(scripts, dict) or not scripts:
         return DiscoveryFact("declared_commands", [], "UNKNOWN")
+    manager = _inferred_js_package_manager(root, index, session=session)
     commands = []
     for name, body in scripts.items():
         if not isinstance(name, str) or not name.strip():
             continue
         script_id = name.strip()
-        invocation = "npm test" if script_id == "test" else f"npm run {script_id}"
+        invocation, argv = _js_script_invocation(manager, script_id)
         kind = "test" if script_id == "test" or script_id.startswith("test") else "workflow"
         commands.append(
             {
                 "id": f"package-json-{_command_slug(script_id)}",
                 "invocation": invocation,
+                "argv": argv,
                 "source": f"{rel}#scripts.{script_id}",
                 "availability": "declared",
                 "execution": "not_validated",
@@ -714,6 +716,35 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _inferred_js_package_manager(
+    root: Path,
+    index: dict[str, str],
+    *,
+    session: DiscoverySession | None = None,
+) -> str:
+    checks = (
+        ("pnpm-lock.yaml", "pnpm"),
+        ("pnpm-workspace.yaml", "pnpm"),
+        ("yarn.lock", "yarn"),
+        ("bun.lockb", "bun"),
+        ("bun.lock", "bun"),
+        ("package-lock.json", "npm"),
+        ("npm-shrinkwrap.json", "npm"),
+    )
+    for name, manager in checks:
+        if resolve_existing(root, name, index, session=session):
+            return manager
+    return "npm"
+
+
+def _js_script_invocation(manager: str, script_id: str) -> tuple[str, list[str]]:
+    if script_id == "test" and manager in {"npm", "pnpm", "yarn", "bun"}:
+        argv = [manager, "test"]
+        return " ".join(argv), argv
+    argv = [manager, "run", script_id]
+    return " ".join(argv), argv
 
 
 def _command_slug(value: str) -> str:

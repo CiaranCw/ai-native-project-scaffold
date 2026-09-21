@@ -199,15 +199,35 @@ lock_update --new-expected <json>` and apply that exact `--plan-digest`.
 That is the explicit Understand authority transition. It is not Git
 Commit/Push and is not a silent update side-effect.
 
+Consumer UPDATE also does **not** rewrite `.scaffold/commands.yaml` or
+`.scaffold/tests.yaml`. An older adopted host may therefore still have
+INFERRED commands without executable `argv` after the install bytes update.
+The supported public route to re-discover current project tooling from
+physical truth is default Understand Refresh (not `action=resume`):
+
+```text
+python .scaffold/install/run.py understand refresh
+```
+
+That updates GENERATED command/test indexes from the current workspace.
+Discovered tooling remains INFERRED until a real Test execution. It does
+not invent VERIFIED required policy, and it does not recreate the project.
+
 On Cursor, Trusted-workspace project hooks deny ordinary project mutation
-while `NOT_ADOPTED`. The official digest-bound apply command is not
-unconditional ALLOW: `preToolUse` may continue it to `beforeShellExecution`,
-which returns `permission=ask` so Cursor itself requires interactive user
-confirmation (`FORCE_PROMPT`). That is a client enforcement adapter, not a
-fifth Skill and not a claim of hard enforcement on other clients. A human
-running the Scaffold CLI outside an Agent session is a different situation.
-Missing or drifted hook policy fails VERIFY (`INCOMPLETE` / `DRIFTED` /
-`INCOMPATIBLE` as applicable).
+while `NOT_ADOPTED`. After Adoption they still deny editor file mutation
+until a current Develop Task/Session exists, but they do not treat every
+ordinary in-project command as forbidden. Local build, test, lint,
+typecheck, package-manager scripts, tool inspection, and SCM inspection are
+autonomous; Git Commit/Push and other hard boundaries remain denied. The
+official digest-bound apply command is not unconditional ALLOW: `preToolUse`
+may continue it to `beforeShellExecution`, which returns `permission=ask` so
+Cursor itself requires interactive user confirmation (`FORCE_PROMPT`). That
+is a client enforcement adapter, not a fifth Skill and not a claim of hard
+enforcement on other clients. A human running the Scaffold CLI outside an
+Agent session is a different situation. Missing or drifted hook policy fails
+VERIFY (`INCOMPLETE` / `DRIFTED` / `INCOMPATIBLE` as applicable). A
+fail-closed hook error reports undetermined lifecycle state; it does not
+claim the host is unadopted.
 
 ## How do I commit it into an internal project repository?
 

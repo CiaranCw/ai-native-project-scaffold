@@ -10,7 +10,12 @@ from scaffold_p5.ownership import (
     path_covered,
     resolve_ownership,
 )
-from scaffold_p5.client_support import is_client_support_path
+from scaffold_p5.client_support import (
+    is_client_support_path,
+    is_protected_mutation_target,
+    is_scaffold_authority_path,
+    mutation_consumes_protected_target,
+)
 from scaffold_p5.scm import git_path_is_tracked
 from scaffold_p5.schemas import CORE_MACHINE_ARTIFACTS
 
@@ -124,6 +129,13 @@ def hard_mutation_boundary_reason(
         or ":" in normalized.split("/", 1)[0]
     ):
         return f"{normalized} is outside ordinary local fixture path form"
+    if is_protected_mutation_target(root, normalized) or (
+        deleting and mutation_consumes_protected_target(root, normalized)
+    ):
+        return (
+            f"mutation authority for {normalized} is CONFLICTING: "
+            "protected Scaffold governance path"
+        )
     if is_client_support_path(root, normalized):
         return (
             f"mutation authority for {normalized} is CONFLICTING: "
@@ -317,11 +329,9 @@ def is_protected_governance_path(rel: str, root: Path | None = None) -> bool:
     normalized = _normalize(rel)
     if not normalized:
         return True
-    if normalized in CORE_PROTECTED or normalized in GOVERNANCE_FILES:
+    if is_scaffold_authority_path(normalized) or normalized in CORE_PROTECTED:
         return True
-    if normalized in GOVERNANCE_NAMES:
-        return True
-    if any(normalized.startswith(prefix) for prefix in GOVERNANCE_PREFIXES):
+    if root is not None and is_protected_mutation_target(root, normalized):
         return True
     return root is not None and is_client_support_path(root, normalized)
 

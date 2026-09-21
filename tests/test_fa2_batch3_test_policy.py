@@ -67,10 +67,14 @@ class FA2Batch3TestPolicyTests(unittest.TestCase):
         self.assertTrue(tests["profiles"])
         self.assertEqual(tests.get("required_authority"), "UNKNOWN")
         for profile in tests["profiles"]:
-            self.assertEqual(profile.get("policy"), "observed")
             self.assertEqual(profile.get("required_authority"), "UNKNOWN")
             self.assertNotEqual(profile.get("required"), True)
             self.assertNotEqual(profile.get("required_authority"), "VERIFIED")
+            if profile.get("id") == "observed-tests":
+                self.assertEqual(profile.get("policy"), "observed")
+            else:
+                self.assertEqual(profile.get("policy"), "discovered_command")
+                self.assertIs(profile.get("required"), False)
         self.assertNotEqual(tests.get("required"), True)
 
     def test_B3T02_observed_pass_is_not_test_complete(self):

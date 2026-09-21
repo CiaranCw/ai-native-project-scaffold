@@ -229,27 +229,34 @@ class ConsumerSelfUpdateFirstUseTests(unittest.TestCase):
 
     def test_arbitrary_python_and_chaining_remain_denied(self):
         dist = str(REPO).replace("\\", "/")
-        cases = [
+        denied = [
             "python -c print(1)",
-            "python payload.py",
             "python .scaffold/install/run.py consumer update --distribution "
             + dist
             + " && echo pwn",
             "python .scaffold/install/run.py consumer install --distribution " + dist,
             "python .scaffold/install/run.py consumer update --rewrite",
-            "python src/scaffold_consumer.py update --host "
-            + str(self.host).replace("\\", "/"),
             "python .scaffold/install/run.py consumer update --host "
             + str(self.host).replace("\\", "/")
             + " --distribution "
             + dist,
-            "echo hello",
         ]
-        for command in cases:
+        allowed = [
+            "python payload.py",
+            "echo hello",
+            "python src/scaffold_consumer.py update --host "
+            + str(self.host).replace("\\", "/"),
+        ]
+        for command in denied:
             kind, detail = classify_first_use_shell(
                 command, self.host, adopted=True
             )
             self.assertEqual(kind, SHELL_DENY, (command, detail))
+        for command in allowed:
+            kind, detail = classify_first_use_shell(
+                command, self.host, adopted=True
+            )
+            self.assertEqual(kind, SHELL_ALLOW, (command, detail))
 
 
 class ConsumerSelfUpdateForwardE2ETests(unittest.TestCase):

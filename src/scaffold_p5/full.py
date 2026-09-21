@@ -525,6 +525,7 @@ def _write_tests(root: Path, facts: list[dict[str, Any]]) -> None:
 
 def _tests_data(facts: list[dict[str, Any]]) -> dict[str, Any]:
     tests = next((f for f in facts if f["name"] == "test_tree"), None)
+    declared = next((f for f in facts if f["name"] == "declared_commands"), None)
     profiles = []
     confidence = tests["confidence"] if tests else "UNKNOWN"
     applicability: bool | None = None
@@ -543,6 +544,40 @@ def _tests_data(facts: list[dict[str, Any]]) -> dict[str, Any]:
         required_authority = "UNKNOWN"
     elif tests and tests["confidence"] == "VERIFIED":
         applicability = False
+    command_rows = (
+        declared.get("value") if declared and isinstance(declared.get("value"), list) else []
+    )
+    for row in command_rows:
+        if not isinstance(row, dict) or row.get("kind") != "test":
+            continue
+        command_id = str(row.get("id") or "").strip()
+        argv = row.get("argv")
+        if not command_id or not isinstance(argv, list) or not argv:
+            continue
+        if not all(isinstance(part, str) and part for part in argv):
+            continue
+        profiles.append(
+            {
+                "id": f"discovered-{command_id}",
+                "purpose": f"discovered {command_id} trial",
+                "required": False,
+                "auto": len(argv) == 2 and argv[1] == "test",
+                "adapter": "local",
+                "command_ref": command_id,
+                "provenance": "LOCAL_EXECUTION",
+                "policy": "discovered_command",
+                "required_authority": "UNKNOWN",
+                "working_directory": ".",
+                "timeout_seconds": 60,
+                "success": {"exit_code": 0},
+                "evidence_required": ["command_result"],
+            }
+        )
+        if applicability is False or applicability is None:
+            applicability = True
+            if confidence not in {"VERIFIED", "INFERRED"}:
+                confidence = "INFERRED"
+            required_authority = "UNKNOWN"
     return {
         "schema_version": "1",
         "applicable": applicability,

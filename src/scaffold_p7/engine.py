@@ -489,7 +489,7 @@ class DevelopEngine:
             "mutable_stage_ids": mutable_stage_ids(task),
             "submit_authorized": False,
             "capabilities": {
-                "source_write": False,
+                "launcher_source_write": False,
                 "commit": False,
                 "push": False,
                 "submit_authorized": False,
@@ -672,7 +672,7 @@ class DevelopEngine:
             },
             "submit_authorized": False,
             "capabilities": {
-                "source_write": False,
+                "launcher_source_write": False,
                 "commit": False,
                 "push": False,
                 "submit_authorized": False,
@@ -2303,7 +2303,7 @@ class DevelopEngine:
             "human_gate": human_gate,
             "submit_authorized": False,
             "capabilities": {
-                "source_write": False,
+                "launcher_source_write": False,
                 "commit": False,
                 "push": False,
                 "submit_authorized": False,
@@ -2464,6 +2464,7 @@ class DevelopEngine:
         return {
             "submit_authorized": False,
             "capabilities": {
+                "launcher_source_write": False,
                 "commit": False,
                 "push": False,
                 "submit_authorized": False,

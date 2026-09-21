@@ -44,13 +44,27 @@ The ordinary user business request is not Adoption approval. `NEEDS_HUMAN`
 means STOP. UNKNOWN lifecycle state does not authorize mutation.
 
 After valid Adoption (`ESTABLISHED_HOST` / `ACTIVE`), this first-use gate no
-longer blocks solely because of `NOT_ADOPTED`. Ordinary HUMAN_OWNED business
-mutation remains unauthorized until Develop has a current `IN_PROGRESS` Task
-Book, a mutable Stage, and an explicit current execution pointer bound to a
-valid OPEN Session. A raw OPEN Session without that pointer is not editor
-authority. Mutation is then authorized only inside that Task's product or
-supporting scope, and only for paths the current execution records. An OPEN
-Session is not a repository-global unlock.
+longer blocks solely because of `NOT_ADOPTED`. Editor / file mutation of
+ordinary HUMAN_OWNED business source remains unauthorized until Develop has
+a current `IN_PROGRESS` Task Book, a mutable Stage, and an explicit current
+execution pointer bound to a valid OPEN Session. A raw OPEN Session without
+that pointer is not editor authority. Mutation is then authorized only
+inside that Task's product or supporting scope, and only for paths the
+current execution records. An OPEN Session is not a repository-global
+unlock. Session seal ends that Develop execution; it does not mean the host
+is unadopted.
+
+Ordinary in-project development commands are autonomous after Adoption.
+The shell adapter is not a package-manager or project-command allowlist.
+Agents may run local build, test, lint, typecheck, package-manager scripts,
+tool/version inspection, and SCM inspection without predeclaring them in
+`commands.yaml` and without a Develop Session. The gate denies only hard
+boundaries: workspace escape, protected Scaffold governance mutation,
+destructive or history-rewriting SCM, irrecoverable deletion, inline eval,
+and prohibited security/attack operations. Git Commit and Git Push remain
+separate publication operations. Fail-closed hook/lifecycle errors must
+describe undetermined host state; they must not claim the host is
+unadopted.
 
 The installed Consumer establishes first Task authority through:
 
@@ -83,6 +97,13 @@ interrupted or unresolved recovery, `RECOVERY_REQUIRED` / `NEEDS_REFRESH` /
 `NEEDS_MIGRATION`) deny ordinary mutation. Status, verify, and Understand
 compatibility/refresh remain reachable so recovery is not deadlocked.
 Unrecognized host classes fail closed.
+
+Default Understand Refresh
+(`python .scaffold/install/run.py understand refresh`) is the supported
+ACTIVE-host route that rewrites GENERATED `.scaffold/commands.yaml` and
+`.scaffold/tests.yaml` from current physical discovery. Consumer UPDATE
+does not. `refresh` `action=resume` is observational and does not perform
+that rewrite. Discovered tooling remains INFERRED until real execution.
 
 Successful Adoption is not write permission. Repair remains a Develop mode.
 There is no fifth Skill.

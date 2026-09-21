@@ -364,7 +364,8 @@ class PilotReadinessPR1Tests(unittest.TestCase):
         self.assertEqual(result.mode, "normal_task")
         self.assertEqual(result.extras["operation"], "task_intake")
         capabilities = result.extras["capabilities"]
-        self.assertFalse(capabilities["source_write"])
+        self.assertFalse(capabilities["launcher_source_write"])
+        self.assertNotIn("source_write", capabilities)
         self.assertFalse(capabilities["commit"])
         self.assertFalse(capabilities["push"])
         self.assertFalse(capabilities["submit_authorized"])

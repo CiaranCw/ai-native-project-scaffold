@@ -644,10 +644,7 @@ class TestEngine:
             if profile_app in {"UNKNOWN", "CONFLICTING"} or profile_conf in {
                 "UNKNOWN",
                 "CONFLICTING",
-                "INFERRED",
             }:
-                if profile_conf == "INFERRED" and profile_app == "APPLICABLE" and declared_prov:
-                    pass
                 results.append(
                     ScenarioResult(
                         profile_id=profile.profile_id,

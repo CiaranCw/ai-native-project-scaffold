@@ -18,8 +18,10 @@ On a never-adopted host, ordinary business work is **not authorized** until
 Understand bootstrap applies that exact Adoption Plan. `--approved
 --plan-digest` is the apply-request spelling, not Git Commit or Git Push.
 Only Git Commit and Git Push require a current explicit user instruction.
-On Cursor-profile installs, Trusted-workspace project hooks are a client
-adapter, not Core authority. See
+After Adoption, ordinary in-project build/test/lint/SCM-inspection commands
+are autonomous; editor file mutation still needs a current Develop Task and
+OPEN Session. On Cursor-profile installs, Trusted-workspace project hooks
+are a client adapter, not Core authority. See
 [CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md) and
 [implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](implementation/FIRST_USE_ENFORCEMENT_DESIGN.md).
 
@@ -69,7 +71,10 @@ Consumer. If Understand compatibility is `UNKNOWN` because expected package
 identity differs from an installed VALID package, continue with
 `python .scaffold/install/run.py understand compatibility --action
 lock_update --new-expected <json>` and apply that exact `--plan-digest`.
-Do not edit `skills.lock` by hand.
+Do not edit `skills.lock` by hand. After Consumer UPDATE of an older adopted
+host, re-discover project commands/tests with
+`python .scaffold/install/run.py understand refresh` (default Refresh, not
+`action=resume`). That does not invent VERIFIED Test authority.
 
 When stopped, the Agent should explain what it observed, why it stopped, what
 you need to decide, what approval would do, and what remains unchanged.

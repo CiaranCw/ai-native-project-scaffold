@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -36,9 +37,10 @@ class LocalTargetAdapter:
     ) -> ExecutionObservation:
         started = datetime.now(timezone.utc)
         start = time.perf_counter()
+        argv = resolve_local_process_argv(command)
         try:
             completed = subprocess.run(
-                command,
+                argv,
                 cwd=str(working_directory),
                 check=False,
                 capture_output=True,
@@ -68,7 +70,7 @@ class LocalTargetAdapter:
         duration_ms = int((time.perf_counter() - start) * 1000)
         return ExecutionObservation(
             adapter_id=self.identity,
-            command=list(command),
+            command=list(argv),
             working_directory=str(working_directory).replace("\\", "/"),
             started_at=started.isoformat().replace("+00:00", "Z"),
             ended_at=ended.isoformat().replace("+00:00", "Z"),
@@ -85,6 +87,31 @@ def resolve_adapter(name: str) -> TargetAdapter | None:
     if name == "local":
         return LocalTargetAdapter()
     return None
+
+
+def resolve_local_process_argv(command: list[str]) -> list[str]:
+    """Resolve argv[0] through PATHEXT / PATH without ``shell=True``.
+
+    Windows CreateProcess does not search ``npm.cmd`` / ``pnpm.cmd`` when the
+    caller passes a bare ``npm`` / ``pnpm`` token. ``shutil.which`` does.
+    Absolute existing paths are left unchanged. Missing programs stay as
+    given so execution remains a truthful FileNotFound/OSError.
+    """
+    if not command:
+        return []
+    program = str(command[0] or "")
+    if not program:
+        return list(command)
+    path = Path(program)
+    try:
+        if path.is_absolute() and path.is_file():
+            return [str(path), *command[1:]]
+    except OSError:
+        return list(command)
+    found = shutil.which(program)
+    if found:
+        return [found, *command[1:]]
+    return list(command)
 
 
 def _decode(value: str | bytes | None) -> str:

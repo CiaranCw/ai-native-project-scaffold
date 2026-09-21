@@ -112,8 +112,14 @@ class PilotFeedbackPF1UnderstandTests(unittest.TestCase):
         self.assertTrue(tests["profiles"])
         for profile in tests["profiles"]:
             self.assertNotEqual(profile.get("required"), True)
-            self.assertEqual(profile.get("policy"), "observed")
             self.assertEqual(profile.get("required_authority"), "UNKNOWN")
+            self.assertNotEqual(profile.get("required_authority"), "VERIFIED")
+            if profile.get("id") == "observed-tests":
+                self.assertEqual(profile.get("policy"), "observed")
+            else:
+                self.assertEqual(profile.get("policy"), "discovered_command")
+                self.assertIs(profile.get("required"), False)
+                self.assertTrue(profile.get("command_ref"))
         self.assertEqual(tests.get("required_authority"), "UNKNOWN")
         self.assertNotEqual(tests.get("required"), True)
 

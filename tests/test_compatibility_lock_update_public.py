@@ -588,22 +588,30 @@ class CompatibilityLockUpdateFirstUseTests(unittest.TestCase):
         self.assertEqual(hook.get("permission"), "allow", hook)
 
     def test_arbitrary_python_and_malformed_flags_remain_denied(self):
-        cases = [
+        denied = [
             "python -c print(1)",
-            "python -m scaffold_p5.engine",
             "python .scaffold/install/run.py understand compatibility --rewrite-lock",
             "python .scaffold/install/run.py understand compatibility --action migrate",
             "python .scaffold/install/run.py understand compatibility --action lock_update --approved",
             "python .scaffold/install/run.py understand compatibility --plan-digest " + ("c" * 64),
             "python .scaffold/install/run.py develop --action lock_update",
         ]
-        for command in cases:
+        for command in denied:
             kind, detail = classify_first_use_shell(
                 command, self.host, adopted=True
             )
             self.assertEqual(kind, SHELL_DENY, (command, detail))
             hook = evaluate_cursor_hook(_shell_payload(self.host, command), self.host)
             self.assertEqual(hook.get("permission"), "deny", (command, hook))
+        kind, detail = classify_first_use_shell(
+            "python -m scaffold_p5.engine", self.host, adopted=True
+        )
+        self.assertEqual(kind, SHELL_ALLOW, (kind, detail))
+        hook = evaluate_cursor_hook(
+            _shell_payload(self.host, "python -m scaffold_p5.engine"),
+            self.host,
+        )
+        self.assertEqual(hook.get("permission"), "allow", hook)
 
 
 class CompatibilityTaxonomyUnchangedTests(unittest.TestCase):

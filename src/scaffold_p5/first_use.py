@@ -34,6 +34,7 @@ from scaffold_p5.host_state import (
     snapshot_host,
 )
 from scaffold_p5.io_util import sha256_bytes
+from scaffold_p5.shell_boundary import ordinary_shell_hard_boundary
 
 
 DECISION_BLOCK = "BLOCK_PROJECT_MUTATION"
@@ -261,15 +262,28 @@ ASK_APPLY_REASON = (
     "digest-bound Adoption apply is an official lifecycle command"
 )
 UNKNOWN_DENY_MESSAGE = (
-    "Project mutation is blocked because Scaffold first-use lifecycle state "
-    "could not be determined. Run `python .scaffold/install/run.py status` "
-    "and `python .scaffold/install/run.py understand bootstrap`. "
-    "UNKNOWN lifecycle state does not authorize ordinary project mutation."
+    "Scaffold blocked this operation because host lifecycle state could "
+    "not be determined. Run `python .scaffold/install/run.py status`. "
+    "This is not a statement that the host is unadopted. UNKNOWN lifecycle "
+    "state does not authorize ordinary project mutation."
+)
+FAIL_CLOSED_USER_MESSAGE = (
+    "Scaffold first-use gate blocked this operation because host lifecycle "
+    "state could not be determined. This is not a statement that the host "
+    "is unadopted."
+)
+GENERIC_DENY_USER_MESSAGE = "Scaffold first-use gate blocked this operation."
+HARD_BOUNDARY_USER_MESSAGE = (
+    "Scaffold blocked a shell command at a hard safety or governance "
+    "boundary (workspace escape, protected Scaffold governance, destructive "
+    "or history-rewriting SCM, irrecoverable deletion, inline eval, or a "
+    "prohibited security/attack operation)."
 )
 USER_DENY_MESSAGE = (
     "Scaffold first-use gate blocked a project mutation on a host that is "
     "not yet adopted."
 )
+SHELL_ORDINARY_ALLOW_REASON = "ordinary in-project development command"
 DEVELOP_DENY_MESSAGE = (
     "Project mutation is blocked because this ACTIVE host has no current "
     "Develop authority (IN_PROGRESS Task Book, mutable Stage, and OPEN "
@@ -316,14 +330,24 @@ If the host is NOT_ADOPTED, ordinary project mutation is not authorized.
 
 Required route: `python .scaffold/install/run.py understand bootstrap`.
 
-If the host is ACTIVE / ESTABLISHED_HOST, ordinary project mutation is
+If the host is ACTIVE / ESTABLISHED_HOST, editor and file mutation is
 not authorized until Develop has a current IN_PROGRESS Task Book, a
 mutable Stage, and an OPEN Develop Session bound to that Task. Task
 scope is semantic intent, not a pre-write file allowlist. An OPEN
-Session is not a repository-global unlock.
+Session is not a repository-global unlock. Session seal ends that
+Develop execution; it does not mean the host is unadopted.
 
-Required route: `python .scaffold/install/run.py enter develop
---intake-json-b64 <envelope>`, then continue with
+Ordinary in-project development commands are autonomous. They do not
+need to be predeclared in commands.yaml, and they do not require a
+Develop Session merely to inspect tools, run local build/test/lint/
+typecheck, or inspect SCM. The shell gate denies hard boundaries only:
+writes outside this workspace, destructive or history-rewriting SCM,
+irrecoverable deletion, protected Scaffold governance mutation, inline
+eval, and prohibited security/attack operations. Git Commit and Git
+Push remain separate publication operations.
+
+Required editor-mutation route: `python .scaffold/install/run.py enter
+develop --intake-json-b64 <envelope>`, then continue with
 `python .scaffold/install/run.py develop session --task-id <task-id>`.
 
 Observation hooks (postToolUse / afterFileEdit and equivalents) are
@@ -378,17 +402,15 @@ sys.path.insert(0, str(RUNTIME))
 _DENY = {
     "permission": "deny",
     "agent_message": (
-        "Project mutation is blocked because this host is NOT_ADOPTED. "
-        "Run the Scaffold Understand bootstrap route: "
-        "`python .scaffold/install/run.py understand bootstrap`. "
-        "If bootstrap returns a preview, continue with that exact plan apply "
-        "request (`--approved --plan-digest`). Adoption apply is Agent "
-        "lifecycle work; it is not Git Commit or Push. "
-        "Do not implement the business task before Adoption completes. "
+        "Scaffold blocked this operation because the first-use hook could "
+        "not load host lifecycle authority. Run "
+        "`python .scaffold/install/run.py status`. This is not a statement "
+        "that the host is unadopted."
     ),
     "user_message": (
-        "Scaffold first-use gate blocked a project mutation on a host that "
-        "is not yet adopted."
+        "Scaffold first-use gate blocked this operation because host "
+        "lifecycle state could not be determined. This is not a statement "
+        "that the host is unadopted."
     ),
 }
 
@@ -498,6 +520,7 @@ def first_use_decision(
             message=UNKNOWN_DENY_MESSAGE,
             required_route=None,
             gate_policy=GATE_FAIL_CLOSED,
+            user_message=FAIL_CLOSED_USER_MESSAGE,
         )
     if host_class == "NOT_ADOPTED":
         return _block_decision(
@@ -508,6 +531,7 @@ def first_use_decision(
             required_route=REQUIRED_ROUTE_BOOTSTRAP,
             snapshot=snapshot,
             gate_policy=GATE_BOOTSTRAP,
+            user_message=USER_DENY_MESSAGE,
         )
     policy = _mutation_gate_policy(snapshot)
     if policy == GATE_FAIL_CLOSED:
@@ -519,7 +543,7 @@ def first_use_decision(
             required_route=None,
             snapshot=snapshot,
             gate_policy=GATE_FAIL_CLOSED,
-            user_message=USER_DENY_MESSAGE,
+            user_message=FAIL_CLOSED_USER_MESSAGE,
         )
     if policy == GATE_RECOVERY:
         return _block_decision(
@@ -584,11 +608,15 @@ def evaluate_cursor_hook(
         return _allow("read-only first-use inspection")
     host_root = resolve_hook_host(data, host)
     if host_root is None:
-        return _deny(UNKNOWN_DENY_MESSAGE, reason="host root could not be resolved")
+        return _deny(
+            UNKNOWN_DENY_MESSAGE,
+            reason="host root could not be resolved",
+            user_message=FAIL_CLOSED_USER_MESSAGE,
+        )
     authority = first_use_decision(host_root, cheap=True)
     policy = str(authority.get("gate_policy") or GATE_FAIL_CLOSED)
     deny_message = authority.get("agent_message") or AGENT_DENY_MESSAGE
-    deny_user = authority.get("user_message") or USER_DENY_MESSAGE
+    deny_user = authority.get("user_message") or _default_deny_user_message(policy)
     if policy == GATE_DEVELOP:
         deny_when = "without current Develop Task/Stage/Session or across a hard boundary"
     elif policy == GATE_RECOVERY:
@@ -629,9 +657,9 @@ def evaluate_cursor_hook(
         if kind == SHELL_ALLOW:
             return _allow(detail)
         return _deny(
-            deny_message,
+            _shell_deny_agent_message(policy, deny_message, detail),
             reason=detail,
-            user_message=deny_user,
+            user_message=_shell_deny_user_message(policy, deny_user),
         )
     if event in TERMINAL_EVENTS or event in MUTATION_EVENTS:
         return _handle_mutation_terminal(
@@ -760,12 +788,14 @@ def classify_first_use_shell(
 ) -> tuple[str, str]:
     """Classify a Shell command while a mutation gate is active.
 
-    Preview/status/verify remain allow. The digest-bound Adoption apply
-    request is not execution authorization; it is an APPLY REQUEST that
-    must reach beforeShellExecution permission=ask. After Adoption the
-    official Develop/Test/Submit launcher commands are also allow so the
-    Agent can establish Task and Session authority. An OPEN Develop
-    Session is not a blanket mutating-shell permission.
+    Official Scaffold launcher invocations keep exact-shape allowlisting.
+    After Adoption, ordinary in-project development commands are autonomous
+    unless they cross a hard safety/governance boundary. An OPEN Develop
+    Session is not a blanket mutating-shell permission, and a missing
+    Session is not a blanket shell deny. Preview/status/verify remain
+    allow. The digest-bound Adoption apply request is not execution
+    authorization; it is an APPLY REQUEST that must reach
+    beforeShellExecution permission=ask.
     """
     raw = str(command or "").strip()
     if raw.startswith("& "):
@@ -819,7 +849,18 @@ def classify_first_use_shell(
             if flags.get("approved") and flags.get("plan_digest"):
                 return SHELL_ALLOW, ASK_APPLY_REASON
             return SHELL_ALLOW, "official first-use Scaffold lifecycle command"
-    return SHELL_DENY, "shell command is not an official Scaffold launcher invocation"
+    if gate == GATE_FAIL_CLOSED:
+        return (
+            SHELL_DENY,
+            "host lifecycle state could not be determined; only official "
+            "Scaffold inspection/update commands are allowed",
+        )
+    if gate == GATE_BOOTSTRAP:
+        return SHELL_DENY, "shell command is not an official Scaffold launcher invocation"
+    boundary = ordinary_shell_hard_boundary(argv, host)
+    if boundary:
+        return SHELL_DENY, boundary
+    return SHELL_ALLOW, SHELL_ORDINARY_ALLOW_REASON
 
 
 def first_use_shell_allowed(
@@ -919,7 +960,11 @@ def hook_main(
             result = _allow("invalid observation is non-blocking")
             _write_hook_result(stdout, result)
             return 0
-        result = _deny(UNKNOWN_DENY_MESSAGE, reason="invalid or unusable hook input")
+        result = _deny(
+            UNKNOWN_DENY_MESSAGE,
+            reason="invalid or unusable hook input",
+            user_message=FAIL_CLOSED_USER_MESSAGE,
+        )
         _write_hook_result(stdout, result)
         return 2
     except Exception:
@@ -927,7 +972,11 @@ def hook_main(
             result = _allow("observation hook failure is non-blocking")
             _write_hook_result(stdout, result)
             return 0
-        result = _deny(UNKNOWN_DENY_MESSAGE, reason="hook adapter failure")
+        result = _deny(
+            UNKNOWN_DENY_MESSAGE,
+            reason="hook adapter failure",
+            user_message=FAIL_CLOSED_USER_MESSAGE,
+        )
         _write_hook_result(stdout, result)
         return 2
 
@@ -1094,9 +1143,33 @@ def _deny(
     return {
         "permission": "deny",
         "agent_message": agent_message,
-        "user_message": user_message or USER_DENY_MESSAGE,
+        "user_message": user_message or GENERIC_DENY_USER_MESSAGE,
         "reason": reason,
     }
+
+
+def _default_deny_user_message(policy: str) -> str:
+    if policy == GATE_BOOTSTRAP:
+        return USER_DENY_MESSAGE
+    if policy == GATE_FAIL_CLOSED:
+        return FAIL_CLOSED_USER_MESSAGE
+    if policy == GATE_RECOVERY:
+        return RECOVERY_USER_DENY_MESSAGE
+    return DEVELOP_USER_DENY_MESSAGE
+
+
+def _shell_deny_agent_message(policy: str, lifecycle_message: str, detail: str) -> str:
+    if policy == GATE_BOOTSTRAP:
+        return lifecycle_message
+    return f"Scaffold blocked this shell command at a hard boundary: {detail}"
+
+
+def _shell_deny_user_message(policy: str, lifecycle_user: str) -> str:
+    if policy == GATE_BOOTSTRAP:
+        return lifecycle_user
+    if policy == GATE_FAIL_CLOSED:
+        return FAIL_CLOSED_USER_MESSAGE
+    return HARD_BOUNDARY_USER_MESSAGE
 
 
 def _write_hook_result(stdout, result: dict[str, Any]) -> None:

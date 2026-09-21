@@ -319,7 +319,7 @@ def command_execution_allowed(command: dict[str, Any] | None) -> tuple[bool, str
     if confidence in {"UNKNOWN", "CONFLICTING"}:
         return False, f"command authority is {confidence}"
     if confidence == "INFERRED":
-        return False, "INFERRED command availability is not VERIFIED execution authority"
+        return True, ""
     if confidence != "VERIFIED":
         return False, "command execution authority is UNKNOWN"
     return True, ""
@@ -517,6 +517,18 @@ def _required_set_is_authoritative(
         return False
     if confidence != "VERIFIED" or applicability not in {"APPLICABLE", "NOT_APPLICABLE"}:
         return False
+    for profile in required:
+        source = (
+            profile.data.get("required_authority")
+            or profile.data.get("confidence")
+            or confidence
+        )
+        if source != "VERIFIED":
+            return False
+        if profile.data.get("policy") == "observed" and (
+            profile.data.get("required_authority") != "VERIFIED"
+        ):
+            return False
     declared = raw.get("required_authority")
     if not required:
         return declared == "VERIFIED"
@@ -535,12 +547,7 @@ def _required_policy_issues(profiles: list[Profile], contract_confidence: str) -
             or profile.data.get("confidence")
             or contract_confidence
         )
-        if source == "INFERRED":
-            issues.append(
-                f"profile {profile.profile_id} required policy is INFERRED-only "
-                "and is not authoritative"
-            )
-        elif source in {"UNKNOWN", "CONFLICTING"}:
+        if source in {"UNKNOWN", "CONFLICTING"}:
             issues.append(
                 f"profile {profile.profile_id} required-policy authority is {source}"
             )
@@ -551,6 +558,8 @@ def _required_policy_issues(profiles: list[Profile], contract_confidence: str) -
                 f"profile {profile.profile_id} observed availability is not "
                 "an authoritative REQUIRED policy"
             )
+        elif source == "INFERRED":
+            continue
         elif source != "VERIFIED":
             issues.append(
                 f"profile {profile.profile_id} required-policy authority is unresolved"
