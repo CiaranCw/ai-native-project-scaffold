@@ -6,10 +6,12 @@ import argparse
 import ast
 import base64
 import json
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -65,6 +67,7 @@ from scaffold_p5.progress import emit_working
 from scaffold_p5.result import result_dict
 
 
+INSTALL_SWAP_RETRY_SECONDS = 3.0
 INSTALL_FORMAT_VERSION = "1"
 RUNTIME_REPRESENTATION_VERSION = "1"
 SCHEMA_VERSION = "1"
@@ -897,6 +900,22 @@ def apply_consumer_install(plan: InstallPlan) -> dict[str, Any]:
     try:
         _write_payloads(host, plan.files, staging_hint=staging)
         _apply_removals(host, plan.removed)
+    except OSError as exc:
+        if _windows_replace_denied(exc):
+            return {
+                "outcome": "FAILED",
+                "mode": plan.mode,
+                "added": [],
+                "modified": [],
+                "unchanged": [],
+                "removed": [],
+                "verify": {"status": VERIFY_UNKNOWN, "reasons": []},
+                "blockers": [
+                    "Windows denied replacing .scaffold/install because a file "
+                    "inside it is open. The previous install was left in place."
+                ],
+            }
+        raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     _clean_install_caches(host)
@@ -2514,6 +2533,140 @@ def _manifest_from_plan(plan: InstallPlan) -> dict[str, Any]:
     }
 
 
+def _windows_replace_denied(exc: BaseException) -> bool:
+    """WinError 5: a file in the tree is open. WinError 32: a directory handle."""
+    if os.name != "nt":
+        return False
+    return getattr(exc, "winerror", None) in {5, 32}
+
+
+def _retry_replace(action) -> None:
+    if os.name != "nt":
+        action()
+        return
+    deadline = time.monotonic() + INSTALL_SWAP_RETRY_SECONDS
+    while True:
+        try:
+            action()
+            return
+        except OSError as exc:
+            if not _windows_replace_denied(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
+def _swap_existing_install(
+    final_install: Path,
+    staging_install: Path,
+    token: str,
+) -> None:
+    """Replace an existing install tree.
+
+    Prefer one directory rename. On Windows that rename is denied while any
+    file inside the tree is open, so fall back to replacing file contents in
+    the existing directory and roll back if a required file stays locked.
+    """
+    backup = final_install.parent / f"install.bak-{token}"
+    if backup.exists():
+        shutil.rmtree(backup)
+    try:
+        final_install.rename(backup)
+    except OSError as exc:
+        if not _windows_replace_denied(exc):
+            raise
+        _replace_install_contents(final_install, staging_install, token)
+        return
+    try:
+        shutil.move(str(staging_install), str(final_install))
+    except OSError:
+        if final_install.exists():
+            shutil.rmtree(final_install, ignore_errors=True)
+        if not final_install.exists():
+            backup.rename(final_install)
+        raise
+    shutil.rmtree(backup, ignore_errors=True)
+
+
+def _replace_install_contents(
+    final_install: Path,
+    staging_install: Path,
+    token: str,
+) -> None:
+    keep = final_install.parent / f"install.keep-{token}"
+    if keep.exists():
+        shutil.rmtree(keep)
+    before = {
+        path.relative_to(final_install).as_posix()
+        for path in final_install.rglob("*")
+        if path.is_file()
+    }
+    staged = {
+        path.relative_to(staging_install).as_posix()
+        for path in staging_install.rglob("*")
+        if path.is_file()
+    }
+    manifest_rel = "install.yaml"
+    ordered = [rel for rel in sorted(staged) if rel != manifest_rel]
+    if manifest_rel in staged:
+        ordered.append(manifest_rel)
+    try:
+        for rel in before:
+            src = final_install / rel
+            dest = keep / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+        for rel in ordered:
+            dest = final_install / rel
+            src = staging_install / rel
+            if dest.is_file() and dest.read_bytes() == src.read_bytes():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _retry_replace(lambda src=src, dest=dest: os.replace(src, dest))
+        for rel in sorted(before - staged, key=len, reverse=True):
+            if rel.endswith(".pyc") or "/__pycache__/" in f"/{rel}":
+                try:
+                    (final_install / rel).unlink(missing_ok=True)
+                except OSError:
+                    continue
+            else:
+                _retry_replace(
+                    lambda rel=rel: (final_install / rel).unlink(missing_ok=True)
+                )
+    except OSError:
+        try:
+            _restore_install_contents(final_install, keep, before)
+        except OSError:
+            raise
+        shutil.rmtree(keep, ignore_errors=True)
+        raise
+    shutil.rmtree(keep, ignore_errors=True)
+
+
+def _restore_install_contents(
+    final_install: Path,
+    keep: Path,
+    before: set[str],
+) -> None:
+    for path in list(final_install.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(final_install).as_posix()
+        if rel not in before:
+            try:
+                path.unlink()
+            except OSError:
+                continue
+    if not keep.is_dir():
+        return
+    for path in keep.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(keep)
+        dest = final_install / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest)
+
+
 def _write_payloads(
     host: Path, files: list[InstallFile], *, staging_hint: Path
 ) -> None:
@@ -2529,15 +2682,10 @@ def _write_payloads(
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(row.data)
     final_install = host / INSTALL_DIR
-    backup = None
     if final_install.exists():
-        backup = host / ".scaffold" / f"install.bak-{staging_hint.name}"
-        if backup.exists():
-            shutil.rmtree(backup)
-        final_install.rename(backup)
-    shutil.move(str(staging_install), str(final_install))
-    if backup is not None:
-        shutil.rmtree(backup, ignore_errors=True)
+        _swap_existing_install(final_install, staging_install, staging_hint.name)
+    else:
+        shutil.move(str(staging_install), str(final_install))
     for row in other_files:
         dest = host / row.rel
         dest.parent.mkdir(parents=True, exist_ok=True)
