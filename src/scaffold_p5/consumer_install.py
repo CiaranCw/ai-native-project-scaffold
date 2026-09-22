@@ -46,6 +46,7 @@ from scaffold_p5.first_use import (
     HOOK_SCRIPT_REL,
     HOOKS_JSON_REL,
     OWNERSHIP_MANAGED_JSON_FRAGMENT,
+    REFRESH_PUBLIC_ACTIONS,
     dumps_hooks_json,
     expected_hook_fragment_digest,
     first_use_decision,
@@ -60,6 +61,7 @@ from scaffold_p5.inventory import project_relative_path
 from scaffold_p5.io_util import file_digest, read_text, sha256_bytes
 from scaffold_p5.models import CORE_SKILLS
 from scaffold_p5.packages import load_package
+from scaffold_p5.progress import emit_working
 from scaffold_p5.result import result_dict
 
 
@@ -255,12 +257,15 @@ Run:
 python .scaffold/install/run.py understand bootstrap
 python .scaffold/install/run.py understand full
 python .scaffold/install/run.py understand refresh
+python .scaffold/install/run.py understand refresh --action resume
 python .scaffold/install/run.py understand compatibility
 python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json>
 python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json> --plan-digest <hex>
 ```
 
-Do not silently rewrite `skills.lock`. Consumer UPDATE does not change
+Zero-context resume is `understand refresh --action resume`. Default Refresh
+rewrites GENERATED command/test indexes; resume is observational and does
+not. Do not silently rewrite `skills.lock`. Consumer UPDATE does not change
 project-local expected identity. Explicit compatibility lock-update is
 the supported authority transition. Preview, then apply that exact plan
 digest. That apply is Agent lifecycle work, not Git Commit or Push.
@@ -293,11 +298,18 @@ Run:
 ```text
 python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>
 python .scaffold/install/run.py develop session --task-id <task-id>
+python .scaffold/install/run.py develop bind --task-id <task-id> --requirement-id <id> --profile-id <id>
+python .scaffold/install/run.py develop complete --task-id <task-id> --complete-json-b64 <envelope>
 python .scaffold/install/run.py develop seal --task-id <task-id>
 ```
 
 `--intake-json-b64` carries the structured Task proposal required by
-Develop intake. Do not write `.scaffold/tasks/` directly. Repair is a
+Develop intake. `develop bind` publishes a grounded `test_profile`
+binding on an existing Task requirement through Task Book CAS; do not
+write `.scaffold/tasks/` directly. `develop complete` requests Test
+execution, Completion Decisions, Stage COMPLETE, and Task
+READY_FOR_REVIEW through engine/lifecycle authority. The caller cannot
+manufacture READY. Repair is a
 Develop mode. Supporting scope is Task affiliation, not ownership override.
 
 Do not use an external Distribution checkout.
@@ -620,11 +632,19 @@ def manifest_fragment_records(manifest: dict[str, Any] | None) -> list[dict[str,
 def expected_region_text(
     rel: str,
     profiles: tuple[AdapterProfile, ...] | None = None,
+    *,
+    host: str | Path | None = None,
+    agents_inner: str | None = None,
 ) -> str | None:
     if profiles is None:
         profiles, _issues = resolve_profiles(None)
     if rel == AGENTS_MD:
-        inner = compose_consumer_agents_inner(_agents_adapter_block(profiles))
+        core = agents_inner
+        if core is None and host is not None:
+            core = _installed_consumer_agents_inner(Path(host))
+        inner = compose_consumer_agents_inner(
+            _agents_adapter_block(profiles), core=core
+        )
         return (
             f"{CONSUMER_REGION_START}\n"
             f"{inner}\n"
@@ -638,8 +658,13 @@ def expected_region_text(
 def expected_region_digest(
     rel: str,
     profiles: tuple[AdapterProfile, ...] | None = None,
+    *,
+    host: str | Path | None = None,
+    agents_inner: str | None = None,
 ) -> str | None:
-    text = expected_region_text(rel, profiles)
+    text = expected_region_text(
+        rel, profiles, host=host, agents_inner=agents_inner
+    )
     if text is None:
         return None
     return sha256_bytes(text.encode("utf-8"))
@@ -769,7 +794,13 @@ def plan_consumer_install(
             payloads[rel] = str(bodies[adapter]).encode("utf-8")
         payloads[FIRST_USE_RULE_REL] = generated["FIRST_USE_RULE_TEXT"].encode("utf-8")
         payloads[HOOK_SCRIPT_REL] = generated["HOOK_SCRIPT_TEXT"].encode("utf-8")
-    agents_text, agents_issue = _planned_agents_text(host_path, profiles)
+    agents_inner = compose_consumer_agents_inner(
+        _agents_adapter_block(profiles),
+        core=generated.get("CONSUMER_AGENTS_INNER"),
+    )
+    agents_text, agents_issue = _planned_agents_text(
+        host_path, profiles, inner=agents_inner
+    )
     if agents_issue:
         plan.blockers.append(agents_issue)
         return plan
@@ -1305,6 +1336,11 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     parser.add_argument("--new-expected", dest="new_expected", default=None)
     parser.add_argument("--new-expected-b64", dest="new_expected_b64", default=None)
     parser.add_argument("--distribution", default=None)
+    parser.add_argument("--requirement-id", dest="requirement_id", default=None)
+    parser.add_argument("--profile-id", dest="profile_id", default=None)
+    parser.add_argument("--kind", default=None)
+    parser.add_argument("--complete-json", dest="complete_json", default=None)
+    parser.add_argument("--complete-json-b64", dest="complete_json_b64", default=None)
     args, rest = parser.parse_known_args(argv)
     target = Path(args.host)
     intake_allowed = (
@@ -1326,6 +1362,9 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         )
         return 1
     compatibility_mode = args.command == "understand" and (args.mode or "") == "compatibility"
+    refresh_mode = args.command == "understand" and (args.mode or "") == "refresh"
+    bind_mode = args.command == "develop" and (args.mode or "") == "bind"
+    complete_mode = args.command == "develop" and (args.mode or "") == "complete"
     if rest and compatibility_mode:
         print(
             json.dumps(
@@ -1339,6 +1378,10 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             )
         )
         return 1
+    if rest and (refresh_mode or bind_mode or complete_mode):
+        return _print_installed_blocked(
+            ["unsupported arguments: " + " ".join(rest)]
+        )
     if compatibility_mode and args.approved:
         print(
             json.dumps(
@@ -1352,22 +1395,34 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             )
         )
         return 1
-    if (
-        args.action or args.new_expected or args.new_expected_b64
-    ) and not compatibility_mode:
-        print(
-            json.dumps(
-                {
-                    "outcome": "BLOCKED",
-                    "blockers": [
-                        "--action / --new-expected is only valid on "
-                        "understand compatibility"
-                    ],
-                },
-                indent=2,
+    if args.new_expected or args.new_expected_b64:
+        if not compatibility_mode:
+            return _print_installed_blocked(
+                ["--new-expected is only valid on understand compatibility"]
             )
+    if args.action:
+        if compatibility_mode:
+            pass
+        elif refresh_mode:
+            if args.action not in REFRESH_PUBLIC_ACTIONS:
+                return _print_installed_blocked(
+                    [f"unsupported refresh action {args.action}"]
+                )
+        else:
+            return _print_installed_blocked(
+                [
+                    "--action is only valid on understand compatibility or "
+                    "understand refresh"
+                ]
+            )
+    if (args.requirement_id or args.profile_id or args.kind) and not bind_mode:
+        return _print_installed_blocked(
+            ["binding flags are only valid on develop bind"]
         )
-        return 1
+    if (args.complete_json or args.complete_json_b64) and not complete_mode:
+        return _print_installed_blocked(
+            ["completion flags are only valid on develop complete"]
+        )
     consumer_update = args.command == "consumer" and (args.mode or "") == "update"
     if args.command == "consumer" and _argv_has_flag(argv, "--host"):
         return _print_installed_blocked(
@@ -1447,6 +1502,12 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                 )
                 return 1
             opts.update(compat_opts)
+        elif mode == "refresh":
+            if args.action:
+                opts["action"] = args.action
+            if args.task_id:
+                opts["task_id"] = args.task_id
+            emit_working(target, "understand.refresh", args.action or "default")
         elif args.approved:
             # Subject selector only. It names which Plan is presented to the
             # human; it is never proof that the human approved it.
@@ -1459,7 +1520,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         return 0 if result.outcome in {"COMPLETED", "BLOCKED", "NEEDS_HUMAN"} else 1
     package = target / ".scaffold" / "install" / "packages" / args.command
     if args.command == "develop":
-        from scaffold_p7.engine import DevelopEngine
+        from scaffold_p7.engine import DevelopEngine, load_complete_envelope_flags
         from scaffold_p7.intake import load_intake_envelope_flags
 
         engine = DevelopEngine(
@@ -1500,6 +1561,40 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             )
         elif mode == "session":
             result = engine.open_develop_session(task_id=args.task_id)
+        elif mode == "bind":
+            result = engine.bind_requirement(
+                task_id=args.task_id,
+                requirement_id=args.requirement_id,
+                profile_id=args.profile_id,
+                kind=args.kind,
+            )
+        elif mode == "complete":
+            envelope, envelope_error = load_complete_envelope_flags(
+                args.complete_json, args.complete_json_b64
+            )
+            if envelope_error:
+                print(
+                    json.dumps(
+                        {"outcome": "BLOCKED", "blockers": [envelope_error]},
+                        indent=2,
+                    )
+                )
+                return 1
+            if envelope is None:
+                print(
+                    json.dumps(
+                        {
+                            "outcome": "BLOCKED",
+                            "blockers": [
+                                "develop complete requires --complete-json or "
+                                "--complete-json-b64"
+                            ],
+                        },
+                        indent=2,
+                    )
+                )
+                return 1
+            result = engine.complete(task_id=args.task_id, envelope=envelope)
         elif mode == "seal":
             result = engine.seal_develop_execution(task_id=args.task_id)
         elif mode == "abort":
@@ -1913,14 +2008,42 @@ def _module_constants(path: Path, names: tuple[str, ...]) -> dict[str, Any]:
     return found
 
 
+def _installed_consumer_agents_inner(host: Path) -> str | None:
+    """Managed AGENTS inner text from the installed runtime, not the importer."""
+    path = host / RUNTIME_DIR / "scaffold_p5" / "agents.py"
+    if not path.is_file():
+        return None
+    try:
+        found = _module_constants(path, ("CONSUMER_AGENTS_INNER",))
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError):
+        return None
+    value = found.get("CONSUMER_AGENTS_INNER")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
+
+
+def _region_payload_digest(rel: str, data: bytes) -> str | None:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        return None
+    slice_text, issues = _live_region_slice(rel, text)
+    if issues or not slice_text:
+        return None
+    return sha256_bytes(slice_text.encode("utf-8"))
+
+
 def _distribution_generated_texts(dist_root: Path) -> tuple[dict[str, Any], list[str]]:
-    """Install generated launcher/hook/rule texts from the Distribution source."""
+    """Install generated launcher/hook/rule/AGENTS texts from the Distribution source."""
     issues: list[str] = []
     ci_path = dist_root / "src" / "scaffold_p5" / "consumer_install.py"
     fu_path = dist_root / "src" / "scaffold_p5" / "first_use.py"
+    agents_path = dist_root / "src" / "scaffold_p5" / "agents.py"
     try:
         ci = _module_constants(ci_path, ("RUNNER_TEXT", "CURSOR_BODIES"))
         fu = _module_constants(fu_path, ("FIRST_USE_RULE_TEXT", "HOOK_SCRIPT_TEXT"))
+        agents = _module_constants(agents_path, ("CONSUMER_AGENTS_INNER",))
     except (OSError, UnicodeError, SyntaxError, ValueError, TypeError) as exc:
         return {}, [f"Distribution generated install texts are unreadable: {type(exc).__name__}"]
     required = {
@@ -1928,6 +2051,7 @@ def _distribution_generated_texts(dist_root: Path) -> tuple[dict[str, Any], list
         "CURSOR_BODIES": ci.get("CURSOR_BODIES"),
         "FIRST_USE_RULE_TEXT": fu.get("FIRST_USE_RULE_TEXT"),
         "HOOK_SCRIPT_TEXT": fu.get("HOOK_SCRIPT_TEXT"),
+        "CONSUMER_AGENTS_INNER": agents.get("CONSUMER_AGENTS_INNER"),
     }
     for name, value in required.items():
         if not isinstance(value, str) and name != "CURSOR_BODIES":
@@ -2120,7 +2244,7 @@ def _managed_region_issues(
         (row["path"], row["region_id"]): row for row in manifest_region_records(manifest)
     }
     for rel, region_id in REGION_HOST_PATHS.items():
-        expected = expected_region_digest(rel, profiles)
+        expected = expected_region_digest(rel, profiles, host=host)
         if not expected:
             incompat.append(f"canonical managed region for {rel} is undefined")
             continue
@@ -2272,11 +2396,17 @@ def _git_check_attr_text_issues(host: Path) -> list[str]:
 def _planned_agents_text(
     host: Path,
     profiles: tuple[AdapterProfile, ...] = (),
+    *,
+    inner: str | None = None,
 ) -> tuple[str | None, str | None]:
-    inner = compose_consumer_agents_inner(_agents_adapter_block(profiles))
+    composed = (
+        str(inner).strip()
+        if inner is not None
+        else compose_consumer_agents_inner(_agents_adapter_block(profiles))
+    )
     path = host / AGENTS_MD
     if not path.exists():
-        applied = apply_consumer_install_region("", inner=inner)
+        applied = apply_consumer_install_region("", inner=composed)
         return applied, None if applied is not None else "cannot create AGENTS.md consumer region"
     if not path.is_file():
         return None, "AGENTS.md exists and is not a file"
@@ -2287,7 +2417,7 @@ def _planned_agents_text(
     state = classify_agents_text(current)
     if state == "unsafe":
         return None, "existing AGENTS.md is unsafe to integrate; refusing overwrite"
-    applied = apply_consumer_install_region(current, inner=inner)
+    applied = apply_consumer_install_region(current, inner=composed)
     if applied is None:
         return None, "existing AGENTS.md cannot receive a scaffold-consumer region"
     return applied, None
@@ -2331,7 +2461,9 @@ def _manifest_from_plan(plan: InstallPlan) -> dict[str, Any]:
     fragments = []
     for row in sorted(plan.files, key=lambda item: item.rel):
         if row.ownership == OWNERSHIP_MANAGED_REGION and row.region_id:
-            digest = expected_region_digest(row.rel, plan.profiles)
+            digest = _region_payload_digest(row.rel, row.data)
+            if not digest:
+                digest = expected_region_digest(row.rel, plan.profiles)
             if not digest:
                 continue
             regions.append(

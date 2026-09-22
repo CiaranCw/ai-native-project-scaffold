@@ -388,7 +388,11 @@ def snapshot_open_inventory(
         loaded = load_open_inventory(directory)
         if loaded is not None:
             return loaded
+    from scaffold_p5.progress import emit_working
+
+    emit_working(root, "develop.inventory", "hash_workspace")
     files = execution_workspace_digests(root)
+    emit_working(root, "develop.inventory", "done", files=len(files))
     payload = {
         "schema_version": "1",
         "record_type": "develop_open_inventory",

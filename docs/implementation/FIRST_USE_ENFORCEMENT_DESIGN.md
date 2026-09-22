@@ -102,8 +102,26 @@ Default Understand Refresh
 (`python .scaffold/install/run.py understand refresh`) is the supported
 ACTIVE-host route that rewrites GENERATED `.scaffold/commands.yaml` and
 `.scaffold/tests.yaml` from current physical discovery. Consumer UPDATE
-does not. `refresh` `action=resume` is observational and does not perform
+does not. Zero-context resume is the same Refresh mode with an explicit
+action:
+
+```text
+python .scaffold/install/run.py understand refresh --action resume
+```
+
+`refresh` `action=resume` is observational and does not perform
 that rewrite. Discovered tooling remains INFERRED until real execution.
+
+Existing Task requirement binding and completion/READY are public Develop
+operations, not private runtime imports:
+
+```text
+python .scaffold/install/run.py develop bind --task-id <task-id> --requirement-id <id> --profile-id <id>
+python .scaffold/install/run.py develop complete --task-id <task-id> --complete-json-b64 <envelope>
+```
+
+`develop complete` still relies on engine/lifecycle authority. Callers cannot
+manufacture READY. TEST_COMPLETE remains project-wide Submit S5 authority.
 
 Successful Adoption is not write permission. Repair remains a Develop mode.
 There is no fifth Skill.

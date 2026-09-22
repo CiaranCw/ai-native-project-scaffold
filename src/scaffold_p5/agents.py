@@ -37,7 +37,7 @@ If the host is NOT_ADOPTED, ordinary business work is not authorized. Do not mod
 
 On a never-adopted host, ordinary business work starts with Understand bootstrap.
 
-If the host is ACTIVE, ordinary HUMAN_OWNED business mutation is not authorized until Develop has a current IN_PROGRESS Task Book, a mutable Stage, and an OPEN Develop Session bound to that Task. Successful Adoption is not permission to edit project source. Do not implement the original business request by writing files directly. Required route: `python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>` to publish a bounded Task proposal through Develop intake. Intake creates no Develop Session. Continue with `python .scaffold/install/run.py develop session --task-id <task-id>` to open the execution window, then `python .scaffold/install/run.py develop seal --task-id <task-id>` or `develop abort` to close it. Do not write `.scaffold/tasks/` directly. Repair remains a Develop mode. There is no fifth Skill.
+If the host is ACTIVE, ordinary HUMAN_OWNED business mutation is not authorized until Develop has a current IN_PROGRESS Task Book, a mutable Stage, and an OPEN Develop Session bound to that Task. Successful Adoption is not permission to edit project source. Do not implement the original business request by writing files directly. Required route: `python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>` to publish a bounded Task proposal through Develop intake. Intake creates no Develop Session. Continue with `python .scaffold/install/run.py develop session --task-id <task-id>` to open the execution window, then `python .scaffold/install/run.py develop seal --task-id <task-id>` or `develop abort` to close it. Bind an existing Task requirement with `python .scaffold/install/run.py develop bind --task-id <task-id> --requirement-id <id> --profile-id <id>`. Request Test, Completion Decisions, Stage COMPLETE, and READY_FOR_REVIEW with `python .scaffold/install/run.py develop complete --task-id <task-id> --complete-json-b64 <envelope>`. Zero-context resume is `python .scaffold/install/run.py understand refresh --action resume`. Do not write `.scaffold/tasks/` directly. Repair remains a Develop mode. There is no fifth Skill.
 
 Required first-use route: `python .scaffold/install/run.py status`, then `python .scaffold/install/run.py understand bootstrap`. Preview is not apply. Continue with `--approved --plan-digest` of that exact Plan. Adoption apply is Agent lifecycle work; it is not Git Commit or Push. No project implementation may happen before Adoption completes.
 
@@ -64,18 +64,27 @@ Do not clone a second Scaffold repository and do not set PYTHONPATH to a develop
 """
 
 
-def compose_consumer_agents_inner(adapter_block: str = "") -> str:
-    """Core consumer AGENTS body plus optional declared-adapter guidance."""
-    core = CONSUMER_AGENTS_INNER.strip()
+def compose_consumer_agents_inner(
+    adapter_block: str = "",
+    *,
+    core: str | None = None,
+) -> str:
+    """Core consumer AGENTS body plus optional declared-adapter guidance.
+
+    `core` is the managed inner text. Callers that plan a Consumer UPDATE
+    MUST pass the TARGET Distribution body so AGENTS does not lag one update
+    behind the imported host runtime.
+    """
+    body = CONSUMER_AGENTS_INNER.strip() if core is None else str(core).strip()
     block = str(adapter_block or "").strip()
     if not block:
-        return core
+        return body
     needle = "Runtime: `.scaffold/install/runtime/`"
-    idx = core.find(needle)
+    idx = body.find(needle)
     if idx < 0:
-        return core + "\n\n" + block
+        return body + "\n\n" + block
     at = idx + len(needle)
-    return core[:at] + "\n\n" + block + core[at:]
+    return body[:at] + "\n\n" + block + body[at:]
 
 
 _MARKER = re.compile(
@@ -91,7 +100,7 @@ This host is managed by AI-Native Project Scaffold.
 - Expected Skills: `.scaffold/skills.lock`
 - Project Rule indexes: `.scaffold/project.yaml`, `.scaffold/modules.yaml`, `.scaffold/tests.yaml`
 
-Zero-context resume: invoke Understand `refresh` with `action=resume`. Current Tasks, Sessions, Repair, Migration, Test, and Submit state are reconstructed from project-local records and supporting runtime artifacts. Chat history is not authority.
+Zero-context resume: invoke Understand `refresh` with `action=resume` via `python .scaffold/install/run.py understand refresh --action resume`. Current Tasks, Sessions, Repair, Migration, Test, and Submit state are reconstructed from project-local records and supporting runtime artifacts. Chat history is not authority.
 
 On an ACTIVE host, ordinary HUMAN_OWNED business mutation still requires Develop Task Book and OPEN Session authority. Do not treat Adoption as write permission.
 

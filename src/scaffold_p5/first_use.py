@@ -216,6 +216,8 @@ POST_ADOPTION_RUN_ARGV = {
     ("develop", "session"): "develop",
     ("develop", "seal"): "develop",
     ("develop", "abort"): "develop",
+    ("develop", "bind"): "develop",
+    ("develop", "complete"): "develop",
 }
 RECOVERY_RUN_ARGV = {
     **ALLOWED_RUN_ARGV,
@@ -231,8 +233,12 @@ FAIL_CLOSED_RUN_ARGV = {
     CONSUMER_UPDATE_RUN_ARGV: "consumer.update",
 }
 INTAKE_POSITIONALS = frozenset({("enter", "develop"), ("develop", "intake")})
+BIND_RUN_ARGV = ("develop", "bind")
+COMPLETE_RUN_ARGV = ("develop", "complete")
 COMPATIBILITY_RUN_ARGV = ("understand", "compatibility")
+REFRESH_RUN_ARGV = ("understand", "refresh")
 COMPATIBILITY_PUBLIC_ACTIONS = frozenset({"evaluate", "lock_update"})
+REFRESH_PUBLIC_ACTIONS = frozenset({"resume", "understand"})
 
 SHELL_ALLOW = "allow"
 SHELL_DENY = "deny"
@@ -349,6 +355,15 @@ Push remain separate publication operations.
 Required editor-mutation route: `python .scaffold/install/run.py enter
 develop --intake-json-b64 <envelope>`, then continue with
 `python .scaffold/install/run.py develop session --task-id <task-id>`.
+Zero-context resume is
+`python .scaffold/install/run.py understand refresh --action resume`.
+Bind an existing Task requirement with
+`python .scaffold/install/run.py develop bind --task-id <task-id>
+--requirement-id <id> --profile-id <id>`. Request Test execution,
+Completion Decisions, Stage COMPLETE, and Task READY_FOR_REVIEW with
+`python .scaffold/install/run.py develop complete --task-id <task-id>
+--complete-json-b64 <envelope>`. Do not write `.scaffold/tasks/`
+directly and do not import private runtime APIs to manufacture READY.
 
 Observation hooks (postToolUse / afterFileEdit and equivalents) are
 optional. Their absence or failure must not stop ordinary in-workspace
@@ -834,6 +849,9 @@ def classify_first_use_shell(
             compat_error = _compatibility_flag_error(positional, flags)
             if compat_error:
                 return SHELL_DENY, compat_error
+            lifecycle_error = _lifecycle_flag_error(positional, flags)
+            if lifecycle_error:
+                return SHELL_DENY, lifecycle_error
             consumer_error = _consumer_flag_error(positional, flags)
             if consumer_error:
                 return SHELL_DENY, consumer_error
@@ -1391,7 +1409,7 @@ def _split_runner_flags(
             continue
         if token == "--action":
             if i + 1 >= len(rest):
-                return tuple(), flags, "--action requires evaluate or lock_update"
+                return tuple(), flags, "--action requires a value"
             flags["action"] = rest[i + 1]
             i += 2
             continue
@@ -1411,6 +1429,36 @@ def _split_runner_flags(
             if i + 1 >= len(rest):
                 return tuple(), flags, "--distribution requires a Distribution path"
             flags["distribution"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--requirement-id":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--requirement-id requires a Task requirement identity"
+            flags["requirement_id"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--profile-id":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--profile-id requires a Test profile identity"
+            flags["profile_id"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--kind":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--kind requires test_profile"
+            flags["kind"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--complete-json":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--complete-json requires a JSON object"
+            flags["complete_json"] = rest[i + 1]
+            i += 2
+            continue
+        if token == "--complete-json-b64":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--complete-json-b64 requires a base64 payload"
+            flags["complete_json_b64"] = rest[i + 1]
             i += 2
             continue
         if token.startswith("-"):
@@ -1442,6 +1490,10 @@ def _consumer_flag_error(
             return "approval flags are only valid on Understand bootstrap"
         if flags.get("intake_json") or flags.get("intake_json_b64"):
             return "intake JSON flags are only valid on enter develop or develop intake"
+        if flags.get("requirement_id") or flags.get("profile_id") or flags.get("kind"):
+            return "binding flags are only valid on develop bind"
+        if flags.get("complete_json") or flags.get("complete_json_b64"):
+            return "completion flags are only valid on develop complete"
         if flags.get("task_id"):
             return "--task-id is not valid on consumer update"
         if flags.get("host") is not None:
@@ -1465,6 +1517,16 @@ def _compatibility_flag_error(
 ) -> str | None:
     action = flags.get("action")
     has_expected = bool(flags.get("new_expected") or flags.get("new_expected_b64"))
+    if positional == REFRESH_RUN_ARGV:
+        if has_expected:
+            return "--new-expected is only valid on understand compatibility"
+        if action is None:
+            return None
+        if action in REFRESH_PUBLIC_ACTIONS:
+            return None
+        if action in COMPATIBILITY_PUBLIC_ACTIONS:
+            return "compatibility flags are only valid on understand compatibility"
+        return f"unsupported refresh action {action}"
     has_compat_flag = action is not None or has_expected
     if (
         flags.get("plan_digest")
@@ -1509,6 +1571,37 @@ def _compatibility_flag_error(
             return "new-expected base64 is malformed"
         if not isinstance(payload, dict) or not payload:
             return "new-expected JSON must be a nonempty object"
+    return None
+
+
+def _lifecycle_flag_error(
+    positional: tuple[str, ...],
+    flags: dict[str, Any],
+) -> str | None:
+    has_bind = bool(
+        flags.get("requirement_id") or flags.get("profile_id") or flags.get("kind")
+    )
+    has_complete = bool(flags.get("complete_json") or flags.get("complete_json_b64"))
+    if has_bind and positional != BIND_RUN_ARGV:
+        return "binding flags are only valid on develop bind"
+    if has_complete and positional != COMPLETE_RUN_ARGV:
+        return "completion flags are only valid on develop complete"
+    if positional == BIND_RUN_ARGV:
+        if flags.get("intake_json") or flags.get("intake_json_b64"):
+            return "intake JSON flags are only valid on enter develop or develop intake"
+        kind = flags.get("kind")
+        if kind is not None and kind != "test_profile":
+            return "develop bind --kind must be test_profile"
+        return None
+    if positional == COMPLETE_RUN_ARGV:
+        if flags.get("intake_json") or flags.get("intake_json_b64"):
+            return "intake JSON flags are only valid on enter develop or develop intake"
+        if flags.get("complete_json") and flags.get("complete_json_b64"):
+            return "provide only one of --complete-json or --complete-json-b64"
+        raw_b64 = flags.get("complete_json_b64")
+        if raw_b64 is not None and not INTAKE_B64_RE.fullmatch(str(raw_b64)):
+            return "completion JSON base64 is malformed"
+        return None
     return None
 
 

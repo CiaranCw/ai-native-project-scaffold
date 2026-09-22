@@ -25,9 +25,12 @@ from test_compatibility_lock_update_public import (
     _write_live_lock,
 )
 from test_consumer_installation import (
+    AGENTS_START,
     EXPECTED_PACKAGES,
+    HUMAN_AGENTS_RULE,
     _copy_live_dist,
     _empty_host,
+    _insert_before_marker,
     _install,
     _run_installed,
 )
@@ -51,6 +54,7 @@ from scaffold_p5.first_use import (
     classify_first_use_shell,
     evaluate_cursor_hook,
 )
+from scaffold_p5.agents import CONSUMER_INSTALL_REGION, parse_managed_regions
 from scaffold_p5.io_util import read_yaml, sha256_bytes
 from scaffold_p5.packages import load_package
 from scaffold_p5.schemas import CURRENT_PROJECT_CONTRACT_GENERATION
@@ -494,6 +498,140 @@ class ConsumerSelfUpdateForwardE2ETests(unittest.TestCase):
             (self.host / ".scaffold" / "tasks" / f"{TASK_A}.yaml").read_bytes(),
             task_bytes,
         )
+
+    def test_one_update_refreshes_agents_to_n1(self):
+        lifecycle = (
+            "Bind an existing Task requirement with `python .scaffold/install/run.py "
+            "develop bind --task-id <task-id> --requirement-id <id> --profile-id <id>`. "
+            "Request Test, Completion Decisions, Stage COMPLETE, and READY_FOR_REVIEW with "
+            "`python .scaffold/install/run.py develop complete --task-id <task-id> "
+            "--complete-json-b64 <envelope>`. Zero-context resume is "
+            "`python .scaffold/install/run.py understand refresh --action resume`. "
+        )
+        dist_n = _copy_live_dist(self.root / "dist-n-agents")
+        _replace_once(
+            dist_n / "src" / "scaffold_p5" / "agents.py",
+            lifecycle,
+            "n-agents-marker ",
+        )
+        n_commit = _git_commit(dist_n, "N-agents")
+        dist_n1 = shutil.copytree(dist_n, self.root / "dist-n1-agents")
+        _replace_once(
+            dist_n1 / "src" / "scaffold_p5" / "agents.py",
+            "n-agents-marker ",
+            lifecycle + "n1-agents-marker ",
+        )
+        entry = dist_n1 / "src" / "scaffold_entry.py"
+        entry.write_text(
+            entry.read_text(encoding="utf-8") + "\n# n1-runtime-marker\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        _replace_once(
+            dist_n1 / "src" / "scaffold_p5" / "consumer_install.py",
+            "raise SystemExit(installed_main(INSTALL_ROOT, sys.argv[1:]))\n'''",
+            "raise SystemExit(installed_main(INSTALL_ROOT, sys.argv[1:]))\n"
+            "# n1-launcher-marker\n'''",
+        )
+        _replace_once(
+            dist_n1 / "src" / "scaffold_p5" / "consumer_install.py",
+            "Supporting scope is Task affiliation, not ownership override.\n\n"
+            "Do not use an external Distribution checkout.\n",
+            "Supporting scope is Task affiliation, not ownership override.\n\n"
+            "Do not use an external Distribution checkout.\n"
+            "n1-adapter-marker\n",
+        )
+        _replace_once(
+            dist_n1 / "src" / "scaffold_p5" / "first_use.py",
+            "or direct implementation appears faster.\n\"\"\"",
+            "or direct implementation appears faster.\n"
+            "n1-first-use-marker\n\"\"\"",
+        )
+        git(dist_n1, "add", "-A")
+        git(
+            dist_n1,
+            "-c",
+            "user.name=Scaffold Test",
+            "-c",
+            "user.email=scaffold-test@example.invalid",
+            "commit",
+            "-m",
+            "N+1-agents",
+        )
+        n1_commit = git(dist_n1, "rev-parse", "HEAD")
+        self.assertNotEqual(n_commit, n1_commit)
+
+        plan, installed = _install(self.host, dist=dist_n)
+        self.assertTrue(plan.allowed, plan.blockers)
+        self.assertEqual(installed.get("outcome"), "COMPLETED", installed)
+        agents_path = self.host / "AGENTS.md"
+        agents_path.write_text(
+            _insert_before_marker(
+                agents_path.read_text(encoding="utf-8"),
+                AGENTS_START,
+                HUMAN_AGENTS_RULE + "\n\n",
+            ),
+            encoding="utf-8",
+        )
+        before = agents_path.read_text(encoding="utf-8")
+        self.assertIn(HUMAN_AGENTS_RULE, before)
+        self.assertIn("n-agents-marker", before)
+        self.assertNotIn("n1-agents-marker", before)
+        self.assertNotIn("develop bind", before)
+        self.assertNotIn("develop complete", before)
+        self.assertNotIn("understand refresh --action resume", before)
+
+        proc = _run_installed(
+            self.host,
+            "consumer",
+            "update",
+            "--distribution",
+            str(dist_n1),
+        )
+        payload = json.loads(proc.stdout or "{}")
+        self.assertEqual(payload.get("outcome"), "COMPLETED", payload)
+        verify = verify_consumer_install(self.host)
+        self.assertEqual(verify.get("status"), VERIFY_VALID, verify)
+        after_manifest = current_manifest(self.host) or {}
+        self.assertEqual(
+            (after_manifest.get("source") or {}).get("git_commit"), n1_commit
+        )
+        self.assertIn(
+            "n1-runtime-marker",
+            (
+                self.host / ".scaffold" / "install" / "runtime" / "scaffold_entry.py"
+            ).read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "n1-launcher-marker",
+            (self.host / ".scaffold" / "install" / "run.py").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "n1-adapter-marker",
+            (
+                self.host / ".cursor" / "skills" / "scaffold-develop" / "SKILL.md"
+            ).read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "n1-first-use-marker",
+            (
+                self.host / ".cursor" / "rules" / "scaffold-first-use.mdc"
+            ).read_text(encoding="utf-8"),
+        )
+        after = agents_path.read_text(encoding="utf-8")
+        self.assertIn(HUMAN_AGENTS_RULE, after)
+        spans, issues = parse_managed_regions(after)
+        self.assertFalse(issues, issues)
+        start, end = spans[CONSUMER_INSTALL_REGION]
+        managed = after[start:end]
+        human = after[:start] + after[end:]
+        self.assertIn(HUMAN_AGENTS_RULE, human)
+        self.assertNotIn("n1-agents-marker", human)
+        self.assertIn("n1-agents-marker", managed)
+        self.assertNotIn("n-agents-marker", managed)
+        self.assertIn("develop bind", managed)
+        self.assertIn("develop complete", managed)
+        self.assertIn("understand refresh --action resume", managed)
 
     def test_repo_package_identity_unchanged(self):
         for skill_id, (version, digest) in EXPECTED_PACKAGES.items():

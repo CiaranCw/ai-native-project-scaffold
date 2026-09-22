@@ -209,9 +209,19 @@ physical truth is default Understand Refresh (not `action=resume`):
 python .scaffold/install/run.py understand refresh
 ```
 
-That updates GENERATED command/test indexes from the current workspace.
-Discovered tooling remains INFERRED until a real Test execution. It does
-not invent VERIFIED required policy, and it does not recreate the project.
+Default Refresh updates GENERATED command/test indexes from the current
+workspace. Discovered tooling remains INFERRED until a real Test execution.
+It does not invent VERIFIED required policy, and it does not recreate the
+project.
+
+Zero-context reconstruction of current Task/Session/work state is the same
+Refresh Skill with an explicit resume action:
+
+```text
+python .scaffold/install/run.py understand refresh --action resume
+```
+
+Resume is observational. It does not rewrite command/test indexes.
 
 On Cursor, Trusted-workspace project hooks deny ordinary project mutation
 while `NOT_ADOPTED`. After Adoption they still deny editor file mutation

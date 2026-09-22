@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from scaffold_p5.host_state import scm_baseline
 from scaffold_p5.io_util import read_yaml
+from scaffold_p5.progress import emit_idle, emit_working
 from scaffold_p5.ownership import (
     normalize_project_path,
     ownership_registry_issues,
@@ -42,6 +47,7 @@ from scaffold_p7.handoff import (
     validate_repair_handoff,
 )
 from scaffold_p7.intake import (
+    INTAKE_B64_RE,
     IntakeDecision,
     assess_grounding,
     intake_task,
@@ -86,6 +92,7 @@ from scaffold_p7.session import (
     persist_session,
     seal_session,
 )
+from scaffold_p7.schemas import execution_binding_issues, validate_task_book
 from scaffold_p7.tasks import (
     apply_session_progress,
     mode_compatible,
@@ -97,6 +104,17 @@ from scaffold_p7.tasks import (
     task_revision,
 )
 from scaffold_p7.unexplained import physical_authority_issues, reconcile_unexplained_drift
+
+COMPLETE_ENVELOPE_KEYS = frozenset(
+    {
+        "test",
+        "stage_decision",
+        "task_decision",
+        "complete_stage",
+        "ready",
+    }
+)
+COMPLETE_TEST_KEYS = frozenset({"invoke", "selected", "published_report_id"})
 
 
 class DevelopEngine:
@@ -287,6 +305,7 @@ class DevelopEngine:
         IN_PROGRESS so mutation authority has a current mutable Stage.
         Intake must not call this.
         """
+        emit_working(self.root, "develop.session", "start")
         chosen_mode = mode if mode in DEVELOP_MODES else "normal_task"
         project_status, _project_reasons, project = inspect_host_project(self.root)
         self.preflight = evaluate_develop_preflight(
@@ -296,7 +315,14 @@ class DevelopEngine:
             project_status=project_status,
         )
         self.skill_version = self.preflight.skill_version or self.skill_version
+        emit_working(self.root, "develop.session", "observe_candidate")
         candidate = observe_candidate(self.root)
+        emit_working(
+            self.root,
+            "develop.session",
+            "candidate_ready",
+            digest=(candidate.digest or "")[:16],
+        )
         if not self.preflight.allowed:
             return self._blocked(
                 chosen_mode,
@@ -465,6 +491,7 @@ class DevelopEngine:
                 )
             task = published.task
         directory = self.root / SESSIONS_DIR / str(session["record_id"])
+        emit_working(self.root, "develop.session", "bind_execution")
         bind_open_execution(
             self.root,
             session_id=str(session["record_id"]),
@@ -474,6 +501,7 @@ class DevelopEngine:
                 session.get("observed_candidate_digest") or candidate.digest
             ),
         )
+        emit_idle(self.root, "develop.session", "COMPLETED")
         extras = {
             "operation": "develop_session",
             "session": {
@@ -521,6 +549,464 @@ class DevelopEngine:
             task_id=task_id, mode=mode, action="abort"
         )
 
+    def bind_requirement(
+        self,
+        *,
+        task_id: str | None,
+        requirement_id: str | None,
+        profile_id: str | None,
+        kind: str | None = None,
+    ):
+        """Publish a grounded test_profile binding on an existing Task requirement.
+
+        Uses ordinary Task Book CAS/revision publication. Does not expose
+        publish_task as the product API and does not open a Develop Session.
+        """
+        emit_working(self.root, "develop.bind", "start")
+        chosen_mode = "normal_task"
+        requirement = str(requirement_id or "").strip()
+        profile = str(profile_id or "").strip()
+        binding_kind = str(kind or "test_profile").strip() or "test_profile"
+        project_status, _project_reasons, project = inspect_host_project(self.root)
+        self.preflight = evaluate_develop_preflight(
+            self.root,
+            package_root=self.package_root,
+            project=project,
+            project_status=project_status,
+        )
+        self.skill_version = self.preflight.skill_version or self.skill_version
+        candidate = observe_candidate(self.root)
+        extras = {"operation": "develop_bind"}
+        if not self.preflight.allowed:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                list(self.preflight.blockers),
+                self.preflight.route or "understand.compatibility",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        if not candidate.usable:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                list(candidate.data.get("blockers") or [
+                    "candidate SCM observation is unresolved"
+                ]),
+                "stop",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        currentness = observe_upstream_currentness(self.root)
+        self.d1_currentness = currentness.public()
+        if not currentness.ok or currentness.state in {STALE, DIVERGED}:
+            blockers = list(currentness.blockers)
+            if not blockers:
+                blockers = [
+                    "Task binding requires a current repository basis; "
+                    f"configured upstream state is {currentness.state}"
+                ]
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                blockers,
+                "human",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        if not requirement:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                ["develop bind requires --requirement-id"],
+                "stop",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        if not profile:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                ["develop bind requires --profile-id"],
+                "stop",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        binding = {"kind": binding_kind, "profile_id": profile}
+        binding_issues = execution_binding_issues(binding, "execution_binding")
+        if binding_issues:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                binding_issues,
+                "stop",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        resolved = resolve_task(self.root, task_id=task_id)
+        if not resolved.ok or resolved.task is None or resolved.path is None:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                resolved.blockers,
+                resolved.route or "stop",
+                candidate=candidate,
+                project=project,
+                extras=extras,
+            )
+        task = resolved.task
+        if task.get("status") != "IN_PROGRESS":
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                [
+                    f"Task status {task.get('status')} cannot update "
+                    "execution_binding"
+                ],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        known_profiles, profile_issues = _current_test_profile_ids(self.root)
+        if profile_issues:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                profile_issues,
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        if profile not in known_profiles:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                [
+                    "execution_binding.profile_id is not grounded in "
+                    f"tests.yaml: {profile}"
+                ],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        updated, match_count, already_bound = _bind_requirement_on_task(
+            task,
+            requirement_id=requirement,
+            profile_id=profile,
+        )
+        extras["requirement_id"] = requirement
+        extras["profile_id"] = profile
+        extras["binding_kind"] = "test_profile"
+        extras["matches"] = match_count
+        extras["identities_separate"] = True
+        if match_count == 0:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                [f"Task requirement {requirement} does not exist"],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        schema_issues = validate_task_book(
+            updated, expected_id=str(task.get("record_id") or "")
+        )
+        if schema_issues:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                ["Task Book is malformed after binding"] + schema_issues,
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        if already_bound:
+            extras["task_publication"] = {
+                "conflict": False,
+                "expected_revision": task_revision(task),
+                "actual_revision": task.get("record_revision"),
+                "published_revision": task.get("record_revision"),
+            }
+            emit_idle(self.root, "develop.bind", "COMPLETED")
+            return skill_result(
+                skill_id=SKILL_ID,
+                skill_version=self.skill_version,
+                mode=chosen_mode,
+                outcome="COMPLETED",
+                baseline=candidate.data,
+                mutations="none",
+                artifacts=[],
+                blockers=[],
+                next_route="develop.session",
+                compatibility=(
+                    self.preflight.compatibility if self.preflight else None
+                ),
+                extras={
+                    **self._result_extras(
+                        task=task,
+                        session=None,
+                        candidate=candidate,
+                        project=project,
+                    ),
+                    **extras,
+                },
+            )
+        expected = task_revision(task)
+        if expected is None:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                ["Task Book record_revision is UNKNOWN"],
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        published = publish_task(
+            resolved.path, updated, expected_revision=expected
+        )
+        extras["task_publication"] = _publication_extras(published)
+        if not published.ok or published.task is None:
+            emit_idle(self.root, "develop.bind", "BLOCKED")
+            return self._blocked(
+                chosen_mode,
+                published.blockers,
+                "stop",
+                candidate=candidate,
+                project=project,
+                task=published.task or task,
+                extras=extras,
+            )
+        emit_idle(self.root, "develop.bind", "COMPLETED")
+        after = observe_candidate(self.root)
+        return skill_result(
+            skill_id=SKILL_ID,
+            skill_version=self.skill_version,
+            mode=chosen_mode,
+            outcome="COMPLETED",
+            baseline=after.data,
+            mutations="task_book",
+            artifacts=[str(resolved.path.as_posix())],
+            blockers=[],
+            next_route="develop.session",
+            compatibility=(
+                self.preflight.compatibility if self.preflight else None
+            ),
+            extras={
+                **self._result_extras(
+                    task=published.task,
+                    session=None,
+                    candidate=after,
+                    project=project,
+                ),
+                **extras,
+            },
+        )
+
+    def complete(self, *, task_id: str | None, envelope: Any):
+        """Request Test, Completion Decisions, Stage COMPLETE, and/or READY.
+
+        Engine/lifecycle authority still decides whether SATISFIED / COMPLETE /
+        READY are legal. The caller cannot manufacture READY.
+
+        Public complete never opens a Session. An existing OPEN Session bound
+        to the requested Task must already provide current Develop authority.
+        Successful complete may still auto-seal that Session.
+        """
+        emit_working(self.root, "develop.complete", "start")
+        opts, error = complete_run_opts(envelope)
+        extras = {"operation": "develop_complete"}
+        project_status, _project_reasons, project = inspect_host_project(
+            self.root
+        )
+        self.preflight = evaluate_develop_preflight(
+            self.root,
+            package_root=self.package_root,
+            project=project,
+            project_status=project_status,
+        )
+        self.skill_version = self.preflight.skill_version or self.skill_version
+        if error:
+            emit_idle(self.root, "develop.complete", "BLOCKED")
+            return self._blocked(
+                "normal_task",
+                [error],
+                "stop",
+                candidate=observe_candidate(self.root),
+                project=project,
+                extras=extras,
+            )
+        if not self.preflight.allowed:
+            emit_idle(self.root, "develop.complete", "BLOCKED")
+            return self._blocked(
+                "normal_task",
+                list(self.preflight.blockers),
+                self.preflight.route or "understand.compatibility",
+                candidate=observe_candidate(self.root),
+                project=project,
+                extras=extras,
+            )
+        _session, blockers, route, task = self._existing_open_session_for_complete(
+            task_id=task_id
+        )
+        if blockers:
+            emit_idle(self.root, "develop.complete", "BLOCKED")
+            return self._blocked(
+                "normal_task",
+                blockers,
+                route,
+                candidate=observe_candidate(self.root),
+                project=project,
+                task=task,
+                extras=extras,
+            )
+        opts["task_id"] = task_id
+        result = self.run("normal_task", **opts)
+        payload = dict(result.extras or {})
+        payload["operation"] = "develop_complete"
+        result.extras = payload
+        emit_idle(self.root, "develop.complete", result.outcome)
+        return result
+
+    def _existing_open_session_for_complete(
+        self, *, task_id: str | None
+    ) -> tuple[dict[str, Any] | None, list[str], str, dict[str, Any] | None]:
+        """Require current OPEN Session authority. Never create a Session."""
+        resolved = resolve_task(self.root, task_id=task_id)
+        if not resolved.ok or resolved.task is None:
+            return None, list(resolved.blockers), resolved.route or "stop", None
+        task = resolved.task
+        wanted = str(task.get("record_id") or "")
+        pointer, pointer_error = load_execution_pointer(self.root)
+        if pointer_error:
+            return None, [pointer_error], "stop", task
+        session = None
+        if pointer:
+            ptr_task = str(pointer.get("task_id") or "")
+            ptr_session = str(pointer.get("session_id") or "")
+            current, _directory, current_issues = load_canonical_open_session(
+                self.root, ptr_session
+            )
+            if current is not None and ptr_task != wanted:
+                return (
+                    current,
+                    [
+                        "another Develop execution is OPEN; seal or abort it "
+                        "before completing this Task"
+                    ],
+                    "stop",
+                    task,
+                )
+            if current is None:
+                return (
+                    None,
+                    current_issues
+                    or [
+                        "develop complete requires an OPEN Develop Session "
+                        "bound to the requested Task; open it with "
+                        "develop session first"
+                    ],
+                    "develop.session",
+                    task,
+                )
+            if str(current.get("task_id") or "") != wanted:
+                return (
+                    current,
+                    [
+                        "OPEN Develop Session is not bound to the requested Task"
+                    ],
+                    "develop.session",
+                    task,
+                )
+            session = current
+            if ptr_session != str(session.get("record_id") or ""):
+                return (
+                    session,
+                    [
+                        "OPEN Develop Session is not the current execution "
+                        "bound to the requested Task"
+                    ],
+                    "develop.session",
+                    task,
+                )
+        existing = raw_open_sessions_for_task(self.root, wanted)
+        if len(existing) > 1:
+            return (
+                None,
+                ["multiple OPEN Develop Sessions are bound to the current Task"],
+                "stop",
+                task,
+            )
+        if session is None and existing:
+            loaded, _directory, load_issues = load_canonical_open_session(
+                self.root, str(existing[0].get("record_id") or "")
+            )
+            if loaded is None:
+                return (
+                    None,
+                    load_issues
+                    or ["existing OPEN Develop Session is not canonical"],
+                    "develop.session",
+                    task,
+                )
+            session = loaded
+        if session is None:
+            return (
+                None,
+                [
+                    "develop complete requires an OPEN Develop Session bound "
+                    "to the requested Task; open it with develop session first"
+                ],
+                "develop.session",
+                task,
+            )
+        if pointer is None:
+            return (
+                None,
+                [
+                    "develop complete requires current Develop Session "
+                    "authority; open it with develop session first"
+                ],
+                "develop.session",
+                task,
+            )
+        other_open = [
+            item
+            for item, _directory in list_canonical_open_sessions(self.root)
+            if str(item.get("task_id") or "") != wanted
+        ]
+        if other_open and (
+            str(other_open[0].get("record_id") or "")
+            != str(session.get("record_id") or "")
+        ):
+            return (
+                None,
+                [
+                    "another Task already has an OPEN Develop execution; "
+                    "seal or abort it first"
+                ],
+                "stop",
+                task,
+            )
+        return session, [], "develop.session", task
+
     def _close_develop_execution(
         self,
         *,
@@ -529,8 +1015,16 @@ class DevelopEngine:
         action: str,
     ):
         chosen_mode = mode if mode in DEVELOP_MODES else "normal_task"
+        emit_working(self.root, f"develop.{action}", "start")
         project_status, _project_reasons, project = inspect_host_project(self.root)
+        emit_working(self.root, f"develop.{action}", "observe_candidate")
         candidate = observe_candidate(self.root)
+        emit_working(
+            self.root,
+            f"develop.{action}",
+            "candidate_ready",
+            digest=(candidate.digest or "")[:16],
+        )
         pointer, pointer_error = load_execution_pointer(self.root)
         if pointer_error and action == "seal":
             return self._blocked(
@@ -597,6 +1091,7 @@ class DevelopEngine:
                     session=session,
                     session_directory=loaded,
                 )
+            emit_working(self.root, "develop.seal", "reconcile")
             reconcile_session_changes(
                 self.root,
                 loaded,
@@ -634,6 +1129,7 @@ class DevelopEngine:
                     session=session,
                     session_directory=loaded,
                 )
+            emit_working(self.root, "develop.seal", "seal_session")
             session = seal_session(self.root, loaded, session)
             session["sealed_candidate_digest"] = candidate.digest
             persist_session(loaded, session)
@@ -684,6 +1180,7 @@ class DevelopEngine:
                 "record_revision": task.get("record_revision"),
                 "status": task.get("status"),
             }
+        emit_idle(self.root, f"develop.{action}", "COMPLETED")
         return skill_result(
             skill_id=SKILL_ID,
             skill_version=self.skill_version,
@@ -1501,6 +1998,7 @@ class DevelopEngine:
         test_to_develop = None
         test_result = None
         if opts.get("invoke_test"):
+            emit_working(self.root, "develop.run", "invoke_test")
             develop_to_test = build_develop_to_test(
                 task=task,
                 session_id=str(session["record_id"]),
@@ -2678,3 +3176,151 @@ def _active_stage_ids(task: dict[str, Any]) -> list[str]:
             if stage.get("stage_id"):
                 out.append(str(stage["stage_id"]))
     return out
+
+
+def load_complete_envelope_flags(
+    json_text: str | None,
+    b64_text: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse installed-CLI completion flags. Missing flags return (None, None)."""
+    json_raw = (json_text or "").strip() or None
+    b64_raw = (b64_text or "").strip() or None
+    if json_raw and b64_raw:
+        return None, "provide only one of --complete-json or --complete-json-b64"
+    if not json_raw and not b64_raw:
+        return None, None
+    if b64_raw:
+        if not INTAKE_B64_RE.fullmatch(b64_raw):
+            return None, "completion JSON base64 is malformed"
+        padded = b64_raw + ("=" * ((4 - len(b64_raw) % 4) % 4))
+        try:
+            decoded = base64.b64decode(padded, validate=False)
+            json_raw = decoded.decode("utf-8")
+        except (ValueError, UnicodeDecodeError, binascii.Error):
+            try:
+                json_raw = base64.urlsafe_b64decode(padded).decode("utf-8")
+            except (ValueError, UnicodeDecodeError, binascii.Error):
+                return None, "completion JSON base64 could not be decoded"
+    try:
+        payload = json.loads(json_raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None, "completion JSON is not parseable"
+    if not isinstance(payload, dict):
+        return None, "develop complete envelope must be a JSON object"
+    return payload, None
+
+
+def complete_run_opts(envelope: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Map the public complete envelope onto existing DevelopEngine.run opts."""
+    if not isinstance(envelope, dict):
+        return None, "develop complete envelope must be a JSON object"
+    unknown = sorted(str(key) for key in envelope if key not in COMPLETE_ENVELOPE_KEYS)
+    if unknown:
+        return None, "unsupported develop complete fields: " + ", ".join(unknown)
+    if not envelope:
+        return None, "develop complete envelope is empty"
+    opts: dict[str, Any] = {}
+    test = envelope.get("test")
+    if test is not None:
+        if not isinstance(test, dict):
+            return None, "develop complete test must be a mapping"
+        test_unknown = sorted(
+            str(key) for key in test if key not in COMPLETE_TEST_KEYS
+        )
+        if test_unknown:
+            return None, "unsupported develop complete test fields: " + ", ".join(
+                test_unknown
+            )
+        invoke = bool(test.get("invoke"))
+        published = str(test.get("published_report_id") or "").strip()
+        if invoke and published:
+            return None, (
+                "develop complete cannot both invoke Test and consume a "
+                "published report"
+            )
+        if invoke:
+            opts["invoke_test"] = True
+        if published:
+            opts["published_test_report_id"] = published
+        selected = test.get("selected")
+        if selected is not None:
+            if not isinstance(selected, list) or any(
+                not isinstance(item, str) or not str(item).strip() for item in selected
+            ):
+                return None, (
+                    "develop complete test.selected must be a list of profile identities"
+                )
+            opts["selected"] = [str(item).strip() for item in selected]
+    if "stage_decision" in envelope:
+        opts["stage_completion_decision"] = envelope.get("stage_decision")
+    if "task_decision" in envelope:
+        opts["task_completion_decision"] = envelope.get("task_decision")
+    if envelope.get("complete_stage") is True or "stage_decision" in envelope:
+        opts["request_stage_complete"] = True
+    if envelope.get("ready") is True:
+        opts["request_ready_for_review"] = True
+    if not opts:
+        return None, "develop complete envelope does not request a lifecycle operation"
+    return opts, None
+
+
+def _current_test_profile_ids(root: Path) -> tuple[set[str], list[str]]:
+    issues: list[str] = []
+    rows = _read_rows(root / ".scaffold/tests.yaml", "profiles", issues)
+    if issues:
+        return set(), issues
+    return (
+        {
+            str(row.get("id") or "")
+            for row in rows
+            if isinstance(row, dict) and str(row.get("id") or "").strip()
+        },
+        [],
+    )
+
+
+def _bind_requirement_on_task(
+    task: dict[str, Any],
+    *,
+    requirement_id: str,
+    profile_id: str,
+) -> tuple[dict[str, Any], int, bool]:
+    """Copy Task and set execution_binding on matching requirement identities."""
+    updated = deepcopy(task)
+    matches = 0
+    already = True
+    binding = {"kind": "test_profile", "profile_id": profile_id}
+
+    def apply_rows(rows: Any) -> list[Any]:
+        nonlocal matches, already
+        out: list[Any] = []
+        for item in rows or []:
+            if not isinstance(item, dict):
+                out.append(item)
+                continue
+            if str(item.get("requirement_id") or "").strip() != requirement_id:
+                out.append(item)
+                continue
+            matches += 1
+            row = dict(item)
+            row["requirement_id"] = requirement_id
+            current = row.get("execution_binding")
+            if current != binding:
+                already = False
+            row["execution_binding"] = dict(binding)
+            out.append(row)
+        return out
+
+    updated["final_tests"] = apply_rows(updated.get("final_tests"))
+    stages = []
+    for stage in updated.get("stages") or []:
+        if not isinstance(stage, dict):
+            stages.append(stage)
+            continue
+        row = dict(stage)
+        row["required_tests"] = apply_rows(row.get("required_tests"))
+        stages.append(row)
+    updated["stages"] = stages
+    if matches == 0:
+        already = False
+    return updated, matches, already and matches > 0

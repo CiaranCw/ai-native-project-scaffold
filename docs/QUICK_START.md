@@ -36,7 +36,13 @@ Open the project and speak naturally:
 - “Review this change and prepare it for submission.”
 
 The Agent maps those requests to existing Skills. Zero-context resume is
-Understand `refresh` with `action=resume` and reads project-local records, not
+Understand `refresh` with `action=resume`:
+
+```text
+python .scaffold/install/run.py understand refresh --action resume
+```
+
+That reads project-local records, not
 chat history. Incremental understanding is Understand `refresh` with
 `action=understand`. Physical observation decides the refresh scope;
 Understand-produced completion receipts are required before a current-head
@@ -44,6 +50,20 @@ may become CURRENT. Receipts do not grant mutation authority; knowledge still
 follows `project.yaml` ownership. Malformed canonical Task or Session
 authority fail-closes resume to human recovery. There is not a fifth Skill or
 a fifth routing engine.
+
+Existing Task requirement → Test profile binding:
+
+```text
+python .scaffold/install/run.py develop bind --task-id <task-id> --requirement-id <id> --profile-id <id>
+```
+
+Completion / READY (engine authority still decides legality):
+
+```text
+python .scaffold/install/run.py develop complete --task-id <task-id> --complete-json-b64 <envelope>
+```
+
+Do not import private runtime APIs or write `.scaffold/tasks/` to manufacture READY.
 
 The Agent may stop for explicit human action when:
 

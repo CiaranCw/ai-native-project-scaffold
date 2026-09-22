@@ -817,6 +817,9 @@ class UnderstandEngine:
         )
 
     def _resume(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
+        from scaffold_p5.progress import emit_idle, emit_working
+
+        emit_working(self.root, "understand.resume", "start")
         view = resume_project(
             self.root,
             distribution=self.distribution,
@@ -837,6 +840,11 @@ class UnderstandEngine:
             "observational": True,
             "chat_memory": False,
         }
+        emit_idle(
+            self.root,
+            "understand.resume",
+            "COMPLETED" if view.get("ok") else "FAILED",
+        )
         return self._base(
             "refresh",
             "COMPLETED" if view.get("ok") else "FAILED",

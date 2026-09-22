@@ -655,7 +655,13 @@ by proven S10 Change Record durability). It does not add a SUBMITTED Task
 status and does not mutate Task Books.
 
 Natural language such as “Continue this project.” maps to `refresh action=resume`.
-There is no fifth routing engine.
+The installed public spelling is:
+
+```text
+python .scaffold/install/run.py understand refresh --action resume
+```
+
+There is no fifth routing engine. Default `understand refresh` remains GENERATED/MANAGED host-knowledge refresh and is not resume.
 
 See [P10_INCREMENTAL_MULTIAGENT.md](P10_INCREMENTAL_MULTIAGENT.md).
 
