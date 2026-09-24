@@ -131,7 +131,8 @@ Scaffold-owned regions/fragments does.
 
 ## How do I update it?
 
-From an already-installed project, the official self-update command is:
+From an already-installed project whose runtime already includes projection
+generation, the official self-update command is:
 
 ```text
 python .scaffold/install/run.py consumer update --distribution <Scaffold-distribution>
@@ -142,7 +143,19 @@ writable workspace target. Update rewrites only MANAGED install files, Scaffold
 managed regions, and the Scaffold hook fragment. It does **not** rewrite
 `skills.lock`, Task Books, Sessions, or product source. Do not copy install
 files by hand. Do not execute Distribution source scripts such as
-`src/scaffold_consumer.py` from inside the Consumer as the in-host update path.
+`src/scaffold_consumer.py` from inside the Consumer as the ordinary in-host
+update path.
+
+One-time exception: a Consumer whose installed runtime predates projection
+generation cannot preserve historical Evidence on its first update to a
+generation-2 release. That old installed updater has no way to record the
+generation boundary before it rewrites maintenance bytes. Do not use
+`.scaffold/install/run.py consumer update` for that first crossing, and do
+not edit `.scaffold` files by hand. From the new Distribution checkout, run
+the single Distribution-side update below. After that generation-aware
+runtime is installed and the boundary is valid, later updates use the
+installed command again. This is a one-time boundary condition, not the
+permanent update model.
 
 From a newer Distribution checkout, the operator command remains:
 

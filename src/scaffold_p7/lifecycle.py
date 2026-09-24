@@ -65,7 +65,9 @@ def evaluate_ready_for_review(
         )
         if not bound:
             return False, bound_reason
-        if not decision_is_satisfied_current(decision, candidate_digest):
+        if not decision_is_satisfied_current(
+            decision, candidate_digest, root=root
+        ):
             return False, (
                 "Stage Completion Decision is not SATISFIED and current "
                 "for the actual candidate"
@@ -91,7 +93,9 @@ def evaluate_ready_for_review(
     if not isinstance(task.get("acceptance"), str) or not str(task["acceptance"]).strip():
         return False, "declared Task-level acceptance is UNKNOWN"
     task_decision = task.get("task_completion_decision")
-    if not decision_is_satisfied_current(task_decision, candidate_digest):
+    if not decision_is_satisfied_current(
+        task_decision, candidate_digest, root=root
+    ):
         return False, (
             "Task Completion Decision is not SATISFIED and current "
             "for the actual candidate"
@@ -230,13 +234,48 @@ def lifecycle_progressed(before: dict[str, Any], after: dict[str, Any]) -> bool:
     return (before.get("stages") or []) != (after.get("stages") or [])
 
 
-def decision_is_satisfied_current(decision: Any, candidate_digest: str) -> bool:
+def _candidate_digest_current(
+    root: Path,
+    stored_digest: str,
+    live_digest: str,
+    *,
+    stored_generation: str | None = None,
+) -> bool:
+    from scaffold_p6.projection import digest_is_current
+
+    return digest_is_current(
+        root,
+        stored_digest,
+        live_digest,
+        stored_generation=stored_generation,
+    )
+
+
+def decision_is_satisfied_current(
+    decision: Any,
+    candidate_digest: str,
+    *,
+    root: Path | None = None,
+) -> bool:
     if not isinstance(decision, dict):
         return False
     if decision.get("outcome") != "SATISFIED":
         return False
     digest = decision.get("candidate_digest")
-    return isinstance(digest, str) and digest == candidate_digest
+    if not isinstance(digest, str) or not digest:
+        return False
+    generation = decision.get("projection_generation")
+    stored_generation = generation if isinstance(generation, str) else None
+    if root is None:
+        return digest == candidate_digest
+    from scaffold_p6.projection import digest_is_current
+
+    return digest_is_current(
+        root,
+        digest,
+        candidate_digest,
+        stored_generation=stored_generation,
+    )
 
 
 def stage_completion_decision_binding(
@@ -415,7 +454,7 @@ def maybe_complete_stage(
     )
     if (
         bound
-        and decision_is_satisfied_current(decision, candidate_digest)
+        and decision_is_satisfied_current(decision, candidate_digest, root=root)
         and tests["ok"]
         and not cited_decision_evidence_stale(decision, root=root, candidate_digest=candidate_digest)
     ):
@@ -447,7 +486,7 @@ def revalidate_complete_stage(
             root=root,
             required_tests=row.get("required_tests") or [],
         )
-    elif decision_is_satisfied_current(prior, candidate_digest) and tests["ok"]:
+    elif decision_is_satisfied_current(prior, candidate_digest, root=root) and tests["ok"]:
         decision = prior
     else:
         decision = unknown_stage_decision(
@@ -466,7 +505,7 @@ def revalidate_complete_stage(
     )
     if (
         bound
-        and decision_is_satisfied_current(decision, candidate_digest)
+        and decision_is_satisfied_current(decision, candidate_digest, root=root)
         and tests["ok"]
         and not cited_decision_evidence_stale(decision, root=root, candidate_digest=candidate_digest)
     ):
@@ -746,7 +785,9 @@ def cited_decision_evidence_stale(
         if not isinstance(report, dict) or not engine.report_usable_for_current(report):
             return True
         bound = resolved.get("candidate_digest")
-        if isinstance(bound, str) and bound and bound != candidate_digest:
+        if isinstance(bound, str) and bound and not _candidate_digest_current(
+            root, bound, candidate_digest
+        ):
             return True
     return False
 
@@ -834,7 +875,7 @@ def apply_ready_authority_refresh(
             )
             refreshed_stages.append(stage)
             continue
-        if prior_digest != candidate_digest:
+        if not _candidate_digest_current(root, prior_digest, candidate_digest):
             stale_found = True
         tests = evaluate_required_tests(
             stage.get("required_tests") or [],
@@ -883,7 +924,7 @@ def apply_ready_authority_refresh(
             required_tests=row.get("required_tests") or [],
         )
         if not decision_is_satisfied_current(
-            row["completion_decision"], candidate_digest
+            row["completion_decision"], candidate_digest, root=root
         ):
             blockers.append(
                 "READY authority refresh could not establish a current SATISFIED "
@@ -904,7 +945,7 @@ def apply_ready_authority_refresh(
         if not isinstance(prior_digest, str) or not prior_digest.strip():
             blockers.append("prior Task Completion Decision candidate binding is missing")
         else:
-            if prior_digest != candidate_digest:
+            if not _candidate_digest_current(root, prior_digest, candidate_digest):
                 stale_found = True
             locators = _unique_locators(updated.get("final_tests"))
             if locators:
@@ -940,7 +981,7 @@ def apply_ready_authority_refresh(
                 required_tests=updated.get("final_tests"),
             )
             if not decision_is_satisfied_current(
-                updated["task_completion_decision"], candidate_digest
+                updated["task_completion_decision"], candidate_digest, root=root
             ):
                 blockers.append(
                     "READY authority refresh could not establish a current "

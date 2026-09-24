@@ -16,6 +16,10 @@ REPORT_SCHEMA_VERSION = "1"
 EVIDENCE_SCHEMA_VERSION = "1"
 CANDIDATE_SCHEMA_VERSION = "1"
 DURABLE_EVIDENCE_SCHEMA_VERSION = "1"
+# Projection generation is not part of the candidate body schema.
+# Generation 1 is the published legacy projection. Generation 2 is current.
+PROJECTION_GENERATION_LEGACY = "1"
+PROJECTION_GENERATION_CURRENT = "2"
 
 SUPPORT_KIND = "test_report"
 RECORD_CLASS = "support_artifact"
@@ -67,10 +71,18 @@ CANONICAL_DEVELOPMENT_RECORDS = ("task_book", "develop_session", "change_record"
 @dataclass
 class CandidateIdentity:
     data: dict[str, Any]
+    host_root: str | None = None
+    inventory: dict[str, Any] | None = None
 
     @property
     def digest(self) -> str:
         return str(self.data.get("candidate_digest") or "")
+
+    @property
+    def projection_generation(self) -> str:
+        return str(
+            self.data.get("projection_generation") or PROJECTION_GENERATION_LEGACY
+        )
 
     @property
     def kind(self) -> str:

@@ -891,6 +891,23 @@ def apply_consumer_install(plan: InstallPlan) -> dict[str, Any]:
         }
     host = plan.host
     (host / ".scaffold").mkdir(parents=True, exist_ok=True)
+    from scaffold_p6.projection import establish_projection_migration
+
+    migration = establish_projection_migration(host, automatic=True)
+    if not migration.get("ok"):
+        return {
+            "outcome": "FAILED",
+            "mode": plan.mode,
+            "added": [],
+            "modified": [],
+            "unchanged": [],
+            "removed": [],
+            "verify": {"status": VERIFY_UNKNOWN, "reasons": []},
+            "blockers": list(
+                migration.get("blockers")
+                or ["candidate projection migration failed before install"]
+            ),
+        }
     staging = Path(
         tempfile.mkdtemp(
             prefix="install.staging-",
@@ -1287,11 +1304,24 @@ def distribution_cli(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "command",
-        choices=["import-project", "install", "update", "verify", "plan"],
+        choices=[
+            "import-project",
+            "install",
+            "update",
+            "verify",
+            "plan",
+            "projection-migration",
+        ],
     )
     parser.add_argument("--host", required=True)
     parser.add_argument("--distribution", default=None)
     args = parser.parse_args(argv)
+    if args.command == "projection-migration":
+        from scaffold_p6.projection import establish_projection_migration
+
+        result = establish_projection_migration(args.host)
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ok") else 1
     dist = Path(args.distribution) if args.distribution else _default_distribution()
     if args.command == "import-project":
         result = import_project(args.host, dist)
@@ -1654,6 +1684,35 @@ def _run_installed_consumer(
             ["unsupported consumer arguments: " + " ".join(rest)]
         )
     action = args.mode or ""
+    if action == "projection-migration":
+        if rest:
+            return _print_installed_blocked(
+                ["unsupported consumer arguments: " + " ".join(rest)]
+            )
+        if (
+            args.task_id
+            or args.approved
+            or args.plan_digest
+            or args.distribution
+            or args.action
+            or args.new_expected
+            or args.new_expected_b64
+            or args.intake_json
+            or args.intake_json_b64
+            or args.requirement_id
+            or args.profile_id
+            or args.kind
+            or args.complete_json
+            or args.complete_json_b64
+        ):
+            return _print_installed_blocked(
+                ["consumer projection-migration does not accept update or lifecycle flags"]
+            )
+        from scaffold_p6.projection import establish_projection_migration
+
+        result = establish_projection_migration(implicit_host)
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ok") else 1
     if action != "update":
         return _print_installed_blocked(
             [f"unsupported consumer action {action or '(missing)'}"]

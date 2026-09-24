@@ -186,6 +186,7 @@ GATE_RECOVERY = "recovery"
 GATE_FAIL_CLOSED = "fail_closed"
 REQUIRED_ROUTE_RECOVERY = "understand.compatibility"
 CONSUMER_UPDATE_RUN_ARGV = ("consumer", "update")
+CONSUMER_PROJECTION_MIGRATION_RUN_ARGV = ("consumer", "projection-migration")
 ALLOWED_RUN_ARGV = {
     (): "verify",
     ("verify",): "verify",
@@ -196,6 +197,7 @@ ALLOWED_RUN_ARGV = {
     ("understand",): "understand.bootstrap",
     ("understand", "bootstrap"): "understand.bootstrap",
     CONSUMER_UPDATE_RUN_ARGV: "consumer.update",
+    CONSUMER_PROJECTION_MIGRATION_RUN_ARGV: "consumer.projection-migration",
 }
 POST_ADOPTION_RUN_ARGV = {
     **ALLOWED_RUN_ARGV,
@@ -231,6 +233,7 @@ FAIL_CLOSED_RUN_ARGV = {
     ("status",): "status",
     ("first-use",): "first-use",
     CONSUMER_UPDATE_RUN_ARGV: "consumer.update",
+    CONSUMER_PROJECTION_MIGRATION_RUN_ARGV: "consumer.projection-migration",
 }
 INTAKE_POSITIONALS = frozenset({("enter", "develop"), ("develop", "intake")})
 BIND_RUN_ARGV = ("develop", "bind")
@@ -1483,6 +1486,27 @@ def _consumer_flag_error(
     flags: dict[str, Any],
 ) -> str | None:
     has_distribution = flags.get("distribution") is not None
+    if positional == CONSUMER_PROJECTION_MIGRATION_RUN_ARGV:
+        if flags.get("action") or flags.get("new_expected") or flags.get("new_expected_b64"):
+            return "compatibility flags are only valid on understand compatibility"
+        if flags.get("approved") or flags.get("plan_digest"):
+            return "approval flags are only valid on Understand bootstrap"
+        if flags.get("intake_json") or flags.get("intake_json_b64"):
+            return "intake JSON flags are only valid on enter develop or develop intake"
+        if flags.get("requirement_id") or flags.get("profile_id") or flags.get("kind"):
+            return "binding flags are only valid on develop bind"
+        if flags.get("complete_json") or flags.get("complete_json_b64"):
+            return "completion flags are only valid on develop complete"
+        if flags.get("task_id"):
+            return "--task-id is not valid on consumer projection-migration"
+        if flags.get("host") is not None:
+            return (
+                "consumer projection-migration does not accept --host; "
+                "the current host is implicit"
+            )
+        if flags.get("distribution") is not None:
+            return "--distribution is only valid on consumer update"
+        return None
     if positional == CONSUMER_UPDATE_RUN_ARGV:
         if flags.get("action") or flags.get("new_expected") or flags.get("new_expected_b64"):
             return "compatibility flags are only valid on understand compatibility"

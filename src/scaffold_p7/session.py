@@ -182,7 +182,17 @@ def load_session(
                 ok=False,
                 blockers=["current candidate identity is UNKNOWN; Session cannot resume"],
             )
-        if bound_digest != current_candidate_digest:
+        from scaffold_p6.projection import digest_is_current
+
+        stored_generation = data.get("projection_generation")
+        if not digest_is_current(
+            root,
+            bound_digest,
+            current_candidate_digest,
+            stored_generation=stored_generation
+            if isinstance(stored_generation, str)
+            else None,
+        ):
             return SessionResolution(
                 ok=False,
                 blockers=[
