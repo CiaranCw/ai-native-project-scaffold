@@ -63,6 +63,11 @@ Completion / READY (engine authority still decides legality):
 python .scaffold/install/run.py develop complete --task-id <task-id> --complete-json-b64 <envelope>
 ```
 
+Field-level Intake/Complete envelope schemas, Session state rules, the
+TEST_PASS/TEST_COMPLETE/READY relationship table, tests.yaml required
+authority upgrade, and delivery-report test-accounting rules live in
+[PUBLIC_LIFECYCLE_REFERENCE.md](PUBLIC_LIFECYCLE_REFERENCE.md).
+
 Do not import private runtime APIs or write `.scaffold/tasks/` to manufacture READY.
 
 The Agent may stop for explicit human action when:

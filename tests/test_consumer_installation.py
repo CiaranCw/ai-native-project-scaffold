@@ -121,6 +121,7 @@ def _copy_live_dist(dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(REPO / "src", dest / "src")
     shutil.copytree(REPO / "skills", dest / "skills")
+    shutil.copytree(REPO / "docs", dest / "docs")
     return dest
 
 

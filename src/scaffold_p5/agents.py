@@ -57,6 +57,8 @@ Self-update: `python .scaffold/install/run.py consumer update --distribution <di
 
 Installed self-update refreshes this host's managed runtime, packages, launcher, and adapters from a validated Scaffold Distribution. The current host is implicit. It does not rewrite `skills.lock`, Task Books, Sessions, or product source.
 
+Public lifecycle reference (Intake/Complete envelope schemas, Session rules, Test semantics, delivery-report test accounting): `.scaffold/install/docs/PUBLIC_LIFECYCLE_REFERENCE.md` — installed MANAGED, refreshed by Consumer UPDATE.
+
 Canonical Skill packages: `.scaffold/install/packages/{understand,develop,test,submit}/`
 Runtime: `.scaffold/install/runtime/`
 

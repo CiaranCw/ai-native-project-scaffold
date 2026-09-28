@@ -5,9 +5,12 @@ from typing import Any
 
 from scaffold_p5.adoption import (
     SKILLS_LOCK,
+    STANDING_POLICY_LOCATION,
     approval_matches,
     build_adoption_plan,
     delete_session,
+    iso_now,
+    normalize_authorization_basis,
     persist_session,
     plan_from_dict,
     plan_to_dict,
@@ -359,7 +362,13 @@ class UnderstandEngine:
                 extras=extras,
             )
         session_dir = Path(preflight.recovery_session_path).parent
-        replace_session_plan(session_dir, replacement)
+        replace_session_plan(
+            session_dir,
+            replacement,
+            authorization_basis=(
+                (extras.get("apply_request") or {}).get("authorization_basis")
+            ),
+        )
         return self._apply_adoption(
             replacement,
             list(opts.get("extra_facts") or []),
@@ -374,13 +383,21 @@ class UnderstandEngine:
         """Exact-plan apply request. Not human approval and not a grant.
 
         `--approved --plan-digest` selects which previewed Plan to apply. It
-        has no Commit/Push meaning.
+        has no Commit/Push meaning. First-time Adoption is Agent-autonomous
+        lifecycle work under the standing pre-authorization clause; the real
+        authorization basis is persisted with the Adoption Session.
         """
+        basis = normalize_authorization_basis(opts.get("authorization_basis")) or {
+            "kind": "standing_policy",
+            "location": STANDING_POLICY_LOCATION,
+            "recorded_at": iso_now(),
+        }
         extras["apply_request"] = {
             "plan_id": plan.plan_id,
             "plan_digest": plan.digest,
             "is_not_human_approval": True,
             "is_not_commit_or_push": True,
+            "authorization_basis": basis,
         }
         if not approval_matches(plan, opts.get("approval")):
             return {
@@ -428,6 +445,9 @@ class UnderstandEngine:
                 checkpoints=[],
                 mutations=[],
                 observed_approved=True,
+                authorization_basis=(
+                    (extras.get("apply_request") or {}).get("authorization_basis")
+                ),
             )
         else:
             session_dir = resume_dir

@@ -82,6 +82,13 @@ PACKAGES_DIR = ".scaffold/install/packages"
 RELEASES_DIR = ".scaffold/install/releases"
 RUNNER_REL = ".scaffold/install/run.py"
 INSTALL_GITIGNORE_REL = ".scaffold/install/.gitignore"
+INSTALL_DOCS_DIR = ".scaffold/install/docs"
+INSTALL_PUBLIC_LIFECYCLE_REFERENCE_REL = (
+    ".scaffold/install/docs/PUBLIC_LIFECYCLE_REFERENCE.md"
+)
+DISTRIBUTION_PUBLIC_LIFECYCLE_REFERENCE_REL = (
+    "docs/PUBLIC_LIFECYCLE_REFERENCE.md"
+)
 AGENTS_MD = "AGENTS.md"
 GITATTRIBUTES = ".gitattributes"
 GITATTR_REGION = "scaffold-consumer-git"
@@ -790,6 +797,14 @@ def plan_consumer_install(
     payloads[f"{RELEASES_DIR}/installed.yaml"] = _release_yaml_bytes(plan.skills)
     payloads[RUNNER_REL] = generated["RUNNER_TEXT"].encode("utf-8")
     payloads[INSTALL_GITIGNORE_REL] = INSTALL_GITIGNORE_TEXT.encode("utf-8")
+    lifecycle_ref = dist_path / DISTRIBUTION_PUBLIC_LIFECYCLE_REFERENCE_REL
+    if not lifecycle_ref.is_file():
+        plan.blockers.append(
+            f"source Distribution is missing required public lifecycle reference "
+            f"{DISTRIBUTION_PUBLIC_LIFECYCLE_REFERENCE_REL}"
+        )
+        return plan
+    payloads[INSTALL_PUBLIC_LIFECYCLE_REFERENCE_REL] = lifecycle_ref.read_bytes()
     if _has_cursor_profile(profiles):
         bodies = generated["CURSOR_BODIES"]
         for adapter in CURSOR_ADAPTERS:
@@ -1061,6 +1076,7 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         f"{RUNTIME_DIR}/scaffold_p8/engine.py",
         *(f"{PACKAGES_DIR}/{skill}/skill.yaml" for skill in CORE_SKILLS),
         *(f"{PACKAGES_DIR}/{skill}/SKILL.md" for skill in CORE_SKILLS),
+        INSTALL_PUBLIC_LIFECYCLE_REFERENCE_REL,
         *required_paths(profiles),
     ):
         if required not in expected:

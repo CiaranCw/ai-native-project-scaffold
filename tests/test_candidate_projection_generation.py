@@ -504,6 +504,11 @@ class PublishedBoundaryTests(unittest.TestCase):
             stdout=subprocess.DEVNULL,
         )
         subprocess.check_call(["tar", "-xf", str(archive), "-C", str(base)])
+        (base / "docs").mkdir(exist_ok=True)
+        shutil.copy2(
+            REPO / "docs" / "PUBLIC_LIFECYCLE_REFERENCE.md",
+            base / "docs" / "PUBLIC_LIFECYCLE_REFERENCE.md",
+        )
         host.mkdir()
         _git(host, "init")
         _write(host / "README.md", "product\n")

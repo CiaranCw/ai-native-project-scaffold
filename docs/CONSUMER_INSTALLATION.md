@@ -242,10 +242,13 @@ until a current Develop Task/Session exists, but they do not treat every
 ordinary in-project command as forbidden. Local build, test, lint,
 typecheck, package-manager scripts, tool inspection, and SCM inspection are
 autonomous; Git Commit/Push and other hard boundaries remain denied. The
-official digest-bound apply command is not unconditional ALLOW: `preToolUse`
-may continue it to `beforeShellExecution`, which returns `permission=ask` so
-Cursor itself requires interactive user confirmation (`FORCE_PROMPT`). That
-is a client enforcement adapter, not a fifth Skill and not a claim of hard
+official digest-bound apply command is an exact-plan APPLY REQUEST, not
+human provenance: `beforeShellExecution` returns `permission=allow` for it
+because first-time Adoption is Agent-autonomous lifecycle work under the
+standing pre-authorization clause, and the real authorization basis is
+persisted in the Adoption Session. Git Commit and Git Push each remain
+separately forbidden until an explicit user instruction. That is a client
+enforcement adapter, not a fifth Skill and not a claim of hard
 enforcement on other clients. A human running the Scaffold CLI outside an
 Agent session is a different situation. Missing or drifted hook policy fails
 VERIFY (`INCOMPLETE` / `DRIFTED` / `INCOMPATIBLE` as applicable). A

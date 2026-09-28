@@ -139,9 +139,12 @@ python .scaffold/install/run.py understand bootstrap
 
 Approved Adoption apply uses the same launcher with `--approved --plan-digest <hex>`.
 That flag is an APPLY REQUEST, not human provenance. The business-task text
-is not that approval. On Cursor, Agent-originated apply is authorized only
-by `beforeShellExecution` `permission=ask`. Other clients need an equivalent
-adapter to claim hard enforcement.
+is not that approval. First-time Adoption is Agent-autonomous lifecycle
+work: `beforeShellExecution` returns `permission=allow` for the exact
+digest-bound apply command, and the real authorization basis (default
+`standing_policy`) is persisted in the Adoption Session. Git Commit and
+Git Push each require a separate explicit user instruction. Other clients
+need an equivalent adapter to claim hard enforcement.
 
 First-use Cursor enforcement is documented in
 [FIRST_USE_ENFORCEMENT_DESIGN.md](FIRST_USE_ENFORCEMENT_DESIGN.md).

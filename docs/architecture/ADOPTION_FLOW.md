@@ -19,12 +19,17 @@ Develop / Test / Submit stay independent.
 
 Normative lifecycle gates are mandatory authorization boundaries, not
 advisory guidance. `NOT_ADOPTED` forbids ordinary project mutation until
-Understand bootstrap and explicit human Plan approval complete. On Cursor,
-`--approved --plan-digest` is an APPLY REQUEST; Agent-originated apply is
-authorized only by `beforeShellExecution` `permission=ask`. Cursor project
-hooks are a client enforcement adapter for that boundary. They are not a
-fifth Skill. Other clients need an equivalent adapter to claim hard
-enforcement.
+Understand bootstrap completes. First-time Adoption is Agent-autonomous
+lifecycle work: a general adopt/bootstrap instruction plus the standing
+pre-authorization clause in `skills/understand/SKILL.md` authorize the
+Agent to preview and then apply that exact Plan with
+`--approved --plan-digest` when machine preconditions still hold. The
+apply records its real authorization basis (`standing_policy`,
+`agent_asserted`, `human_instruction`, or `client_confirmation`) in the
+Adoption Session; it is never rendered as a human grant unless a human
+actually granted it. Cursor project hooks are a client enforcement
+adapter, not a fifth Skill. Git Commit and Git Push remain separate
+operations that each require a current explicit user instruction.
 
 ---
 
@@ -88,15 +93,16 @@ Ordinary project
         │                     CREATE / MANAGED_UPDATE / PRESERVE
         │                     LOCAL_ONLY / DEFER
         ▼
- B4 Human Plan Approval       default = not authorized
-        │                     plan-candidate-bound
+ B4 Plan Apply Authorization  digest-bound apply request records
+        │                     the real authorization basis
+        │                     (default: standing_policy clause);
         │                     envelope = B5 + B6 until B8
         ▼
  B5 Minimal Apply             first allowed mutation
-        │                     inside approved envelope
+        │                     inside the apply-authorized envelope
         ▼
  B6 Understand Full           normalize knowledge (P5)
-        │                     still inside approved envelope
+        │                     still inside the apply-authorized envelope
         ▼
  B7 Activation Validation     files exist ≠ Active
         │                     all B5/B6 mutations vs Plan
@@ -115,43 +121,45 @@ Ordinary project
 ```
 
 No mutation before B2 + B3 + B4.
-B5 and B6 mutations MUST stay inside the approved envelope.
+B5 and B6 mutations MUST stay inside the apply-authorized envelope.
 
 ---
 
-## Approval and re-plan loops
+## Apply authorization and re-plan loops
 
 ```text
           B3 Plan candidate
                  │
                  ▼
-          B4 Human review
-           /           \
-     reject             approve
+          B4 Apply authorization (Agent-autonomous
+           /           \        via --approved --plan-digest)
+     host changed       exact apply
        │                  │
        ▼                  ▼
-  no Apply          host still same?
-                    /            \
-                  yes            material change
-                   │                  │
-                   ▼                  ▼
-                 B5 Apply      approval void
-                               re-discover → new Plan → B4
+  re-discover        host still same?
+  → new Plan        /            \
+  → new apply     yes            material change
+  request           │                  │
+                    ▼                  ▼
+                  B5 Apply      apply request void
+                                re-discover → new Plan → B4
 
 B6 needs a mutation outside the envelope
         → STOP (do not apply it)
         → new Plan candidate
-        → previous B4 invalid
-        → human re-approval
-        → continue
+        → previous apply request invalid
+        → re-plan and re-apply
 
 Human changes requested scope
         → new Plan candidate
-        → previous B4 invalid
+        → previous apply request invalid
 
 Material host change after B4, before B8
-        → re-evaluate Plan / approval
-        → re-discover / re-plan / re-approve if invalidated
+        → re-evaluate Plan / apply request
+        → re-discover / re-plan / re-apply if invalidated
+
+The apply request is not Git Commit or Git Push. Git Commit and Git
+Push each require a current explicit user instruction.
 ```
 
 ---
@@ -170,7 +178,7 @@ Apply started, then interrupted
       yes                     no
        │                      │
        ▼                      ▼
-  continue safely      re-discover → re-plan → B4
+  continue safely      re-discover → re-plan → new apply request
 
 B7 fails
         │
@@ -178,7 +186,7 @@ B7 fails
  MUST NOT Activate
         │
         ▼
- correct adoption state and/or re-plan → B4 if Plan changes
+ correct adoption state and/or re-plan → new apply request if Plan changes
         │
         ▼
  B7 again

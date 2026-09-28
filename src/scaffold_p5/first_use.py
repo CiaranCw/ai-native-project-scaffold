@@ -2,9 +2,11 @@
 
 Not a Skill. Host lifecycle remains `snapshot_host` / classify_host.
 Cursor-specific allow/deny/ask translation lives here as an adapter, not as
-canonical Skill meaning. `--approved` is an APPLY REQUEST, not human
-provenance; Agent-originated apply is authorized only by Cursor
-beforeShellExecution permission=ask.
+canonical Skill meaning. `--approved` is an exact-plan APPLY REQUEST, not
+human provenance. First-time Adoption is Agent-autonomous lifecycle work
+under the standing pre-authorization clause; the real authorization basis is
+persisted with the Adoption Session. Git Commit and Git Push each require a
+separate explicit user instruction.
 """
 
 from __future__ import annotations
@@ -258,11 +260,13 @@ AGENT_DENY_MESSAGE = (
     "Do not implement the business task before Adoption completes."
 )
 ASK_AGENT_MESSAGE = (
-    "This command is an Adoption apply request. Continue the official "
-    "bootstrap apply. It is not Git Commit or Push."
+    "This command is an exact-plan Adoption APPLY REQUEST. It is not proof of "
+    "human approval. Continue the official bootstrap apply. It is not Git "
+    "Commit or Push."
 )
 ASK_USER_MESSAGE = (
-    "Scaffold is applying an exact Adoption Plan. This is not Git Commit or Push."
+    "Scaffold is requesting to apply an exact Adoption Plan. This is an apply "
+    "request, not evidence of an existing approval. It is not Git Commit or Push."
 )
 PRETOOL_APPLY_CONTINUE_REASON = (
     "digest-bound Adoption apply request is an official lifecycle command"
@@ -811,9 +815,11 @@ def classify_first_use_shell(
     unless they cross a hard safety/governance boundary. An OPEN Develop
     Session is not a blanket mutating-shell permission, and a missing
     Session is not a blanket shell deny. Preview/status/verify remain
-    allow. The digest-bound Adoption apply request is not execution
-    authorization; it is an APPLY REQUEST that must reach
-    beforeShellExecution permission=ask.
+    allow. The digest-bound Adoption apply request is an APPLY REQUEST,
+    not human provenance and not execution authorization; it is classified
+    as an official lifecycle command (allow) and its authorization basis
+    is persisted with the Adoption Session. Git Commit and Git Push each
+    require a separate explicit user instruction.
     """
     raw = str(command or "").strip()
     if raw.startswith("& "):

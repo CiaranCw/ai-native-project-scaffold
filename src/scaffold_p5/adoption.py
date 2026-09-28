@@ -73,6 +73,39 @@ STANDARD_TARGETS = (
     TESTING_MD,
 )
 
+# F1 (R7 P1): persisted authorization basis for an Adoption apply request.
+# `--approved --plan-digest` is a consistency-checked APPLY REQUEST, not human
+# provenance. The basis records the real source that authorized the apply.
+# No kind may be rendered as a human grant unless a human actually granted it.
+AUTHORIZATION_KINDS = frozenset(
+    {"standing_policy", "agent_asserted", "human_instruction", "client_confirmation"}
+)
+
+STANDING_POLICY_LOCATION = (
+    "skills/understand/SKILL.md bootstrap standing pre-authorization "
+    "(AGENTS.md managed router region mirrors the same clause)"
+)
+
+
+def normalize_authorization_basis(value: Any) -> dict[str, Any] | None:
+    """Normalize an authorization basis. Never fabricates a human grant."""
+    if not isinstance(value, dict):
+        return None
+    kind = str(value.get("kind") or "").strip()
+    if kind not in AUTHORIZATION_KINDS:
+        return None
+    row: dict[str, Any] = {
+        "kind": kind,
+        "recorded_at": iso_now(),
+    }
+    location = str(value.get("location") or "").strip()
+    if location:
+        row["location"] = location
+    note = str(value.get("note") or "").strip()
+    if note:
+        row["note"] = note
+    return row
+
 
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -582,11 +615,29 @@ def approval_matches(plan: AdoptionPlan, approval: dict[str, Any] | None) -> boo
     return digest == plan.digest
 
 
-def persist_session(root: Path, plan: AdoptionPlan, *, status: str, steps: list[str], checkpoints: list[str], mutations: list[dict[str, Any]], observed_approved: bool) -> Path:
+def persist_session(
+    root: Path,
+    plan: AdoptionPlan,
+    *,
+    status: str,
+    steps: list[str],
+    checkpoints: list[str],
+    mutations: list[dict[str, Any]],
+    observed_approved: bool,
+    authorization_basis: dict[str, Any] | None = None,
+) -> Path:
     session_id = make_id("adopt")
     directory = root / ".scaffold" / "runtime" / "adoption-sessions" / session_id
     directory.mkdir(parents=True, exist_ok=True)
     now = iso_now()
+    plan_record: dict[str, Any] = {
+        "identity": plan.plan_id,
+        "digest": plan.digest,
+        "observed_approved": observed_approved,
+    }
+    basis = normalize_authorization_basis(authorization_basis)
+    if basis is not None:
+        plan_record["authorization_basis"] = basis
     session = {
         "record_type": "adoption_session",
         "schema_version": "1",
@@ -595,11 +646,7 @@ def persist_session(root: Path, plan: AdoptionPlan, *, status: str, steps: list[
         "updated_at": now,
         "status": status,
         "baseline": plan.baseline,
-        "plan": {
-            "identity": plan.plan_id,
-            "digest": plan.digest,
-            "observed_approved": observed_approved,
-        },
+        "plan": plan_record,
         "completed_steps": steps,
         "checkpoints": checkpoints,
         "applied_mutation_summary": mutations,
@@ -625,7 +672,12 @@ def update_session(directory: Path, **fields: Any) -> None:
     write_yaml_atomic(path, data)
 
 
-def replace_session_plan(directory: Path, plan: AdoptionPlan) -> None:
+def replace_session_plan(
+    directory: Path,
+    plan: AdoptionPlan,
+    *,
+    authorization_basis: dict[str, Any] | None = None,
+) -> None:
     existing = read_yaml(directory / "session.yaml")
     provenance = dict(existing.get("generated_provenance") or {})
     host_root = directory.parents[3]
@@ -633,16 +685,24 @@ def replace_session_plan(directory: Path, plan: AdoptionPlan) -> None:
         path = host_root / action.target
         if action.ownership == "GENERATED" and path.is_file():
             provenance[action.target] = file_digest(path)
+    prior_plan = existing.get("plan") if isinstance(existing.get("plan"), dict) else {}
+    prior_basis = prior_plan.get("authorization_basis")
+    basis = normalize_authorization_basis(authorization_basis)
+    if basis is None and isinstance(prior_basis, dict):
+        basis = dict(prior_basis)
+    plan_record = {
+        "identity": plan.plan_id,
+        "digest": plan.digest,
+        "observed_approved": True,
+    }
+    if basis is not None:
+        plan_record["authorization_basis"] = basis
     write_yaml_atomic(directory / "plan.yaml", plan_to_dict(plan))
     update_session(
         directory,
         status="OPEN",
         baseline=plan.baseline,
-        plan={
-            "identity": plan.plan_id,
-            "digest": plan.digest,
-            "observed_approved": True,
-        },
+        plan=plan_record,
         release_id=plan.release_id,
         intended_lock=plan.intended_lock,
         mutation_envelope=plan.mutation_envelope,

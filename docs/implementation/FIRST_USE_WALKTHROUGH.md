@@ -49,10 +49,11 @@ clone host
     (operation identity, not path shape, determines Read authorization)
   → Agent must run Understand bootstrap
   → preview Adoption Plan; NEEDS_HUMAN means STOP
-  → Agent may issue the digest-bound apply command only as an APPLY REQUEST
-  → Cursor beforeShellExecution returns ask (FORCE_PROMPT); the Agent cannot
-    self-approve that prompt
-  → only after the user confirms that Cursor permission may the apply run
+  → Agent issues the digest-bound apply command as an APPLY REQUEST
+  → Cursor beforeShellExecution returns allow (official lifecycle command);
+    first-time Adoption is Agent-autonomous, no interactive confirmation
+  → the apply records its authorization basis (default standing_policy)
+    in the Adoption Session; it is not Git Commit or Git Push
   → host becomes ACTIVE / ESTABLISHED_HOST
   → ordinary HUMAN_OWNED business mutation is still denied until Develop
     has a current Task Book, mutable Stage, OPEN Session, and current
@@ -78,10 +79,10 @@ Cursor syntax and does not take ownership of unrelated skills such as
 | Does Scaffold exist? | `AGENTS.md` `scaffold-consumer` region plus `.scaffold/install/install.yaml` and the four Cursor adapters |
 | Where are the four Skills? | `.scaffold/install/packages/{understand,develop,test,submit}/` |
 | Which entrypoint governs normal work? | `python .scaffold/install/run.py` and `src/scaffold_entry.py` inside the vendored runtime |
-| How does first-use Adoption begin? | Understand `bootstrap`; preview is not approval; `NEEDS_HUMAN` means STOP |
+| How does first-use Adoption begin? | Understand `bootstrap`; preview is not apply; `NEEDS_HUMAN` means STOP |
 | Is ordinary mutation authorized while NOT_ADOPTED? | No. That is a mandatory authorization boundary, not advice |
-| Does `--approved --plan-digest` prove a human approved? | No. That spelling is an APPLY REQUEST. On Cursor, Agent-originated apply is authorized only by `beforeShellExecution` `permission=ask` |
-| What enforces that on Cursor? | Always Apply `.cursor/rules/scaffold-first-use.mdc` plus project hooks; `beforeShellExecution` ASK / FORCE_PROMPT; other clients need their own adapter |
+| Does `--approved --plan-digest` prove a human approved? | No. That spelling is an APPLY REQUEST. First-time Adoption is Agent-autonomous lifecycle work: `beforeShellExecution` returns `permission=allow` for the exact digest-bound apply, and the authorization basis (default `standing_policy`) is persisted in the Adoption Session. Git Commit and Git Push each require a separate explicit user instruction |
+| What enforces that on Cursor? | Always Apply `.cursor/rules/scaffold-first-use.mdc` plus project hooks; digest-bound apply is allowed as an official lifecycle command; other clients need their own adapter |
 | How does runtime execute? | Vendored `.scaffold/install/runtime/` — no PYTHONPATH to SOURCE |
 | How is package identity verified? | `install.yaml` digests + `load_package` on installed packages; later `skills.lock` after Adoption |
 | How do Develop/Test/Submit proceed? | Same installed packages; Repair remains Develop |

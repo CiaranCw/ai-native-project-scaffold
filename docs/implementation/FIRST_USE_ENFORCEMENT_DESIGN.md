@@ -181,12 +181,16 @@ While `NOT_ADOPTED`:
   `understand` | `understand bootstrap` (preview). Preview is not approval.
 - The digest-bound apply request
   `python .scaffold/install/run.py understand bootstrap --approved --plan-digest <hex>`
-  is **not** unconditional ALLOW. `preToolUse` Shell allows it only so the
-  command can reach `beforeShellExecution`. `beforeShellExecution` returns
-  `permission = ask`. `--approved` is an APPLY REQUEST, not human provenance.
-  Human authorization for an Agent-originated apply is the Cursor interactive
-  confirmation produced by that ASK / FORCE_PROMPT. The Agent cannot satisfy
-  it with ordinary tool calls.
+  is an APPLY REQUEST, not human provenance. Under the current product
+  authorization policy, first-time Adoption is Agent-autonomous lifecycle
+  work: `beforeShellExecution` returns `permission = allow` for the
+  exact digest-bound apply command, and the real authorization basis
+  (default `standing_policy`, citing the standing pre-authorization clause
+  location) is persisted in the Adoption Session (`plan.authorization_basis`).
+  A human-invoked CLI run outside an Agent session may instead record
+  `human_instruction` or, on clients that surface interactive confirmation
+  payloads, `client_confirmation`. No basis is ever rendered as a human grant
+  unless a human actually granted it.
 - A human invoking the same CLI outside an Agent session is a different
   situation. Other clients need an equivalent adapter to claim hard
   enforcement. This Distribution does not claim universal client hard
