@@ -59,8 +59,26 @@ def consume_published_report(
         )
     if report.get("candidate_match") is not True:
         blockers.append("published Test report candidate_match is not true")
+    stale_diagnostic: dict[str, Any] | None = None
     if not report_usable_for(report, candidate):
         blockers.append("published Test report is stale for the current candidate")
+        stale_diagnostic = {
+            "current_candidate_digest": candidate.digest,
+            "evidence_candidate_digest": str(
+                (
+                    (report.get("candidate") or {}).get("candidate_digest")
+                    if isinstance(report.get("candidate"), dict)
+                    else ""
+                )
+                or ""
+            ),
+            "evidence_report_id": str(report.get("report_id") or ""),
+            "remediation": (
+                "re-run Test against the current candidate and rebind the "
+                "published report; do not rewrite historical decisions or "
+                "delete historical evidence"
+            ),
+        }
 
     completeness = report.get("completeness") if isinstance(report.get("completeness"), dict) else {}
     sav_payload = completeness.get("sav") if isinstance(completeness.get("sav"), dict) else {}
@@ -86,6 +104,7 @@ def consume_published_report(
         "candidate_match": report.get("candidate_match") is True,
         "sav": sav_payload,
         "evidence": list(report.get("evidence") or []),
+        **({"stale_evidence": stale_diagnostic} if stale_diagnostic else {}),
     }
 
 
@@ -107,6 +126,8 @@ def published_report_skill_result(
         "sav": loaded.get("sav") or {},
         "candidate_match": loaded.get("candidate_match"),
     }
+    if loaded.get("stale_evidence"):
+        extras["stale_evidence"] = loaded["stale_evidence"]
     if report is not None:
         extras["report"] = report
     outcome = "COMPLETED" if loaded.get("ok") else "BLOCKED"

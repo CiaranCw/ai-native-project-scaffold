@@ -140,6 +140,53 @@ complete 永远不创建 Session；成功处理后该 Session 会自动 SEALED�
   producer profile 与 binding 不符均阻断。**空集视为通过**——这是合法但较弱的
   配置；建议在 proposal 中声明真实 required 测试。
 
+零上下文 Agent 的结构化测试绑定指引（全部对照源码核验）：
+
+- **如何在 Intake 中声明测试要求**：在 proposal 的 `stages[].required_tests`
+  （Stage 级）与 `final_tests`（Task 级）写入测试要求。每个元素最小形态是
+  `{"requirement_id": "<id>"}`；声明 `execution_binding` 后，Test 完成时
+  引擎自动回填 `evidence_ref.locator` 与 `observed_outcome`，无需 Agent
+  手工拼接 locator。显式 `profile_id` 必须存在于当前 `tests.yaml` profiles。
+- **如何绑定已有 Test Profile**：先在 `understand refresh` 产出的
+  `tests.yaml` profiles 中确认目标 profile 存在，再写
+  `execution_binding: {kind: "test_profile", profile_id: "<id>"}`。
+  `kind` 必须精确为 `test_profile`；binding 冲突（同一 requirement_id
+  两个 profile）会被拒绝。
+- **如何关联正式 Test Report**：两条合法路径——(a) Intake 时声明了
+  execution_binding，`develop complete` 的 `test.invoke: true` 同步执行后
+  `bind_published_evidence` 自动把 portable locator 挂到对应 requirement；
+  (b) 已有报告时用 `develop bind --task-id <id> --requirement-id <id>
+  --profile-id <id>` 补挂，或 complete 时用 `test.published_report_id`
+  消费既有报告。
+- **如何判断 Evidence 对应当前 Candidate**：对每个 locator，
+  引擎 resolve 时校验报告绑定的 `candidate.candidate_digest` 与当前
+  workspace candidate（含 projection generation 兼容）一致；不一致即
+  "stale for the actual candidate"，该条目无法支撑 COMPLETE/READY。
+  此时正确动作是重新执行 Test（`test.invoke: true`）或对当前 candidate
+  重新绑定，而不是改写历史决策。
+- **如何区分正式 Scaffold Test 与额外执行的本地测试**：正式 Test 是经
+  P6 公开边界执行并发布 `report_id` 的 scoped 验证运行（见 §7）；Agent
+  在 Session 内自行跑的本地构建/测试命令（如直接 `pytest`）不是 P6
+  Evidence，不能写入 `evidence_ref`，只能作为过程参考披露。
+
+### 2.2.1 Stale Evidence 诊断字段
+
+当 required/final 测试引用的 Evidence 不再对应当前 Candidate 时，拒绝
+信息携带以下结构化诊断（便于零上下文 Agent 自助恢复，不改变拒绝结果）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `current_candidate_digest` | 当前 workspace candidate 的 digest。 |
+| `evidence_candidate_digest` | 被拒 Evidence 报告绑定的 candidate digest。 |
+| `evidence_locator` | 失效 Evidence 的 portable locator。 |
+| `remediation` | 恢复指引：`re-run Test against the current candidate and rebind`。 |
+
+同一诊断同样出现在消费 Published Test Report 的两个边界上：
+`develop complete` 的 `test.published_report_id` 路径，以及
+`refresh_ready_authority` 路径——报告过期时 blockers 携带
+`current_candidate_digest` / `evidence_candidate_digest` / `remediation`，
+且历史报告与历史决策永不被改写或删除。
+
 ### 2.3 最小合法样例（Test + Stage 决策 + READY）
 
 ```json

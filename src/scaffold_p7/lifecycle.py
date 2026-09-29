@@ -1163,9 +1163,24 @@ def _judge_requirement(
         }
     report = resolved.get("report")
     if not isinstance(report, dict) or not engine.report_usable_for_current(report):
+        bound_digest = ""
+        stored = report.get("candidate") if isinstance(report, dict) else None
+        if isinstance(stored, dict):
+            bound_digest = str(stored.get("candidate_digest") or "")
+        current = observe_candidate_digest(engine)
+        diagnostic = (
+            f"current_candidate_digest={current or 'unavailable'} "
+            f"evidence_candidate_digest={bound_digest or 'unavailable'} "
+            f"evidence_locator={locator} remediation=re-run Test against "
+            "the current candidate and rebind; do not rewrite historical "
+            "decisions or delete historical evidence"
+        )
         return {
             "state": "unresolved",
-            "reason": "required test Evidence is stale for the actual candidate",
+            "reason": (
+                "required test Evidence is stale for the actual candidate; "
+                + diagnostic
+            ),
         }
     bound_profile = automated_execution_profile_id(item)
     producer = resolved_producer_profile_id(resolved)
@@ -1297,3 +1312,10 @@ def _p6_engine(root: Path) -> TestEngine:
         root,
         resolve_skill_package("test", host=root, runtime_file=Path(__file__)),
     )
+
+
+def observe_candidate_digest(engine: TestEngine) -> str:
+    """Current candidate digest via the engine's root; empty when unusable."""
+    from scaffold_p6.candidate import observe_candidate
+
+    return observe_candidate(engine.root).digest

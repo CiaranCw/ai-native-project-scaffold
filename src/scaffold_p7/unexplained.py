@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from scaffold_p5.io_util import read_yaml, sha256_text, write_yaml_atomic
+from scaffold_p5.io_util import read_yaml, sha256_bytes, sha256_text, write_yaml_atomic
 from scaffold_p5.schemas import (
     COMPATIBILITY_BOUNDARY_GENERATION,
     CORE_MACHINE_ARTIFACTS,
@@ -39,6 +39,7 @@ RECORD_TYPE = "develop_unexplained_drift"
 SCHEMA_VERSION = "1"
 CLASS_UNEXPLAINED = "unexplained"
 CLASS_INHERITED_INIT = "inherited-at-initialization"
+CLASS_INSTALL_MANAGED = "install-managed"
 KIND_MISSING = "missing"
 KIND_FILE = "regular_file"
 STATE_NEVER_INITIALIZED = "never_initialized"
@@ -209,9 +210,85 @@ def unexplained_matches_current(root: str | Path, rel: str) -> bool:
     row = unexplained_path_map(root).get(wanted)
     if row is None:
         return False
-    if str(row.get("classification") or "") != CLASS_UNEXPLAINED:
+    if str(row.get("classification") or "") not in {
+        CLASS_UNEXPLAINED,
+        CLASS_INSTALL_MANAGED,
+    }:
         return False
     return _row_state(row) == _row_state(current)
+
+
+def _install_managed_verified(root: Path, rel: str) -> bool:
+    """True only when the trusted Install Manifest attests these exact bytes.
+
+    Install provenance is never inferred from path shape alone. A whole-file
+    MANAGED entry must digest-match; a mixed-ownership host file (AGENTS.md,
+    .gitattributes, hooks.json) is attested only by its managed region slice.
+    Anything unverifiable keeps the conservative unexplained classification.
+    """
+    from scaffold_p5.consumer_install import (
+        current_manifest,
+        is_install_managed_path,
+        manifest_file_map,
+        _live_region_slice,
+        _manifest_format_ok,
+    )
+
+    normalized = rel.replace("\\", "/").strip("/")
+    if not is_install_managed_path(normalized):
+        return False
+    manifest = current_manifest(root)
+    if not isinstance(manifest, dict) or not _manifest_format_ok(manifest):
+        return False
+    path = root / normalized
+    if not path.is_file():
+        return False
+    if normalized in manifest_file_map(manifest):
+        try:
+            from scaffold_p5.io_util import file_digest
+
+            return manifest_file_map(manifest)[normalized] == file_digest(path)
+        except OSError:
+            return False
+    # Mixed-ownership host files: the manifest carries no whole-file digest.
+    # Verify the live managed-region slice against the canonical expectation.
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    slice_text, issues = _live_region_slice(normalized, text)
+    if issues or not slice_text:
+        return False
+    from scaffold_p5.consumer_install import (
+        expected_region_digest,
+        manifest_region_records,
+        REGION_HOST_PATHS,
+    )
+
+    if normalized not in REGION_HOST_PATHS:
+        # hooks.json fragments: attest by live scaffold fragment identity.
+        from scaffold_p5.first_use import inspect_scaffold_hook_fragment
+
+        try:
+            import json as _json
+
+            data = _json.loads(text)
+        except (ValueError, TypeError):
+            return False
+        fragment, frag_missing, frag_drifted, _frag_incompat = (
+            inspect_scaffold_hook_fragment(data)
+        )
+        return fragment is not None and not frag_missing and not frag_drifted
+    expected = expected_region_digest(normalized, host=root)
+    if expected is None:
+        return False
+    live = sha256_bytes(slice_text.encode("utf-8"))
+    if live == expected:
+        return True
+    for record in manifest_region_records(manifest):
+        if record["path"] == normalized and record["digest"] == live:
+            return True
+    return False
 
 
 def unexplained_path_map(root: str | Path) -> dict[str, dict[str, Any]]:
@@ -301,14 +378,57 @@ def reconcile_unexplained_drift(
             continue
         if (
             isinstance(prev, dict)
+            and str(prev.get("classification") or "") == CLASS_INSTALL_MANAGED
+        ):
+            if row["kind"] == KIND_FILE and _install_managed_verified(host, path):
+                updated = dict(prev)
+                updated["kind"] = row["kind"]
+                updated["digest"] = row.get("digest")
+                updated["accepted_kind"] = str(anchor.get("kind") or "")
+                updated["accepted_revision"] = str(anchor.get("revision") or "")
+                next_rows.append(updated)
+                continue
+            # The trusted install no longer attests these bytes: keep the
+            # durable fact but fall back to the conservative classification.
+            downgraded = dict(prev)
+            downgraded["kind"] = row["kind"]
+            downgraded["digest"] = row.get("digest")
+            downgraded["accepted_kind"] = str(anchor.get("kind") or "")
+            downgraded["accepted_revision"] = str(anchor.get("revision") or "")
+            downgraded["classification"] = CLASS_UNEXPLAINED
+            next_rows.append(downgraded)
+            continue
+        if (
+            isinstance(prev, dict)
             and str(prev.get("classification") or "") == CLASS_UNEXPLAINED
         ):
+            if row["kind"] == KIND_FILE and _install_managed_verified(host, path):
+                converged = dict(prev)
+                converged["kind"] = row["kind"]
+                converged["digest"] = row.get("digest")
+                converged["accepted_kind"] = str(anchor.get("kind") or "")
+                converged["accepted_revision"] = str(anchor.get("revision") or "")
+                converged["classification"] = CLASS_INSTALL_MANAGED
+                next_rows.append(converged)
+                continue
             updated = dict(prev)
             updated["kind"] = row["kind"]
             updated["digest"] = row.get("digest")
             updated["accepted_kind"] = str(anchor.get("kind") or "")
             updated["accepted_revision"] = str(anchor.get("revision") or "")
             next_rows.append(updated)
+            continue
+        if row["kind"] == KIND_FILE and _install_managed_verified(host, path):
+            next_rows.append(
+                _fact_row(
+                    row,
+                    classification=CLASS_INSTALL_MANAGED,
+                    accepted_kind=str(anchor.get("kind") or ""),
+                    accepted_revision=str(anchor.get("revision") or ""),
+                    boundary=used_boundary,
+                    observed_at=now,
+                )
+            )
             continue
         next_rows.append(
             _fact_row(
