@@ -91,6 +91,18 @@ GIT_DESTRUCTIVE = frozenset(
 # working-tree files. Inspection verbs stay outside this set so git status /
 # log / diff / show remain autonomous even when they mention protected paths.
 GIT_PATH_MUTATION = frozenset({"mv", "rm", "checkout", "restore"})
+# F8: discard-shaped invocations whose documented behavior destroys uncommitted
+# working-tree content for the named paths. Automatic risk judgment only — no
+# human-approval gate is introduced and the Commit/Push authorization contract
+# is unchanged. reset --hard remains blocked by GIT_DESTRUCTIVE above.
+GIT_DISCARD_ALTERNATIVE = (
+    "uncommitted work would be irreversibly discarded by this discard-shaped "
+    "Git operation (git checkout -- / git restore / git reset --hard paths); "
+    "a non-destructive alternative is to record the current content (for "
+    "example a plain file copy outside Git) or finish the authorized Commit "
+    "first, then re-apply the discard; this command is blocked automatically "
+    "because the loss of in-scope uncommitted work cannot be ruled out"
+)
 GIT_GLOBAL_VALUE_FLAGS = frozenset(
     {
         "-C",
@@ -176,11 +188,74 @@ def _git_hard_boundary(argv: list[str], host_root: Path) -> str | None:
         )
     if subcommand in GIT_DESTRUCTIVE or _force_push(subcommand, rest):
         return "destructive or history-rewriting SCM operation is a hard boundary"
+    if subcommand == "restore" and _git_discard_shaped(rest):
+        return GIT_DISCARD_ALTERNATIVE
+    if subcommand == "checkout" and _checkout_discard_shaped(rest):
+        return GIT_DISCARD_ALTERNATIVE
     if subcommand in GIT_PATH_MUTATION:
         return _governance_mutation_boundary(
             ["git", *rest], host_root, consume_descendants=True
         )
     return None
+
+
+def _git_discard_shaped(rest: list[str]) -> bool:
+    """True for discard-shaped git invocations that drop uncommitted work.
+
+    Matches: ``git restore [<paths>]`` (worktree restore is discard-shaped by
+    definition) and ``git checkout [--] <paths>`` (path form discards local
+    changes). Branch/commit switching forms (``git checkout <branch>``,
+    ``git checkout -b <name>``) stay outside this set: they are ordinary
+    autonomous operations and do not destroy in-scope uncommitted content.
+    """
+    tokens = list(rest or [])
+    # restore: worktree restore without --staged discards working-tree edits.
+    i = 0
+    staged_only = False
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "--":
+            return not staged_only
+        if token.startswith("-"):
+            name = token.split("=", 1)[0].lower()
+            if name in {"--staged", "-s"}:
+                staged_only = True
+            if name in {"-S"}:
+                staged_only = True
+            i += 1
+            continue
+        # First non-flag operand of restore is a pathspec.
+        return not staged_only
+    # Bare `git restore` with no operands: no target, not discard-shaped here
+    # (Git errors out anyway).
+    return False
+
+
+def _checkout_discard_shaped(rest: list[str]) -> bool:
+    """True for ``git checkout -- <paths>`` / ``git checkout <paths>`` form."""
+    tokens = list(rest or [])
+    saw_double_dash = False
+    operands: list[str] = []
+    for token in tokens:
+        if token == "--":
+            saw_double_dash = True
+            continue
+        if token.startswith("-"):
+            name = token.split("=", 1)[0].lower()
+            # Branch-creating/switching flags: safe forms, never discard.
+            if name in {"-b", "-B", "-t", "--track", "--orphan"}:
+                return False
+            continue
+        operands.append(token)
+    if saw_double_dash:
+        # Everything after -- is a pathspec: discard-shaped (with or without
+        # a preceding tree-ish).
+        return True
+    # No --: `git checkout <branch>` is safe; `git checkout <tree-ish> --` was
+    # covered above. `git checkout <branch> <path>` without -- is ambiguous
+    # and Git rejects it when the path is not a ref; treat conservatively as
+    # not discard-shaped to avoid blocking ordinary operations.
+    return False
 
 
 def _git_subcommand(argv: list[str]) -> tuple[str, list[str]]:

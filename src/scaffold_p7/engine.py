@@ -109,6 +109,7 @@ COMPLETE_ENVELOPE_KEYS = frozenset(
     {
         "test",
         "stage_decision",
+        "stage_decisions",
         "task_decision",
         "complete_stage",
         "ready",
@@ -501,6 +502,14 @@ class DevelopEngine:
                 session.get("observed_candidate_digest") or candidate.digest
             ),
         )
+        from scaffold_p7.lifecycle import open_session_drift_warning
+
+        drift_warning = open_session_drift_warning(
+            self.root,
+            session=session,
+            task=task,
+            current_candidate_digest=str(candidate.digest or ""),
+        )
         emit_idle(self.root, "develop.session", "COMPLETED")
         extras = {
             "operation": "develop_session",
@@ -516,6 +525,7 @@ class DevelopEngine:
             },
             "mutable_stage_ids": mutable_stage_ids(task),
             "submit_authorized": False,
+            "drift_warning": drift_warning,
             "capabilities": {
                 "launcher_source_write": False,
                 "commit": False,
@@ -2127,6 +2137,7 @@ class DevelopEngine:
             test_result=test_result,
             stage_completion_decision=opts.get("stage_completion_decision"),
             task_completion_decision=opts.get("task_completion_decision"),
+            stage_completion_decisions=opts.get("stage_completion_decisions"),
             request_stage_complete=bool(opts.get("request_stage_complete")),
             revalidate_complete_stages=bool(opts.get("revalidate_complete_stages")),
             request_ready_for_review=bool(opts.get("request_ready_for_review")),
@@ -3094,6 +3105,11 @@ def _requests_satisfied_completion(opts: dict[str, Any]) -> bool:
         spec = opts.get(key)
         if isinstance(spec, dict) and spec.get("outcome") == "SATISFIED":
             return True
+    batch = opts.get("stage_completion_decisions")
+    if isinstance(batch, list):
+        for spec in batch:
+            if isinstance(spec, dict) and spec.get("outcome") == "SATISFIED":
+                return True
     return False
 
 
@@ -3253,9 +3269,27 @@ def complete_run_opts(envelope: Any) -> tuple[dict[str, Any] | None, str | None]
             opts["selected"] = [str(item).strip() for item in selected]
     if "stage_decision" in envelope:
         opts["stage_completion_decision"] = envelope.get("stage_decision")
+    if "stage_decisions" in envelope:
+        batch = envelope.get("stage_decisions")
+        if not isinstance(batch, list) or not batch:
+            return None, (
+                "develop complete stage_decisions must be a non-empty list "
+                "of Stage Completion Decision objects"
+            )
+        for index, item in enumerate(batch):
+            if not isinstance(item, dict):
+                return None, (
+                    f"develop complete stage_decisions[{index}] must be a "
+                    "Stage Completion Decision object"
+                )
+        opts["stage_completion_decisions"] = batch
     if "task_decision" in envelope:
         opts["task_completion_decision"] = envelope.get("task_decision")
-    if envelope.get("complete_stage") is True or "stage_decision" in envelope:
+    if (
+        envelope.get("complete_stage") is True
+        or "stage_decision" in envelope
+        or "stage_decisions" in envelope
+    ):
         opts["request_stage_complete"] = True
     if envelope.get("ready") is True:
         opts["request_ready_for_review"] = True

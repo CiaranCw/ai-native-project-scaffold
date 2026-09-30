@@ -6,6 +6,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from scaffold_p5.io_util import read_yaml
+from scaffold_p7.models import SESSIONS_DIR
+
 if TYPE_CHECKING:
     from scaffold_p6.engine import TestEngine
 
@@ -113,6 +116,7 @@ def prepare_lifecycle(
     test_result: Any = None,
     stage_completion_decision: Any = None,
     task_completion_decision: Any = None,
+    stage_completion_decisions: Any = None,
     request_stage_complete: bool = False,
     revalidate_complete_stages: bool = False,
     request_ready_for_review: bool = False,
@@ -128,7 +132,23 @@ def prepare_lifecycle(
     if updated != task:
         extras["evidence_bound"] = True
 
-    apply_complete = bool(request_stage_complete or stage_completion_decision)
+    batch_decisions = _normalized_batch_decisions(stage_completion_decisions)
+    if batch_decisions is not None:
+        extras["stage_completion_batch_size"] = len(batch_decisions)
+        batch_error = _batch_stage_decisions_error(
+            batch_decisions,
+            task=updated,
+            existing_stage_completion_decision=stage_completion_decision,
+        )
+        if batch_error:
+            extras["stage_completion_rejected"] = True
+            return updated, [batch_error], extras
+
+    apply_complete = bool(
+        request_stage_complete
+        or stage_completion_decision
+        or batch_decisions
+    )
     revalidate = bool(revalidate_complete_stages or request_ready_for_review)
     extras["stage_completion_attempted"] = apply_complete
     extras["revalidation_attempted"] = revalidate
@@ -149,26 +169,26 @@ def prepare_lifecycle(
         row = dict(stage)
         status = row.get("status")
         if apply_complete and status == "IN_PROGRESS":
-            if _spec_targets_stage(stage_completion_decision, row):
+            stage_spec = _stage_spec_for_stage(
+                stage_completion_decision,
+                batch_decisions,
+                row,
+            )
+            if stage_spec is not None or (
+                stage_completion_decision is None and not batch_decisions
+            ):
                 row = apply_stage_decision(
                     row,
-                    spec=stage_completion_decision,
-                    candidate_digest=candidate_digest,
-                    root=root,
-                )
-            elif stage_completion_decision is None:
-                row = apply_stage_decision(
-                    row,
-                    spec=None,
+                    spec=stage_spec,
                     candidate_digest=candidate_digest,
                     root=root,
                 )
             row = maybe_complete_stage(row, root=root, candidate_digest=candidate_digest)
         elif revalidate and status == "COMPLETE":
-            revalidate_spec = (
-                stage_completion_decision
-                if _spec_targets_stage(stage_completion_decision, row)
-                else None
+            revalidate_spec = _stage_spec_for_stage(
+                stage_completion_decision,
+                batch_decisions,
+                row,
             )
             row = revalidate_complete_stage(
                 row,
@@ -1235,6 +1255,79 @@ def _spec_targets_stage(spec: Any, stage: dict[str, Any]) -> bool:
     return target.strip() == str(stage.get("stage_id") or "")
 
 
+def _normalized_batch_decisions(value: Any) -> list[dict[str, Any]] | None:
+    """Batch decisions are opt-in: absent/None means single-decision mode."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _batch_stage_decisions_error(
+    batch: list[dict[str, Any]],
+    *,
+    task: dict[str, Any],
+    existing_stage_completion_decision: Any = None,
+) -> str | None:
+    """Atomic validation: any illegal decision rejects the entire batch.
+
+    Checks (in order): empty batch, duplicate stage_id, batch/single-decision
+    conflict, and per-decision existing Stage binding authority. No Task
+    mutation has happened when any of these fail.
+    """
+    if not batch:
+        return (
+            "stage_decisions must be a non-empty list of Stage Completion "
+            "Decision objects"
+        )
+    seen: set[str] = set()
+    for index, spec in enumerate(batch):
+        target = str(spec.get("stage_id") or "").strip()
+        if not target:
+            return (
+                f"stage_decisions[{index}] is unscoped; each decision must "
+                "bind exactly one stage_id"
+            )
+        if target in seen:
+            return (
+                f"stage_decisions contains duplicate stage_id {target!r}; "
+                "each Stage must be bound at most once per envelope"
+            )
+        seen.add(target)
+    if existing_stage_completion_decision is not None and isinstance(
+        existing_stage_completion_decision, dict
+    ):
+        single_target = str(
+            existing_stage_completion_decision.get("stage_id") or ""
+        ).strip()
+        if single_target and single_target in seen:
+            return (
+                "envelope contains conflicting Stage Completion Decisions: "
+                f"stage_id {single_target!r} is bound by both stage_decision "
+                "and stage_decisions"
+            )
+    for index, spec in enumerate(batch):
+        authority_error = _stage_completion_authority_error(spec, task)
+        if authority_error:
+            return f"stage_decisions[{index}]: {authority_error}"
+    return None
+
+
+def _stage_spec_for_stage(
+    single_spec: Any,
+    batch: list[dict[str, Any]] | None,
+    stage: dict[str, Any],
+) -> Any:
+    """Resolve the decision spec applying to one Stage, batch first."""
+    if batch:
+        for spec in batch:
+            if _spec_targets_stage(spec, stage):
+                return spec
+        return None
+    return single_spec if _spec_targets_stage(single_spec, stage) else None
+
+
 def _stage_completion_authority_error(spec: Any, task: dict[str, Any]) -> str | None:
     if spec is None:
         return None
@@ -1319,3 +1412,245 @@ def observe_candidate_digest(engine: TestEngine) -> str:
     from scaffold_p6.candidate import observe_candidate
 
     return observe_candidate(engine.root).digest
+
+
+def open_session_drift_warning(
+    root: Path,
+    *,
+    session: dict[str, Any],
+    task: dict[str, Any],
+    current_candidate_digest: str,
+) -> dict[str, Any]:
+    """Session-OPEN early diagnostic between Candidate and recent SEALED evidence.
+
+    Read-only and advisory. Never rewrites or deletes historical Evidence and
+    never duplicates the P2 Published-Evidence-Staleness gates (those run at
+    decision/evidence consumption time). Distinguishes authorized in-session
+    development from unattributed worktree drift and reports UNKNOWN when
+    reliable attribution is not possible.
+    """
+    from scaffold_p5.scm import observe_scm
+
+    warning: dict[str, Any] = {
+        "status": "NONE",
+        "checks": [],
+    }
+    checks = warning["checks"]
+
+    observed = observe_scm(root)
+    if not observed.ok or observed.kind != "git":
+        warning["status"] = "UNKNOWN"
+        checks.append(
+            {
+                "kind": "candidate_observation",
+                "state": "UNKNOWN",
+                "detail": (
+                    "SCM observation is unresolved; open-Session drift "
+                    "attribution cannot be performed"
+                ),
+            }
+        )
+        return warning
+
+    # Check 1: Candidate drift since the Session recorded its digest.
+    bound_digest = str(session.get("observed_candidate_digest") or "")
+    candidate_unattributable = False
+    if not bound_digest:
+        candidate_unattributable = True
+        warning["status"] = "UNKNOWN"
+        checks.append(
+            {
+                "kind": "candidate_binding",
+                "state": "UNKNOWN",
+                "detail": (
+                    "the OPEN Session has no recorded candidate digest; "
+                    "Candidate identity cannot be reliably attributed"
+                ),
+            }
+        )
+    elif bound_digest != current_candidate_digest:
+        checks.append(
+            {
+                "kind": "candidate_binding",
+                "state": "DIVERGED",
+                "detail": (
+                    "workspace Candidate changed since this Session opened; "
+                    "determine whether the change came from authorized "
+                    "development inside this Session or from unattributed "
+                    "worktree activity"
+                ),
+                "session_candidate_digest": bound_digest,
+                "current_candidate_digest": current_candidate_digest,
+            }
+        )
+        warning["status"] = "DIVERGED"
+    else:
+        checks.append(
+            {
+                "kind": "candidate_binding",
+                "state": "CURRENT",
+                "detail": "Session candidate digest matches the live Candidate",
+            }
+        )
+
+    # Check 2: unattributed working-tree drift outside the Task scope.
+    scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
+    scope_paths = {
+        str(item).replace("\\", "/").strip("/")
+        for item in (scope.get("paths") or [])
+        if str(item or "").strip()
+    }
+    overlay_paths = {
+        str(entry.get("path") or "")
+        for entry in (session.get("workspace_overlay_s0") or {}).get("paths", [])
+        if isinstance(entry, dict) and entry.get("path")
+    }
+    unattributed: list[str] = []
+    unknown_paths = 0
+    attributed_paths = _previously_attributed_paths(root)
+    for entry in observed.entries:
+        rel = str(entry.get("path") or "")
+        if not rel:
+            unknown_paths += 1
+            continue
+        if entry.get("untracked") or entry.get("code") in {"??", " A", "AM"}:
+            in_scope = any(
+                rel == item or rel.startswith(item.rstrip("/") + "/")
+                for item in scope_paths
+            )
+            if in_scope:
+                # Authorized in-Session development: Task-scope files the
+                # implementation legitimately created. Not a warning.
+                continue
+            if rel == "AGENTS.md" or rel == ".gitattributes" or rel.startswith(
+                ".scaffold/"
+            ):
+                # Scaffold governance/install-managed surfaces: their drift
+                # classification is owned by the existing reconcile authority
+                # (P2-F3), not by this advisory check.
+                continue
+            if rel in attributed_paths:
+                # Existing drift-authority attribution (accepted anchor,
+                # install-managed, or previously classified unexplained):
+                # pre-existing historical difference, not new unattributed
+                # worktree drift.
+                continue
+            unattributed.append(rel)
+    if unattributed:
+        warning["status"] = (
+            "DIVERGED" if warning["status"] != "DIVERGED" else warning["status"]
+        )
+        checks.append(
+            {
+                "kind": "unattributed_drift",
+                "state": "DIVERGED",
+                "detail": (
+                    "working-tree files changed outside the Task scope and "
+                    "outside prior recorded authority; verify whether these "
+                    "belong to pre-existing historical differences or to "
+                    "unattributed worktree drift"
+                ),
+                "paths": sorted(unattributed)[:20],
+            }
+        )
+    if unknown_paths:
+        warning["status"] = "UNKNOWN" if warning["status"] == "NONE" else warning["status"]
+        checks.append(
+            {
+                "kind": "unattributed_drift",
+                "state": "UNKNOWN",
+                "detail": (
+                    f"{unknown_paths} SCM entries have no usable path; drift "
+                    "attribution is incomplete"
+                ),
+            }
+        )
+
+    # Check 3: relationship to the most recent applicable SEALED evidence.
+    latest_sealed = _latest_sealed_session_for_task(
+        root, task_id=str(task.get("record_id") or "")
+    )
+    if latest_sealed is not None:
+        sealed_digest = str(
+            latest_sealed.get("observed_candidate_digest") or ""
+        )
+        if sealed_digest and current_candidate_digest and sealed_digest != current_candidate_digest:
+            checks.append(
+                {
+                    "kind": "sealed_evidence_relationship",
+                    "state": "DIVERGED",
+                    "detail": (
+                        "the most recent SEALED Session recorded a different "
+                        "Candidate than the current workspace; any Evidence "
+                        "bound by that Session may be stale for the current "
+                        "Candidate (authoritative staleness is still decided "
+                        "by the existing Evidence gates at consumption time)"
+                    ),
+                    "sealed_candidate_digest": sealed_digest,
+                    "current_candidate_digest": current_candidate_digest,
+                    "sealed_session_id": latest_sealed.get("record_id"),
+                }
+            )
+            warning["status"] = "DIVERGED"
+    else:
+        checks.append(
+            {
+                "kind": "sealed_evidence_relationship",
+                "state": "NONE",
+                "detail": "no applicable SEALED Session exists for this Task",
+            }
+        )
+    # Final status: a reliable-attribution failure (UNKNOWN) outranks a
+    # divergence report, per the UNKNOWN-reporting requirement.
+    if candidate_unattributable:
+        warning["status"] = "UNKNOWN"
+    return warning
+
+
+def _latest_sealed_session_for_task(
+    root: Path,
+    *,
+    task_id: str,
+) -> dict[str, Any] | None:
+    """Latest SEALED Session record for a Task from canonical Session files."""
+    folder = root / SESSIONS_DIR
+    wanted = str(task_id or "").strip()
+    if not folder.is_dir() or not wanted:
+        return None
+    latest: dict[str, Any] | None = None
+    for directory in sorted(folder.iterdir()):
+        if not directory.is_dir():
+            continue
+        path = directory / "session.yaml"
+        if not path.is_file():
+            continue
+        try:
+            data = read_yaml(path)
+        except (OSError, ValueError, TypeError, UnicodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("task_id") or "").strip() != wanted:
+            continue
+        if data.get("status") != "SEALED":
+            continue
+        if latest is None or str(data.get("updated_at") or "") > str(
+            latest.get("updated_at") or ""
+        ):
+            latest = data
+    return latest
+
+
+def _previously_attributed_paths(root: Path) -> set[str]:
+    """Paths that already carry an attribution from the existing drift authority.
+
+    Includes accepted-anchor and install-managed/unexplained classifications.
+    Read-only best-effort: any failure returns an empty set and the advisory
+    check falls back to its UNKNOWN/reporting behavior.
+    """
+    try:
+        from scaffold_p7.unexplained import unexplained_path_map
+
+        return {str(key) for key in unexplained_path_map(root)}
+    except Exception:
+        return set()

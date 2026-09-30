@@ -35,6 +35,34 @@ from scaffold_p5.full import (
     normalize,
 )
 from scaffold_p5.currentness import evaluate_understanding_currentness
+
+
+def _resume_heartbeat(operation: str, step: str, **detail: Any) -> None:
+    """Terminal-only heartbeat for the read-only resume observation path.
+
+    Mirrors the WORKING heartbeat text emitted by scaffold_p5.progress but
+    deliberately skips the persistent progress.json write: a normal resume
+    must not modify any persistent file (R7 P3-F6).
+    """
+    import sys
+
+    from scaffold_p5.progress import _write_progress_timestamp
+
+    ts = _write_progress_timestamp()
+    parts = [f"scaffold: WORKING {operation} {step} at={ts}"]
+    for key, value in detail.items():
+        if value is None or value == "":
+            continue
+        text = str(value)
+        if len(text) > 80:
+            text = text[:77] + "..."
+        parts.append(f"{key}={text}")
+    try:
+        sys.stderr.write(" ".join(parts) + "\n")
+        sys.stderr.flush()
+    except OSError:
+        pass
+
 from scaffold_p5.host_state import (
     PROJECT_YAML,
     compare_adoption_state,
@@ -837,9 +865,11 @@ class UnderstandEngine:
         )
 
     def _resume(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
-        from scaffold_p5.progress import emit_idle, emit_working
-
-        emit_working(self.root, "understand.resume", "start")
+        # F6: resume is observational. Terminal heartbeats stay, but no
+        # progress.json (or any other persistent file) is written during a
+        # normal resume observation. Other long-running operations keep the
+        # existing global Progress behavior untouched.
+        _resume_heartbeat("understand.resume", "start")
         view = resume_project(
             self.root,
             distribution=self.distribution,
@@ -860,10 +890,10 @@ class UnderstandEngine:
             "observational": True,
             "chat_memory": False,
         }
-        emit_idle(
-            self.root,
+        _resume_heartbeat(
             "understand.resume",
-            "COMPLETED" if view.get("ok") else "FAILED",
+            "done",
+            outcome="COMPLETED" if view.get("ok") else "FAILED",
         )
         return self._base(
             "refresh",

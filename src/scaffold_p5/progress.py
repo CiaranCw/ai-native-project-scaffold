@@ -11,6 +11,11 @@ from typing import Any
 PROGRESS_REL = ".scaffold/runtime/progress.json"
 
 
+def _write_progress_timestamp() -> str:
+    """Shared UTC timestamp format for WORKING heartbeats."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def emit_working(
     root: str | Path | None,
     operation: str,
@@ -18,7 +23,7 @@ def emit_working(
     **detail: Any,
 ) -> None:
     """Tell a watching Agent the process is still WORKING, not hung."""
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = _write_progress_timestamp()
     parts = [f"scaffold: WORKING {operation} {step} at={ts}"]
     for key, value in detail.items():
         if value is None or value == "":
@@ -47,7 +52,7 @@ def emit_idle(
     operation: str,
     outcome: str = "",
 ) -> None:
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = _write_progress_timestamp()
     _write_progress(
         root,
         state="IDLE",

@@ -439,10 +439,17 @@ class CommandTestAutonomyLightweightTests(unittest.TestCase):
             "git blame src/app.py",
             "git mv src/app.py src/app2.py",
             "git rm src/obsolete.py",
+        ):
+            self._allow(command)
+        # R7 P3-F8: discard-shaped Git operations on business paths now
+        # destroy uncommitted in-scope work and are blocked automatically
+        # (with a non-destructive alternative) instead of being allowed.
+        for command in (
             "git checkout HEAD -- src/app.py",
             "git restore src/app.py",
         ):
-            self._allow(command)
+            detail = self._deny(command)
+            self.assertIn("irreversibly discarded", detail)
         for command in (
             "git mv .scaffold scaffold-off",
             "git mv .scaffold/tests.yaml .scaffold/tests.bak",

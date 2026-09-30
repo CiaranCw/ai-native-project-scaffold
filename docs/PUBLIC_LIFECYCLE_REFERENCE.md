@@ -110,6 +110,7 @@ complete 永远不创建 Session；成功处理后该 Session 会自动 SEALED�
 | --- | --- | --- |
 | `test` | object | 可选。白名单子键：`invoke`（bool，同步调用一次 Test）、`published_report_id`（string，消费已发布的 P6 报告）、`selected`（list[string]，profile 选择）。`invoke` 与 `published_report_id` 互斥；三者均缺省表示本信封不涉及 Test。 |
 | `stage_decision` | object | 可选。Stage Completion Decision 规范，必须绑定恰好一个 Stage（`stage_id` 必须与该 Stage 一致且唯一存在）。结构见 §2.1。 |
+| `stage_decisions` | list[object] | 可选。批量 Stage Completion Decision（P3-F5）。每个 decision 仍是结构同 §2.1 的单个 Stage 绑定规范，必须精确绑定一个真实存在的 Stage。原子性：任一 decision 非法（绑定不存在/歧义 Stage、重复 `stage_id`、与单数 `stage_decision` 绑定同一 Stage 冲突、结构非法）时整个信封被拒绝，Task 不发生任何部分发布。所有 decision 仍走既有 Candidate、Evidence 与 Completion 门禁；与 `task_decision`、`ready` 的组合遵守现有生命周期。单数 `stage_decision` 永久兼容，两者可并存但不得绑定同一 Stage。 |
 | `task_decision` | object | 可选。Task Completion Decision 规范，结构同 §2.1（无 `stage_id`）。 |
 | `complete_stage` | bool | `true` 表示请求把当前 IN_PROGRESS Stage 推进到 COMPLETE（仍由决策与证据合法性裁决）。与 `stage_decision` 可同用；仅有 `stage_decision` 时隐含 complete 请求。 |
 | `ready` | bool | `true` 表示请求 READY_FOR_REVIEW（Records §11 门禁裁决）。 |
@@ -234,6 +235,45 @@ python .scaffold/install/run.py understand refresh --action resume
 （含 OPEN/SEALED/ABORTED/UNKNOWN/ORPHANED/MALFORMED）。resume 是观测性命令，
 不依赖聊天历史。
 
+### 4.1 Session 状态统计（P3）
+
+`work.session_status_counts` 基于同一实时权威枚举（`inspect_sessions()`）
+提供按状态统计，不新增第二套 Session 权威记录：
+
+- `counts`：`OPEN` / `SEALED` / `ABORTED` / `UNKNOWN` 四类计数；
+- `anomalous`：实际存在的异常重建 Session（`ORPHANED` / `MALFORMED` /
+  `UNREADABLE` / 身份非法）逐条保留 `record_id` + `status` +
+  `reconstruction` 明细，不会被统计静默删除；
+- 统计来源标注为 `inspect_sessions live enumeration`——只来自实时权威枚举，
+  不通过历史聊天内容或缓存推断。
+
+### 4.2 Resume 只读化（P3-F6）
+
+正常 `resume` 观测过程**不修改 `progress.json` 或其他持久文件**：
+resume 路径的心跳只输出到终端 stderr（文本格式与 WORKING 心跳一致），
+不再写 `.scaffold/runtime/progress.json`。全局 Progress 机制本身保留，
+其他需要持久进度记录的长时间运行操作（Test 执行、Session 打开/关闭等）
+行为不变。重复 resume 幂等：两次 resume 之间持久文件字节一致。
+
+### 4.3 Session OPEN 提前漂移诊断（P3-F7）
+
+`develop session` 成功打开 OPEN Session 时，结果 extras 携带只读诊断
+`drift_warning`（`status`: NONE / DIVERGED / UNKNOWN），检查当前 Candidate
+与适用的最近有效 SEALED 证据之间的关系：
+
+- Candidate 绑定一致性：OPEN Session 记录的 candidate digest 与当前
+  workspace Candidate 是否一致；
+- 未归属漂移：Task scope 之外的未跟踪/已修改工作树文件（Task 范围内的
+  合法授权开发变化与 OPEN Session 自身合法写入不产生告警）；
+- 最近 SEALED 证据关系：最近 SEALED Session 记录的 Candidate 与当前
+  Candidate 不一致时提示（权威的 stale 判定仍由既有 Evidence 门禁在
+  消费时做出，本诊断不重复也不替代 P2 的 Published Evidence Staleness
+  检查）。
+
+边界：诊断是提前提示，不修改、不删除任何历史 Evidence；SCM 观测不可用
+或 Session 未记录 candidate digest 时明确报告 UNKNOWN，不伪造 Candidate
+身份；既有历史差异以提示形式呈现，由 Agent 判断归属。
+
 ## 5. Test 五态关系（TEST_PASS / coverage_complete / required_policy / TEST_COMPLETE / READY）
 
 | 概念 | 含义 | 判定来源 |
@@ -294,3 +334,17 @@ Scaffold 的 shell 硬边界对 `git commit` / `git push` 直接拒绝
 （`shell_boundary.py` `GIT_PUBLICATION`），history-rewriting 操作
 （rebase/reset/clean/force-push 等）同样被拒。其余正常开发操作（含首次
 Adoption apply）自主执行，无需人工审批。
+
+### 8.1 丢弃型 Git 操作的自动防护（P3-F8）
+
+在上述人工授权合同不变的前提下（只有 Commit/Push 需要人工授权），
+shell 边界对丢弃型 Git 操作增加**自动风险判断**，不引入任何额外人工审批：
+
+- `git checkout -- <paths>` / `git checkout <tree-ish> -- <paths>`、
+  `git restore [<paths>]`（worktree restore）、以及 `git reset --hard`
+  （既有 GIT_DESTRUCTIVE 边界）会不可逆丢弃工作树未提交内容，自动阻断，
+  并说明具体风险与非破坏性替代路径（先记录当前内容或完成授权 Commit 再
+  重新应用丢弃）。
+- 普通分支/提交切换（`git checkout <branch>`、`git checkout -b`）与全部
+  检查类命令（status/log/diff/show）不受影响，保持自主执行。
+- Agent 会话之外用户直接执行的 Git 命令不在本机制约束范围内。

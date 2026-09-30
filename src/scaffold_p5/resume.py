@@ -41,6 +41,51 @@ CLIENT_SEMANTIC_KEYS = frozenset(
 CONTINUABLE_TASK_STATUSES = frozenset({"IN_PROGRESS", "READY_FOR_REVIEW"})
 
 
+SESSION_STATUS_BUCKETS = ("OPEN", "SEALED", "ABORTED", "UNKNOWN")
+
+
+def session_status_counts(
+    sessions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Live status statistics over the authoritative inspect_sessions() enum.
+
+    Counts come from the real-time canonical Session enumeration only — never
+    from chat history, caches, or a second Session record. Sessions that fail
+    reconstruction (ORPHANED / MALFORMED / UNREADABLE / malformed identity)
+    stay individually visible with their reconstruction detail and are
+    counted as UNKNOWN; they are never silently dropped from the statistics.
+    """
+    counts = {status: 0 for status in SESSION_STATUS_BUCKETS}
+    anomalous: list[dict[str, Any]] = []
+    for row in sessions or []:
+        if not isinstance(row, dict):
+            counts["UNKNOWN"] += 1
+            anomalous.append(
+                {"record_id": "", "status": "UNKNOWN", "reconstruction": "UNKNOWN"}
+            )
+            continue
+        status = str(row.get("status") or "")
+        if status in counts:
+            counts[status] += 1
+        else:
+            counts["UNKNOWN"] += 1
+        reconstruction = str(row.get("reconstruction") or "")
+        if reconstruction != "VALID" or status not in counts or status == "UNKNOWN":
+            anomalous.append(
+                {
+                    "record_id": row.get("record_id"),
+                    "status": status or "UNKNOWN",
+                    "reconstruction": reconstruction or "UNKNOWN",
+                }
+            )
+    return {
+        "counts": counts,
+        "total": len(sessions or []),
+        "anomalous": anomalous,
+        "source": "inspect_sessions live enumeration",
+    }
+
+
 def resume_project(
     root: str | Path,
     *,
@@ -91,6 +136,7 @@ def resume_project(
             "task_blockers": task_blockers,
             "session_blockers": session_blockers,
             "sessions": sessions,
+            "session_status_counts": session_status_counts(sessions),
             "ready_task_ids": list(submit_view.get("ready_task_ids") or []),
             "durably_finalized_task_ids": list(
                 submit_view.get("durably_finalized_task_ids") or []
