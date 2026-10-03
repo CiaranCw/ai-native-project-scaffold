@@ -23,7 +23,7 @@ from scaffold_p8.cleanup import cleanup_sessions
 from scaffold_p8.completeness import evaluate_completeness
 from scaffold_p8.delta import classify_delta, load_sealed_sessions, observe_real_diff
 from scaffold_p8.finalize import finalize_s10, reconcile_index_transactions
-from scaffold_p8.handoff import executable_repair_route
+from scaffold_p8.handoff import executable_repair_route, nonrepairable_scope_paths
 from scaffold_p8.knowledge import evaluate_knowledge
 from scaffold_p8.lock_review import evaluate_skills_lock_review_authority
 from scaffold_p8.models import PROVIDES, REQUIRES, SKILL_ID
@@ -300,13 +300,50 @@ class SubmitEngine:
                         "structural": structural,
                     },
                 )
+            structural_blockers = [
+                blocker
+                for blocker in structural.get("blockers") or []
+                if isinstance(blocker, str) and blocker
+            ]
+            undeclared_paths = [
+                path
+                for path in structural.get("undeclared") or []
+                if isinstance(path, str) and path
+            ]
+            governance_paths = nonrepairable_scope_paths(
+                self.root, project, undeclared_paths
+            )
+            other_blockers = [
+                blocker
+                for blocker in structural_blockers
+                if "undeclared Task Book paths" not in blocker
+            ]
+            missing_blocker = (
+                "substantive repair required; scoped source is missing: "
+                + ", ".join(missing_source)
+            )
+            # A missing-source handoff is executable only when every other
+            # structural finding is also repairable by that same handoff.
+            # Governance paths and unrelated blockers stay on the stop route
+            # with their text intact.
+            if governance_paths or other_blockers:
+                return self._blocked(
+                    [missing_blocker, *structural_blockers],
+                    "stop",
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                    extras={
+                        "stage": "S3",
+                        "repair_handoff": None,
+                        "delta": delta,
+                        "structural": structural,
+                    },
+                )
             route, handoff, blockers = executable_repair_route(
                 task,
                 candidate_digest=candidate.digest,
-                blockers=[
-                    "substantive repair required; scoped source is missing: "
-                    + ", ".join(missing_source)
-                ],
+                blockers=[missing_blocker, *structural_blockers],
                 missing_source=missing_source,
             )
             return self._blocked(
@@ -323,6 +360,47 @@ class SubmitEngine:
                 },
             )
         if not structural.get("structural_review_pass"):
+            undeclared_paths = [
+                path
+                for path in structural.get("undeclared") or []
+                if isinstance(path, str) and path
+            ]
+            structural_blockers = [
+                blocker
+                for blocker in structural.get("blockers") or []
+                if isinstance(blocker, str) and blocker
+            ]
+            governance_paths = nonrepairable_scope_paths(
+                self.root, project, undeclared_paths
+            )
+            scope_escape_only = (
+                task is not None
+                and bool(undeclared_paths)
+                and not governance_paths
+                and len(structural_blockers) == 1
+                and "undeclared Task Book paths" in structural_blockers[0]
+            )
+            if scope_escape_only:
+                candidate = observe_candidate(self.root)
+                route, handoff, blockers = executable_repair_route(
+                    task,
+                    candidate_digest=candidate.digest,
+                    blockers=structural_blockers,
+                    undeclared=undeclared_paths,
+                )
+                return self._blocked(
+                    blockers,
+                    route,
+                    candidate=candidate,
+                    project=project,
+                    task=task,
+                    extras={
+                        "stage": "S3",
+                        "repair_handoff": handoff,
+                        "delta": delta,
+                        "structural": structural,
+                    },
+                )
             return self._blocked(
                 list(structural.get("blockers") or ["structural review blocked"]),
                 "stop",
@@ -470,13 +548,27 @@ class SubmitEngine:
             s5_route = str(completeness.get("route") or "")
             if not s5_route or s5_route == "develop.repair":
                 s5_route = "test.scoped_verification"
+            authority_guidance = [
+                blocker
+                for blocker in completeness.get("authority_blockers") or []
+                if isinstance(blocker, str) and blocker
+            ]
+            message = "TEST_COMPLETE does not hold; Submit stops at S5"
+            if authority_guidance:
+                message += "; " + " | ".join(authority_guidance)
+            extras: dict[str, Any] = {
+                "stage": "S5",
+                "completeness": _public_completeness(completeness),
+            }
+            if authority_guidance:
+                extras["authority_blockers"] = authority_guidance
             return self._blocked(
-                ["TEST_COMPLETE does not hold; Submit stops at S5"],
+                [message],
                 s5_route,
                 candidate=s5_candidate,
                 project=project,
                 task=task,
-                extras={"stage": "S5", "completeness": _public_completeness(completeness)},
+                extras=extras,
             )
 
         want_s10 = bool(opts.get("request_s10") or opts.get("finalize"))
@@ -1662,5 +1754,6 @@ def _public_completeness(completeness: dict[str, Any]) -> dict[str, Any]:
         "required_fail_ids": completeness.get("required_fail_ids"),
         "required_fail_profile_ids": completeness.get("required_fail_profile_ids"),
         "blockers": completeness.get("blockers"),
+        "authority_blockers": completeness.get("authority_blockers"),
         "route": completeness.get("route"),
     }

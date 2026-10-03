@@ -18,9 +18,11 @@ from typing import Any
 
 from scaffold_p5 import yaml_lite
 from scaffold_p5.agents import (
+    AGENTS_ROUTER_REGION,
     CONSUMER_INSTALL_REGION,
     CONSUMER_REGION_END,
     CONSUMER_REGION_START,
+    agents_router_region_text,
     apply_consumer_install_region,
     classify_agents_text,
     compose_consumer_agents_inner,
@@ -691,6 +693,67 @@ def predecessor_region_digests(rel: str) -> set[str]:
     if rel == GITATTRIBUTES:
         text = f"{GITATTR_START}\n{RC2_GITATTR_INNER.strip()}\n{GITATTR_END}"
         return {sha256_bytes(text.encode("utf-8"))}
+    return set()
+
+
+def expected_managed_region_text(
+    rel: str,
+    region_id: str,
+    profiles: tuple[AdapterProfile, ...] | None = None,
+    *,
+    host: str | Path | None = None,
+    agents_inner: str | None = None,
+) -> str | None:
+    """Canonical slice for one host path and one managed region id.
+
+    ``agents-router`` identity is the router block AGENTS itself writes.
+    ``scaffold-consumer`` and ``scaffold-consumer-git`` stay the existing
+    Consumer Install expected text. Region order is not part of the identity.
+    """
+    if rel == AGENTS_MD and region_id == AGENTS_ROUTER_REGION:
+        return agents_router_region_text()
+    if rel == AGENTS_MD and region_id == CONSUMER_INSTALL_REGION:
+        return expected_region_text(
+            rel, profiles, host=host, agents_inner=agents_inner
+        )
+    if rel == GITATTRIBUTES and region_id == GITATTR_REGION:
+        return expected_region_text(
+            rel, profiles, host=host, agents_inner=agents_inner
+        )
+    return None
+
+
+def expected_managed_region_digest(
+    rel: str,
+    region_id: str,
+    profiles: tuple[AdapterProfile, ...] | None = None,
+    *,
+    host: str | Path | None = None,
+    agents_inner: str | None = None,
+) -> str | None:
+    text = expected_managed_region_text(
+        rel,
+        region_id,
+        profiles,
+        host=host,
+        agents_inner=agents_inner,
+    )
+    if text is None:
+        return None
+    return sha256_bytes(text.encode("utf-8"))
+
+
+def predecessor_managed_region_digests(rel: str, region_id: str) -> set[str]:
+    """Supported predecessor digests for one path and one region id.
+
+    The existing RC2 predecessors cover ``scaffold-consumer`` and
+    ``scaffold-consumer-git`` only. ``agents-router`` has no predecessor
+    identity in that contract.
+    """
+    if rel == AGENTS_MD and region_id == CONSUMER_INSTALL_REGION:
+        return predecessor_region_digests(rel)
+    if rel == GITATTRIBUTES and region_id == GITATTR_REGION:
+        return predecessor_region_digests(rel)
     return set()
 
 

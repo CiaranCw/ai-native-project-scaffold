@@ -1117,13 +1117,15 @@ class FA2Batch5DevelopLifecycleTests(unittest.TestCase):
         (self.host / "src/app.py").unlink()
         bind_ready_completion_authority(self.host)
         submitted = submit_engine(self.host).run(task_id=TASK_A)
+        # R8 FND-B remediation: a single-Stage Task maps a missing scoped
+        # source deterministically to that Stage without inventing Stage
+        # ownership, so the repair route is now executable.
         self.assertEqual(submitted.outcome, "BLOCKED")
-        self.assertNotEqual(submitted.next_route, "develop.repair")
-        self.assertEqual(submitted.next_route, "human")
-        self.assertIsNone(submitted.extras.get("repair_handoff"))
-        self.assertTrue(
-            any(UNRESOLVED_REPAIR_REASON in item for item in submitted.blockers)
-        )
+        self.assertEqual(submitted.next_route, "develop.repair")
+        handoff = submitted.extras.get("repair_handoff")
+        self.assertIsNotNone(handoff)
+        self.assertEqual(handoff.get("target_stage_ids"), ["stage-1"])
+        self.assertEqual(handoff.get("target_mapping"), "single_stage")
 
     def test_B5F12_ready_repair_e2e_under_fnd3(self):
         self._prepare_test_host()

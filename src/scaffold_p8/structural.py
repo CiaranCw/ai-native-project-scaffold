@@ -19,6 +19,10 @@ from scaffold_p8.task_authority import (
 )
 
 
+INSTALL_MANAGED_VERIFICATION = "install-managed-manifest-verification"
+INSTALL_UNMANAGED_HUMAN_BYTES = "unmanaged-human-bytes"
+
+
 IMPACT_MODULE_STRUCTURE = "MODULE_STRUCTURE"
 IMPACT_PUBLIC_INTERFACE = "PUBLIC_INTERFACE"
 IMPACT_DEPENDENCY = "DEPENDENCY"
@@ -115,6 +119,8 @@ def review_structure(
             )
 
     undeclared: list[str] = []
+    install_managed_paths: list[dict[str, Any]] = []
+    install_managed_seen: set[str] = set()
     if scope is not None:
         if scope.issues:
             blockers.extend(scope.issues)
@@ -125,12 +131,23 @@ def review_structure(
                 if _is_source_path(path)
                 and not path_in_task_candidate(path, scope)
                 and path not in CORE_MACHINE_ARTIFACTS
+                and not _install_managed_change_verified(root, path)
             ]
             if undeclared:
                 blockers.append(
                     "real Diff contains undeclared Task Book paths: "
                     + ", ".join(undeclared)
                 )
+            for path in real_paths:
+                if (
+                    _is_source_path(path)
+                    and path not in CORE_MACHINE_ARTIFACTS
+                    and not path_in_task_candidate(path, scope)
+                    and _install_managed_change_verified(root, path)
+                ):
+                    _remember_install_managed(
+                        install_managed_paths, install_managed_seen, path
+                    )
 
     missing_scoped = missing_scoped_source(root, task)
     unknown_ownership: list[str] = []
@@ -157,6 +174,11 @@ def review_structure(
         )
         resolved = resolve_ownership(ownership, path)
         if not allowed:
+            if _install_managed_change_verified(root, path):
+                _remember_install_managed(
+                    install_managed_paths, install_managed_seen, path
+                )
+                continue
             if resolved.status == "UNKNOWN" and role != "supporting":
                 unknown_ownership.append(path)
             else:
@@ -179,6 +201,13 @@ def review_structure(
                 "scope_role": role,
             }
         )
+    _observe_agents_mixed_ownership(
+        root,
+        real_paths,
+        install_managed_paths,
+        install_managed_seen,
+        unknown_ownership,
+    )
     if unknown_ownership:
         blockers.append(
             "changed source path has UNKNOWN ownership: " + ", ".join(unknown_ownership)
@@ -216,6 +245,7 @@ def review_structure(
         "repair_required": repair,
         "unexpected_core": unexpected_core,
         "undeclared": undeclared,
+        "install_managed_paths": install_managed_paths,
         "missing_scoped": missing_scoped,
         "unknown_ownership": unknown_ownership,
         "conflicting_ownership": conflicting_ownership,
@@ -469,6 +499,48 @@ def _record_namespace(path: str) -> bool:
         or normalized.startswith(".scaffold/derived/")
         or normalized.startswith(".scaffold/ext/")
     )
+
+
+def _install_managed_change_verified(root: Path, rel: str) -> bool:
+    """Structural-review view of the shared mixed-ownership verifier."""
+    from scaffold_p5.mixed_surface import install_managed_bytes_verified
+
+    return install_managed_bytes_verified(root, rel)
+
+
+def _remember_install_managed(
+    rows: list[dict[str, Any]],
+    seen: set[str],
+    path: str,
+) -> None:
+    if path in seen:
+        return
+    seen.add(path)
+    rows.append({"path": path, "verification": INSTALL_MANAGED_VERIFICATION})
+
+
+def _observe_agents_mixed_ownership(
+    root: Path,
+    real_paths: list[str],
+    install_managed_paths: list[dict[str, Any]],
+    install_managed_seen: set[str],
+    unknown_ownership: list[str],
+) -> None:
+    """AGENTS.md is not an ordinary source path.
+
+    A verified Scaffold region stays install-managed. A human edit outside
+    the managed spans, or an unattested region, stays visible to Structural
+    Review. The file is not reclassified as a normal product source path.
+    """
+    if "AGENTS.md" not in real_paths:
+        return
+    if _install_managed_change_verified(root, "AGENTS.md"):
+        _remember_install_managed(
+            install_managed_paths, install_managed_seen, "AGENTS.md"
+        )
+        return
+    if "AGENTS.md" not in unknown_ownership:
+        unknown_ownership.append("AGENTS.md")
 
 
 def _is_source_path(path: str) -> bool:

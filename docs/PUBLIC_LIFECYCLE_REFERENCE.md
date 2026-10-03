@@ -291,6 +291,24 @@ resume 路径的心跳只输出到终端 stderr（文本格式与 WORKING 心跳
   `refresh_ready_authority` 路径时，引擎才硬性要求该报告 `test_complete=true`。
 - 不得把空 required 集自动视为权威来"达成" TEST_COMPLETE——这会削弱测试门禁。
 
+### 5.1 S5 权威诊断（authority_blockers）
+
+当 Submit 在 S5 因 required 集不权威而阻断（TEST_COMPLETE=false）时，结果
+`extras.authority_blockers` 携带结构化恢复指引，逐条说明：
+
+1. **为什么 TEST_COMPLETE 为 false**：报告的 `required_policy` 为
+   `UNKNOWN`（required 集未经项目权威确认），S5 无法对照一个无根据的
+   required 集验证完整性；
+2. **谁拥有修正权威**：required 集权威存在于 `.scaffold/tests.yaml`，该文件
+   是 GENERATED，仅由 Understand Refresh 维护；Develop 与 Submit 均不得手工编辑；
+3. **缺什么 grounded 信息**：空 required 集缺顶层 `required_authority: VERIFIED`
+   声明（或 grounded 的零 required 事实）；非空 required 集缺各 profile 的
+   `required_authority: VERIFIED` 事实。
+
+恢复路径（全部自主，无人工审批门）：运行 Understand Refresh grounded
+required profiles（或 zero-required 事实）→ 重跑 Test 产出新报告 → 重新 Submit。
+该诊断只解释阻断原因，不改变 TEST_COMPLETE 判定语义。
+
 ## 6. tests.yaml required 权威升级路径
 
 `tests.yaml` 的 `required_authority`（顶层与每个 profile）取值为事实类
@@ -309,6 +327,13 @@ resume 路径的心跳只输出到终端 stderr（文本格式与 WORKING 心跳
 `required_authority`）。该文件按 project.yaml ownership 规则维护
 （GENERATED 索引可由 Refresh 重写；人工确认后视为权威）。升级完成后，
 后续 Test 报告的 `required_policy` 变为 `VERIFIED`，`TEST_COMPLETE` 才可能为 true。
+
+S5 恢复可用性（R8-FND-D）：Submit S5 因 required 集不权威而阻断时，
+阻断结果的 `extras.authority_blockers` 携带结构化诊断——说明阻断原因
+（required_policy 为 UNKNOWN）、修正权威归属（tests.yaml GENERATED，
+仅 Understand Refresh 维护）、缺失的 grounded 信息，以及自主恢复路径
+（Refresh → 重跑 Test → 重新 Submit）。整个恢复过程无需人工审批门；
+语义约束不变：required 集不权威时 TEST_COMPLETE 恒为 false。
 
 ## 7. 测试口径与交付报告规范（F9）
 

@@ -128,11 +128,17 @@ class P8SubmitTests(unittest.TestCase):
         (self.host / "src/app.py").unlink()
         result = run_submit(self.host, task_id=TASK_A)
         self.assertEqual(result.outcome, "BLOCKED")
-        self.assertEqual(result.next_route, "human")
-        self.assertIsNone(result.extras.get("repair_handoff"))
-        self.assertTrue(
-            any(UNRESOLVED_REPAIR_REASON in item for item in result.blockers)
-        )
+        # R8 FND-B remediation: a READY single-Stage Task maps a missing
+        # scoped source deterministically to that Stage, so Submit now emits
+        # an explicit submit_to_develop repair handoff instead of an
+        # unresolved human route.
+        self.assertEqual(result.next_route, "develop.repair")
+        handoff = result.extras.get("repair_handoff")
+        self.assertIsNotNone(handoff)
+        self.assertEqual(handoff.get("target_stage_ids"), ["stage-1"])
+        self.assertEqual(handoff.get("target_mapping"), "single_stage")
+        self.assertFalse(handoff.get("submit_authorized"))
+        self.assertFalse(handoff.get("test_pass"))
 
     def test_S11_stale_knowledge_requires_understand(self):
         write_submit_host(self.host, maintenance=["NEEDS_REFRESH"])
@@ -761,11 +767,15 @@ class P8SubmitTests(unittest.TestCase):
         write_submit_host(self.host)
         (self.host / "src/app.py").unlink()
         result = run_submit(self.host, task_id=TASK_A)
-        self.assertEqual(result.next_route, "human")
-        self.assertIsNone(result.extras.get("repair_handoff"))
-        self.assertFalse(result.extras["capabilities"]["commit"])
-        self.assertFalse(result.extras["capabilities"]["push"])
-        self.assertFalse(result.extras["capabilities"]["submit_authorized"])
+        # R8 FND-B remediation: the deterministic single-Stage handoff now
+        # exists, but it still must not escalate any permission.
+        self.assertEqual(result.next_route, "develop.repair")
+        handoff = result.extras.get("repair_handoff")
+        self.assertIsNotNone(handoff)
+        self.assertFalse(handoff.get("submit_authorized"))
+        self.assertFalse(handoff.get("capabilities", {}).get("commit"))
+        self.assertFalse(handoff.get("capabilities", {}).get("push"))
+        self.assertFalse(handoff.get("capabilities", {}).get("submit_authorized"))
 
     def test_package_identity(self):
         pkg = load_package(REPO_SUBMIT)

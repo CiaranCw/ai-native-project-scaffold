@@ -416,7 +416,7 @@ class FA2ReauditTrancheATests(unittest.TestCase):
         self.assertEqual(map_repair_target_stage_ids(one, fail_ids=["unit"]), [])
         self.assertEqual(
             map_repair_target_stage_ids(one, missing_source=["src/app.py"]),
-            [],
+            ["stage-1"],
         )
         two = {
             "record_id": TASK_A,
@@ -428,6 +428,10 @@ class FA2ReauditTrancheATests(unittest.TestCase):
         self.assertEqual(map_repair_target_stage_ids(two, fail_ids=["unit"]), [])
         self.assertEqual(
             map_repair_target_stage_ids(two, missing_source=["src/app.py"]),
+            [],
+        )
+        self.assertEqual(
+            map_repair_target_stage_ids(two, undeclared=["src/app.py"]),
             [],
         )
 

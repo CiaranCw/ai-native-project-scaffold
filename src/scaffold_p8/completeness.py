@@ -178,6 +178,10 @@ def evaluate_completeness(
     elif not used_report or not test_complete:
         route = "test.scoped_verification"
 
+    authority_blockers = _required_authority_guidance(
+        used_report, completeness
+    )
+
     return {
         "test_pass": test_pass,
         "test_complete": test_complete,
@@ -202,7 +206,49 @@ def evaluate_completeness(
         "required_fail_ids": required_fail_ids,
         "required_fail_profile_ids": sorted(fail_profile_ids),
         "blockers": sorted(set(trust_blockers + coverage_blockers)),
+        "authority_blockers": authority_blockers,
     }
+
+
+def _required_authority_guidance(
+    used_report: dict[str, Any] | None,
+    completeness: dict[str, Any],
+) -> list[str]:
+    """S5 usability guidance when the required set is not authoritative.
+
+    TEST_COMPLETE semantics are unchanged: ``required_set_authoritative is
+    not True`` still forces ``test_complete=False``. These diagnostics only
+    explain why Submit stopped at S5, which authority owns the correction,
+    and which grounded facts are missing.
+    """
+    if used_report is None:
+        return []
+    if completeness.get("required_set_authoritative") is True:
+        return []
+    policy = str(completeness.get("required_policy") or "UNKNOWN")
+    required_total = completeness.get("required_total")
+    guidance = [
+        "TEST_COMPLETE is false because the required Test set is not "
+        f"authoritative (report required_policy is {policy}); S5 cannot "
+        "verify completeness against an ungrounded required set",
+        "required-set authority lives in .scaffold/tests.yaml, which is "
+        "GENERATED and maintained only by Understand Refresh; Develop and "
+        "Submit must not hand-edit it",
+    ]
+    if required_total == 0:
+        guidance.append(
+            "this report declares an empty required set without top-level "
+            "required_authority: VERIFIED; record the grounded zero-required "
+            "fact (or the grounded required profiles) in tests.yaml through "
+            "Understand Refresh, rerun Test, then resubmit"
+        )
+    else:
+        guidance.append(
+            "tests.yaml currently carries no VERIFIED required-authority "
+            "facts; run Understand Refresh to ground the required profiles, "
+            "rerun Test, then resubmit"
+        )
+    return guidance
 
 
 def _consume_published_report_for_task(

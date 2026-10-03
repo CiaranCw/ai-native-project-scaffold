@@ -368,6 +368,15 @@ def replace_managed_region(text: str, region_id: str, inner: str) -> str | None:
     return text[:start] + block + text[end:]
 
 
+def agents_router_region_text() -> str:
+    """Canonical ``agents-router`` slice, including its markers.
+
+    This is the region ``integrated_agents_text`` writes. The newline after
+    the end marker is framing around the slice, not part of the region bytes.
+    """
+    return _region_block().rstrip("\n")
+
+
 def _region_block() -> str:
     return f"{REGION_START}\n{GENERATED_AGENTS.strip()}\n{REGION_END}\n"
 
@@ -406,6 +415,16 @@ def _human_surface(text: str, spans: dict[str, tuple[int, int]]) -> str:
         cursor = end
     pieces.append(text[cursor:])
     return "".join(pieces)
+
+
+def human_surface(text: str, spans: dict[str, tuple[int, int]]) -> str:
+    """Human-owned text with each managed span removed.
+
+    Spans are walked individually, so text between two regions stays in the
+    surface. This does not collapse regions to one min/max range and does
+    not normalize whitespace.
+    """
+    return _human_surface(text, spans)
 
 
 def _anti_integration(text: str) -> bool:

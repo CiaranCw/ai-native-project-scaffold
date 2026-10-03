@@ -28,6 +28,23 @@ INVENTORY_SKIP_DIRS = frozenset(
     {".git", ".scaffold", "__pycache__", "test-runs"}
 )
 
+# Session provenance only. These names cannot reasonably carry Task product
+# bytes. This is narrower than the P5 metadata/adoption exclusion set:
+# dist, build, out, target, vendor, coverage, and cache stay inventoried.
+# Directory matching is any path component, case-insensitive, and is shared
+# by the live walk and legacy inventory normalization.
+SESSION_PROVENANCE_EXCLUDED_DIRS = frozenset(
+    {
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".venv",
+        "venv",
+    }
+)
+SESSION_PROVENANCE_EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
+
 
 def operational_project_name(
     project: dict[str, Any] | None,
@@ -363,17 +380,17 @@ def execution_workspace_digests(root: str | Path) -> dict[str, str]:
     if not host.is_dir():
         return out
     for dirpath, dirnames, filenames in os.walk(host, followlinks=False):
-        dirnames[:] = [
-            name
-            for name in dirnames
-            if name not in INVENTORY_SKIP_DIRS and not name.endswith(".egg-info")
-        ]
         rel_dir = Path(dirpath).relative_to(host).as_posix()
         if rel_dir == ".":
             rel_dir = ""
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not session_provenance_excluded(
+                f"{rel_dir}/{name}" if rel_dir else name
+            )
+        ]
         for name in filenames:
-            if name.endswith((".pyc", ".pyo")):
-                continue
             rel = name if not rel_dir else f"{rel_dir}/{name}"
             rel = rel.replace("\\", "/")
             if _inventory_skipped(rel, host):
@@ -439,15 +456,48 @@ def load_open_inventory(directory: Path) -> dict[str, str] | None:
         digest = str(row.get("digest") or "").strip()
         if rel and digest:
             out[rel] = digest
-    return out
+    return _canonical_inventory(out)
+
+
+def _canonical_inventory(inventory: dict[str, str]) -> dict[str, str]:
+    """Drop legacy rows the live walk can no longer observe.
+
+    The predicate is ``session_provenance_excluded``: any-depth directory
+    components, the same case folding, and the same file suffixes as the
+    walk. A row the walk cannot see is removed here so an exclusion-policy
+    upgrade cannot report it as a deletion. Product paths are kept.
+    """
+    return {
+        rel: digest
+        for rel, digest in inventory.items()
+        if not _inventory_skipped(rel, None)
+    }
+
+
+def session_provenance_excluded(rel: str) -> bool:
+    """True when Session provenance must not inventory this path.
+
+    Directory names match at any depth, case-insensitively. File suffixes
+    match the leaf only. ``.egg-info`` directories stay excluded. Product
+    output names such as ``dist`` and ``vendor`` are not in this set.
+    """
+    parts = [part for part in str(rel or "").replace("\\", "/").split("/") if part and part not in {".", ".."}]
+    if not parts:
+        return False
+    excluded_dirs = {
+        name.casefold()
+        for name in (INVENTORY_SKIP_DIRS | SESSION_PROVENANCE_EXCLUDED_DIRS)
+    }
+    for part in parts:
+        folded = part.casefold()
+        if folded in excluded_dirs or folded.endswith(".egg-info"):
+            return True
+    leaf = parts[-1].casefold()
+    return any(leaf.endswith(suffix) for suffix in SESSION_PROVENANCE_EXCLUDED_SUFFIXES)
 
 
 def _inventory_skipped(rel: str, root: Path | None = None) -> bool:
-    if rel in INVENTORY_SKIP_DIRS:
-        return True
-    if any(
-        rel == name or rel.startswith(name + "/") for name in INVENTORY_SKIP_DIRS
-    ):
+    if session_provenance_excluded(rel):
         return True
     return root is not None and is_client_support_path(root, rel)
 

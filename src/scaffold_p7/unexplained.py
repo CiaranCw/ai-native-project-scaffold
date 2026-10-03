@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from scaffold_p5.io_util import read_yaml, sha256_bytes, sha256_text, write_yaml_atomic
+from scaffold_p5.io_util import read_yaml, sha256_text, write_yaml_atomic
 from scaffold_p5.schemas import (
     COMPATIBILITY_BOUNDARY_GENERATION,
     CORE_MACHINE_ARTIFACTS,
@@ -219,76 +219,15 @@ def unexplained_matches_current(root: str | Path, rel: str) -> bool:
 
 
 def _install_managed_verified(root: Path, rel: str) -> bool:
-    """True only when the trusted Install Manifest attests these exact bytes.
+    """Same attestation as Structural Review's mixed-ownership verifier.
 
-    Install provenance is never inferred from path shape alone. A whole-file
-    MANAGED entry must digest-match; a mixed-ownership host file (AGENTS.md,
-    .gitattributes, hooks.json) is attested only by its managed region slice.
-    Anything unverifiable keeps the conservative unexplained classification.
+    Region identity is the canonical expected digest or a supported
+    predecessor. A rewritten install.yaml region digest is not sufficient,
+    and human bytes outside the managed slice stay visible.
     """
-    from scaffold_p5.consumer_install import (
-        current_manifest,
-        is_install_managed_path,
-        manifest_file_map,
-        _live_region_slice,
-        _manifest_format_ok,
-    )
+    from scaffold_p5.mixed_surface import install_managed_bytes_verified
 
-    normalized = rel.replace("\\", "/").strip("/")
-    if not is_install_managed_path(normalized):
-        return False
-    manifest = current_manifest(root)
-    if not isinstance(manifest, dict) or not _manifest_format_ok(manifest):
-        return False
-    path = root / normalized
-    if not path.is_file():
-        return False
-    if normalized in manifest_file_map(manifest):
-        try:
-            from scaffold_p5.io_util import file_digest
-
-            return manifest_file_map(manifest)[normalized] == file_digest(path)
-        except OSError:
-            return False
-    # Mixed-ownership host files: the manifest carries no whole-file digest.
-    # Verify the live managed-region slice against the canonical expectation.
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return False
-    slice_text, issues = _live_region_slice(normalized, text)
-    if issues or not slice_text:
-        return False
-    from scaffold_p5.consumer_install import (
-        expected_region_digest,
-        manifest_region_records,
-        REGION_HOST_PATHS,
-    )
-
-    if normalized not in REGION_HOST_PATHS:
-        # hooks.json fragments: attest by live scaffold fragment identity.
-        from scaffold_p5.first_use import inspect_scaffold_hook_fragment
-
-        try:
-            import json as _json
-
-            data = _json.loads(text)
-        except (ValueError, TypeError):
-            return False
-        fragment, frag_missing, frag_drifted, _frag_incompat = (
-            inspect_scaffold_hook_fragment(data)
-        )
-        return fragment is not None and not frag_missing and not frag_drifted
-    expected = expected_region_digest(normalized, host=root)
-    if expected is None:
-        return False
-    live = sha256_bytes(slice_text.encode("utf-8"))
-    if live == expected:
-        return True
-    for record in manifest_region_records(manifest):
-        if record["path"] == normalized and record["digest"] == live:
-            return True
-    return False
+    return install_managed_bytes_verified(root, rel)
 
 
 def unexplained_path_map(root: str | Path) -> dict[str, dict[str, Any]]:

@@ -7,6 +7,7 @@ from typing import Any
 
 UNRESOLVED_TARGET_MAPPING = "unresolved"
 EXECUTION_BINDING_MAPPING = "execution_binding"
+SINGLE_STAGE_MAPPING = "single_stage"
 
 
 def bound_test_profile_id(item: dict[str, Any]) -> str:
@@ -27,8 +28,16 @@ def map_repair_target_stage_ids(
     *,
     fail_ids: list[str] | None = None,
     missing_source: list[str] | None = None,
+    undeclared: list[str] | None = None,
 ) -> list[str]:
-    """Name Stages only when a blocker maps through execution_binding. Never guess."""
+    """Name Stages only through a deterministic mapping. Never guess.
+
+    A scope escape (missing scoped source or an undeclared changed path) maps
+    deterministically only when the Task Book has exactly one Stage: the
+    blocker cannot belong to any other Stage, so naming it invents no Stage
+    ownership. With more than one Stage the escape is ambiguous — no path or
+    module ownership is invented and the mapping stays unresolved.
+    """
     stages = [
         stage
         for stage in (task.get("stages") or [])
@@ -46,7 +55,9 @@ def map_repair_target_stage_ids(
                     mapped.append(str(stage["stage_id"]))
                     break
         return sorted(set(mapped))
-    if missing_source:
+    if missing_source or undeclared:
+        if len(stages) == 1:
+            return [str(stages[0]["stage_id"])]
         return []
     return []
 
@@ -82,6 +93,7 @@ def attach_test_failure_targets(
     *,
     task: dict[str, Any] | None,
     test_result: Any = None,
+    undeclared: list[str] | None = None,
 ) -> dict[str, Any]:
     """Add deterministic target_stage_ids when execution_binding mapping exists."""
     updated = dict(payload)
@@ -91,7 +103,9 @@ def attach_test_failure_targets(
     if task is None:
         updated["target_mapping"] = UNRESOLVED_TARGET_MAPPING
         return updated
-    targets = map_repair_target_stage_ids(task, fail_ids=fail_ids)
+    targets = map_repair_target_stage_ids(
+        task, fail_ids=fail_ids, undeclared=undeclared
+    )
     if targets:
         updated["target_stage_ids"] = targets
         updated["target_mapping"] = EXECUTION_BINDING_MAPPING

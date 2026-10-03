@@ -28,6 +28,10 @@ INSTALL_PREFIX = ".scaffold/install/"
 SUBMIT_EXT_PREFIX = ".scaffold/ext/submit/"
 DEVELOP_EXT_PREFIX = ".scaffold/ext/develop/"
 MIXED_OWNERSHIP_PATHS = frozenset({"AGENTS.md", ".gitattributes"})
+# Install-only Scaffold bytes on these hosts are omitted from the candidate
+# when the shared human surface matches HEAD. Generation-2 digest projection
+# stays limited to MIXED_OWNERSHIP_PATHS.
+_SURFACE_NEUTRAL_PATHS = MIXED_OWNERSHIP_PATHS | {".cursor/hooks.json"}
 _PROJECTION_GENERATIONS = frozenset(
     {PROJECTION_GENERATION_LEGACY, PROJECTION_GENERATION_CURRENT}
 )
@@ -556,7 +560,7 @@ def _git_dirty_paths(
                 continue
             if (
                 generation == PROJECTION_GENERATION_CURRENT
-                and path in MIXED_OWNERSHIP_PATHS
+                and path in _SURFACE_NEUTRAL_PATHS
                 and _mixed_projection_matches_head(root, scm, path)
             ):
                 continue
@@ -603,10 +607,36 @@ def tracked_mixed_matches_head(root: str | Path, rel: str) -> bool:
 
 
 def _mixed_projection_matches_head(root: Path, scm: ScmObservation, rel: str) -> bool:
-    """True when a dirty tracked file differs from HEAD only in neutral regions."""
-    worktree = _projected_mixed_digest(root / rel, rel)
-    head = _head_projected_digest(scm, rel)
-    return bool(worktree) and worktree == head
+    """True when a dirty tracked file differs from HEAD only in neutral regions.
+
+    The comparison uses the shared mixed-ownership human surface, so an
+    installer-appended managed region and its separator newline agree with
+    HEAD while a real human-byte edit does not.
+    """
+    from scaffold_p5.mixed_surface import human_owned_surface_matches
+
+    try:
+        live = (root / rel).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    head = _head_text(scm, rel)
+    if head is None:
+        return False
+    return human_owned_surface_matches(rel, live, head)
+
+
+def _head_text(scm: ScmObservation, rel: str) -> str | None:
+    if scm.worktree_root is None or not scm.revision:
+        return None
+    prefix = scm.project_prefix.strip("/")
+    git_path = rel if prefix in {"", "."} else prefix + "/" + rel
+    result = _run_git_bytes(scm.worktree_root, "show", f"{scm.revision}:{git_path}")
+    if not result.ok:
+        return None
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeError:
+        return None
 
 
 def _head_projected_digest(scm: ScmObservation, rel: str) -> str | None:
