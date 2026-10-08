@@ -20,7 +20,9 @@ Understand bootstrap applies that exact Adoption Plan. `--approved
 Only Git Commit and Git Push require a current explicit user instruction.
 After Adoption, ordinary in-project build/test/lint/SCM-inspection commands
 are autonomous; editor file mutation still needs a current Develop Task and
-OPEN Session. On Cursor-profile installs, Trusted-workspace project hooks
+OPEN Session. The one pre-session exception is writing
+`.scaffold/transport/develop-intake.json`, then
+`python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json`. On Cursor-profile installs, Trusted-workspace project hooks
 are a client adapter, not Core authority. See
 [CONSUMER_INSTALLATION.md](CONSUMER_INSTALLATION.md) and
 [implementation/FIRST_USE_ENFORCEMENT_DESIGN.md](implementation/FIRST_USE_ENFORCEMENT_DESIGN.md).

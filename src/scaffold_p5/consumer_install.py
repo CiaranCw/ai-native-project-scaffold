@@ -308,15 +308,19 @@ product or supporting scope, and close with `develop seal` or `develop abort`.
 Run:
 
 ```text
-python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>
+python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json
 python .scaffold/install/run.py develop session --task-id <task-id>
 python .scaffold/install/run.py develop bind --task-id <task-id> --requirement-id <id> --profile-id <id>
 python .scaffold/install/run.py develop complete --task-id <task-id> --complete-json-b64 <envelope>
 python .scaffold/install/run.py develop seal --task-id <task-id>
 ```
 
-`--intake-json-b64` carries the structured Task proposal required by
-Develop intake. `develop bind` publishes a grounded `test_profile`
+Before a Develop Session exists, write the Intake JSON envelope to exactly
+`.scaffold/transport/develop-intake.json`. That one editor write is allowed
+and is transport only. Product source stays blocked until Task and Session
+authority exist. `--intake-json-file` reads that canonical path.
+`--intake-json-b64` remains accepted when the payload is already one literal
+token. Do not calculate base64. `develop bind` publishes a grounded `test_profile`
 binding on an existing Task requirement through Task Book CAS; do not
 write `.scaffold/tasks/` directly. `develop complete` requests Test
 execution, Completion Decisions, Stage COMPLETE, and Task
@@ -960,6 +964,70 @@ def plan_consumer_install(
     return plan
 
 
+def _update_currentness_blockers(host: Path, plan: InstallPlan) -> list[str]:
+    """Refuse an update that would leave a current SATISFIED decision stale.
+
+    The planned bytes come from the Distribution plan already on ``plan``.
+    Live runtime generators and ``install.yaml`` are not a trust root. An
+    update with no generation-2-visible delta is allowed, including an
+    adopted host whose project authority already omits ``.cursor/``.
+    """
+    if plan.mode != "update":
+        return []
+    from scaffold_p6.candidate import generation2_byte_delta, observe_candidate
+    from scaffold_p7.lifecycle import decision_is_satisfied_current
+
+    replacements: dict[str, bytes] = {}
+    missing: list[str] = []
+    known = {row.rel.replace("\\", "/"): row.data for row in plan.files}
+    for rel in list(plan.modified) + list(plan.added):
+        normalized = rel.replace("\\", "/")
+        if normalized in known:
+            replacements[normalized] = known[normalized]
+        else:
+            missing.append(normalized)
+    delta = generation2_byte_delta(host, replacements, tuple(plan.removed))
+    delta.extend(path for path in missing if path not in delta)
+    if not delta:
+        return []
+    live = observe_candidate(host)
+    if not live.usable or not live.digest:
+        return []
+    if not _has_current_satisfied_decision(host, live.digest, decision_is_satisfied_current):
+        return []
+    shown = ", ".join(delta[:8])
+    extra = "" if len(delta) <= 8 else f" (+{len(delta) - 8} more)"
+    return [
+        "consumer update would change the generation-2 candidate while a "
+        "SATISFIED Completion Decision is current; refusing before any "
+        f"install write ({shown}{extra})"
+    ]
+
+
+def _has_current_satisfied_decision(host: Path, live_digest: str, current) -> bool:
+    tasks = host / ".scaffold" / "tasks"
+    if not tasks.is_dir():
+        return False
+    for path in sorted(tasks.glob("*.yaml")):
+        try:
+            task = yaml_lite.load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, TypeError):
+            continue
+        if not isinstance(task, dict):
+            continue
+        decisions: list[Any] = []
+        task_decision = task.get("task_completion_decision")
+        if isinstance(task_decision, dict):
+            decisions.append(task_decision)
+        for stage in task.get("stages") or []:
+            if isinstance(stage, dict) and isinstance(stage.get("completion_decision"), dict):
+                decisions.append(stage["completion_decision"])
+        for decision in decisions:
+            if current(decision, live_digest, root=host):
+                return True
+    return False
+
+
 def apply_consumer_install(plan: InstallPlan) -> dict[str, Any]:
     if not plan.allowed:
         return {
@@ -971,6 +1039,18 @@ def apply_consumer_install(plan: InstallPlan) -> dict[str, Any]:
     (host / ".scaffold").mkdir(parents=True, exist_ok=True)
     from scaffold_p6.projection import establish_projection_migration
 
+    currentness_blockers = _update_currentness_blockers(host, plan)
+    if currentness_blockers:
+        return {
+            "outcome": "BLOCKED",
+            "mode": plan.mode,
+            "added": [],
+            "modified": [],
+            "unchanged": [],
+            "removed": [],
+            "verify": verify_consumer_install(host),
+            "blockers": currentness_blockers,
+        }
     migration = establish_projection_migration(host, automatic=True)
     if not migration.get("ok"):
         return {
@@ -1179,7 +1259,14 @@ def verify_consumer_install(host: str | Path) -> dict[str, Any]:
         status = VERIFY_INCOMPLETE
     elif drifted:
         status = VERIFY_DRIFTED
-    elif skill_issues or adapter_issues or rule_issues or gitattr_incompat or abs_hits or reasons:
+    elif (
+        skill_issues
+        or adapter_issues
+        or rule_issues
+        or gitattr_incompat
+        or abs_hits
+        or reasons
+    ):
         status = VERIFY_INCOMPATIBLE
     else:
         status = VERIFY_VALID
@@ -1460,6 +1547,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-digest", dest="plan_digest", default=None)
     parser.add_argument("--intake-json", default=None)
     parser.add_argument("--intake-json-b64", default=None)
+    parser.add_argument("--intake-json-file", default=None)
     parser.add_argument("--action", default=None)
     parser.add_argument("--new-expected", dest="new_expected", default=None)
     parser.add_argument("--new-expected-b64", dest="new_expected_b64", default=None)
@@ -1475,14 +1563,14 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         (args.command == "enter" and (args.mode or "") == "develop")
         or (args.command == "develop" and (args.mode or "") == "intake")
     )
-    if (args.intake_json or args.intake_json_b64) and not intake_allowed:
+    if _has_intake_cli_transport(args) and not intake_allowed:
         print(
             json.dumps(
                 {
                     "outcome": "BLOCKED",
                     "blockers": [
-                        "--intake-json / --intake-json-b64 is only valid on "
-                        "enter develop or develop intake"
+                        "--intake-json / --intake-json-b64 / --intake-json-file "
+                        "is only valid on enter develop or develop intake"
                     ],
                 },
                 indent=2,
@@ -1587,12 +1675,9 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         return 0
     if args.command == "enter":
         from scaffold_entry import enter_project
-        from scaffold_p7.intake import load_intake_envelope_flags
 
         kind = args.mode or "status"
-        envelope, envelope_error = load_intake_envelope_flags(
-            args.intake_json, args.intake_json_b64
-        )
+        envelope, envelope_error = _load_installed_intake_envelope(target, args)
         if envelope_error:
             print(
                 json.dumps(
@@ -1613,6 +1698,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             if args.task_id:
                 structured["task_id"] = args.task_id
             result = enter_project(target, structured_intent=structured)
+        _consume_intake_staging_after_publication(target, args, result)
         print(json.dumps(result if isinstance(result, dict) else result_dict(result), indent=2, default=str))
         return 0
     dist = load_installed_distribution(target)
@@ -1649,7 +1735,6 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     package = target / ".scaffold" / "install" / "packages" / args.command
     if args.command == "develop":
         from scaffold_p7.engine import DevelopEngine, load_complete_envelope_flags
-        from scaffold_p7.intake import load_intake_envelope_flags
 
         engine = DevelopEngine(
             target,
@@ -1657,9 +1742,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
         )
         mode = args.mode or "normal_task"
         if mode == "intake":
-            envelope, envelope_error = load_intake_envelope_flags(
-                args.intake_json, args.intake_json_b64
-            )
+            envelope, envelope_error = _load_installed_intake_envelope(target, args)
             if envelope_error:
                 print(
                     json.dumps(
@@ -1674,8 +1757,8 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                         {
                             "outcome": "BLOCKED",
                             "blockers": [
-                                "develop intake requires --intake-json or "
-                                "--intake-json-b64"
+                                "develop intake requires --intake-json, "
+                                "--intake-json-b64, or --intake-json-file"
                             ],
                         },
                         indent=2,
@@ -1687,6 +1770,7 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                 proposal=envelope["proposal"],
                 grounding=envelope["grounding"],
             )
+            _consume_intake_staging_after_publication(target, args, result)
         elif mode == "session":
             result = engine.open_develop_session(task_id=args.task_id)
         elif mode == "bind":
@@ -1752,6 +1836,69 @@ def _print_installed_blocked(blockers: list[str]) -> int:
     return 1
 
 
+def _has_intake_cli_transport(args: argparse.Namespace) -> bool:
+    return bool(args.intake_json or args.intake_json_b64 or args.intake_json_file)
+
+
+def _load_installed_intake_envelope(
+    host: Path,
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve one public Intake transport through the existing envelope parser."""
+    from scaffold_p7.intake import load_intake_envelope_flags, read_intake_staging_file
+
+    selected = [
+        name
+        for name, present in (
+            ("--intake-json", args.intake_json),
+            ("--intake-json-b64", args.intake_json_b64),
+            ("--intake-json-file", args.intake_json_file),
+        )
+        if present
+    ]
+    if len(selected) > 1:
+        return None, (
+            "provide only one of --intake-json, --intake-json-b64, "
+            "or --intake-json-file"
+        )
+    if args.intake_json_file:
+        text, error = read_intake_staging_file(host, args.intake_json_file)
+        if error:
+            return None, error
+        if not str(text or "").strip():
+            return None, "intake JSON is not parseable"
+        envelope, error = load_intake_envelope_flags(text, None)
+        if error:
+            return None, error
+        if envelope is None:
+            return None, "intake JSON is not parseable"
+        return envelope, None
+    return load_intake_envelope_flags(args.intake_json, args.intake_json_b64)
+
+
+def _published_intake_task(result: Any) -> dict[str, Any] | None:
+    extras = result.get("extras") if isinstance(result, dict) else getattr(result, "extras", None)
+    if not isinstance(extras, dict):
+        return None
+    task = extras.get("task")
+    if isinstance(task, dict) and str(task.get("record_id") or "").strip():
+        return task
+    return None
+
+
+def _consume_intake_staging_after_publication(
+    host: Path,
+    args: argparse.Namespace,
+    result: Any,
+) -> None:
+    """Delete the staging file only after a Task record exists."""
+    if not args.intake_json_file or _published_intake_task(result) is None:
+        return
+    from scaffold_p7.intake import consume_intake_staging_file
+
+    consume_intake_staging_file(host)
+
+
 def _run_installed_consumer(
     implicit_host: Path,
     args: argparse.Namespace,
@@ -1778,6 +1925,7 @@ def _run_installed_consumer(
             or args.new_expected_b64
             or args.intake_json
             or args.intake_json_b64
+            or args.intake_json_file
             or args.requirement_id
             or args.profile_id
             or args.kind

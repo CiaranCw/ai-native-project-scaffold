@@ -58,23 +58,28 @@ Ordinary in-project development commands are autonomous after Adoption.
 The shell adapter is not a package-manager or project-command allowlist.
 Agents may run local build, test, lint, typecheck, package-manager scripts,
 tool/version inspection, and SCM inspection without predeclaring them in
-`commands.yaml` and without a Develop Session. The gate denies only hard
+`commands.yaml` and without a Develop Session. The gate denies hard
 boundaries: workspace escape, protected Scaffold governance mutation,
 destructive or history-rewriting SCM, irrecoverable deletion, inline eval,
-and prohibited security/attack operations. Git Commit and Git Push remain
+prohibited security/attack operations, command chaining, redirection,
+here-strings, and PowerShell subexpressions. Git Commit and Git Push remain
 separate publication operations. Fail-closed hook/lifecycle errors must
 describe undetermined host state; they must not claim the host is
 unadopted.
 
-The installed Consumer establishes first Task authority through:
+The installed Consumer establishes first Task authority through the
+pre-session staging file `.scaffold/transport/develop-intake.json` and:
 
-`python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>`
+`python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json`
 
-or `python .scaffold/install/run.py develop intake --intake-json-b64 <envelope>`.
-That envelope is the structured proposal `DevelopEngine.intake` requires.
-`--intake-json` is also accepted. Bare `enter develop` without a proposal
-fails closed. Intake creates no Develop Session and does not transition
-Stage merely to manufacture editor authority. After Task publication, the
+or `python .scaffold/install/run.py develop intake --intake-json-file .scaffold/transport/develop-intake.json`.
+That file is the only editor write allowed before Develop authority exists.
+It is transport, not product authority. The runner feeds it through the
+existing `DevelopEngine.intake` parser. `--intake-json-b64` remains accepted
+when the token is already literal. `--intake-json` is also accepted and does
+not read a file. Bare `enter develop` without a proposal fails closed.
+Intake creates no Develop Session and does not transition Stage merely to
+manufacture editor authority. After Task publication, the
 installed Consumer opens execution with
 `python .scaffold/install/run.py develop session --task-id <task-id>` and
 closes it with `develop seal` or `develop abort`. Do not write
@@ -204,9 +209,16 @@ While `ACTIVE` / `ESTABLISHED_HOST` without current Develop authority:
 - Official launcher commands for `understand`, `develop`, `test`, `submit`,
   `enter`, `status`, `verify`, and `first-use` remain ALLOW so the Agent can
   establish Task Book and Session authority, including
-  `enter develop --intake-json-b64` and `develop intake --intake-json-b64`.
-- Direct Write / Delete / StrReplace / arbitrary Shell / Task / unknown MCP
-  remain DENY until the current Task/Stage/Session tuple exists. Then editor
+  `enter develop --intake-json-file .scaffold/transport/develop-intake.json`
+  and the same flag on `develop intake`. Literal `--intake-json-b64` remains
+  allowed. `--intake-json-file` does not exempt shell metacharacters.
+- Direct Write / Delete / StrReplace of product source, tests, tools,
+  `AGENTS.md`, `.cursor` governance, and `.scaffold` lifecycle paths remain
+  DENY. The only pre-session editor exception is creating or updating
+  exactly `.scaffold/transport/develop-intake.json`. Delete of that file is
+  not an Agent bypass; the runner consumes it after Task publication.
+  Arbitrary Shell / Task / unknown MCP remain DENY until the current
+  Task/Stage/Session tuple exists. Then editor
   mutation is authorized only for targets inside that Task's product or
   supporting scope after an explicit current execution pointer is bound.
   `preToolUse` authorizes the attempt and records a pending mutation

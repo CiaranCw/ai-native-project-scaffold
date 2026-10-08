@@ -14,7 +14,27 @@
 
 ## 1. Develop Intake Envelope（任务发布信封）
 
-命令：
+零上下文命令（不需要手工 base64，也不依赖 PowerShell 引号）：
+
+1. 在 Task 与 Develop Session 出现之前，唯一允许的编辑器写入是这份非权威暂存文件：`.scaffold/transport/develop-intake.json`。它不是产品源码权限，不是 Task Book，也不是 Session。
+2. 把下面的 JSON 对象按 UTF-8 原样写入该路径。
+3. 运行：
+
+```text
+python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json
+```
+
+等价：
+
+```text
+python .scaffold/install/run.py develop intake --intake-json-file .scaffold/transport/develop-intake.json
+```
+
+产品源码、测试、工具、`AGENTS.md`、`.cursor` 治理以及其它 `.scaffold` 生命周期路径在 Task + Session 权威出现之前仍然拒绝。校验失败不发布 Task、不创建 Session、不把暂存文件变成权威。校验通过并发布 Task 之后，运行器消费并删除该暂存文件。Intake 仍然不创建 Develop Session。
+
+已是单个字面量 token 时，`--intake-json-b64 <envelope>` 继续可用。`--intake-json` 的含义不变，它不读取文件。
+
+兼容命令：
 
 ```text
 python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>

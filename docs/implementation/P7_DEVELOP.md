@@ -83,11 +83,16 @@ unchanged. No version-number-only compatibility rule is used.
 Installed structured intake transport:
 
 ```text
-python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>
-python .scaffold/install/run.py develop intake --intake-json-b64 <envelope>
+python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json
+python .scaffold/install/run.py develop intake --intake-json-file .scaffold/transport/develop-intake.json
 ```
 
-`--intake-json` is also accepted. These flags are valid only on those two
+The canonical staging file is `.scaffold/transport/develop-intake.json`.
+Before Develop authority exists, the Cursor write gate allows only that
+exact file. The runner accepts only that relative path, reads UTF-8 JSON,
+and uses the existing envelope parser. A published Task consumes the file.
+Invalid input publishes nothing and leaves no Session. `--intake-json` and
+`--intake-json-b64` remain accepted. These flags are valid only on those two
 positionals.
 
 ## Develop execution window
@@ -368,9 +373,12 @@ authority. A missing project-local `file_artifact` locator fails closed.
 Opaque Human/CI/External locators that are not host files keep existing
 P6 semantics.
 
-Installed Consumer first-Task creation uses
-`python .scaffold/install/run.py enter develop --intake-json-b64 <envelope>`
-(or `develop intake`). Intake creates no Develop Session. Execution uses
+Installed Consumer first-Task creation writes
+`.scaffold/transport/develop-intake.json`, then runs
+`python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json`
+(or `develop intake --intake-json-file` with that path). Literal
+`--intake-json-b64` remains accepted. Intake creates no Develop Session.
+Execution uses
 `develop session --task-id`, then Cursor mutation checks the current
 execution Session, Task, mutable Stage, and shared path authority. Close
 with `develop seal` or `develop abort`. An OPEN Session is not a

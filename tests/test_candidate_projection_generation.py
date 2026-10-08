@@ -505,6 +505,10 @@ class PublishedBoundaryTests(unittest.TestCase):
         )
         subprocess.check_call(["tar", "-xf", str(archive), "-C", str(base)])
         (base / "docs").mkdir(exist_ok=True)
+        # This overlay is already in the published baseline 2e3b864.
+        # 79755b15 does not carry the later public lifecycle reference the
+        # installer requires. The installed path is under .scaffold/install/docs,
+        # which generation 2 excludes as install infrastructure.
         shutil.copy2(
             REPO / "docs" / "PUBLIC_LIFECYCLE_REFERENCE.md",
             base / "docs" / "PUBLIC_LIFECYCLE_REFERENCE.md",
@@ -557,13 +561,26 @@ class PublishedBoundaryTests(unittest.TestCase):
         book["stages"][0]["completion_decision"]["candidate_digest"] = legacy.digest
         book["task_completion_decision"]["candidate_digest"] = legacy.digest
         _write(task_path, yaml_lite.dump(book))
-        code = distribution_cli(
-            ["update", "--host", str(host), "--distribution", str(REPO)]
+        before_rule = (host / ".cursor/rules/scaffold-first-use.mdc").read_bytes()
+        before_adapter = (
+            host / ".cursor/skills/scaffold-develop/SKILL.md"
+        ).read_bytes()
+        pre = observe_candidate(host)
+        plan = plan_consumer_install(host, REPO, mode="update")
+        self.assertTrue(plan.allowed, plan.blockers)
+        result = apply_consumer_install(plan)
+        self.assertEqual(result["outcome"], "BLOCKED", result.get("blockers"))
+        self.assertEqual(
+            (host / ".cursor/rules/scaffold-first-use.mdc").read_bytes(),
+            before_rule,
         )
-        self.assertEqual(code, 0)
-        self.assertEqual(len(list(migration_dir(host).glob("*.yaml"))), 1)
+        self.assertEqual(
+            (host / ".cursor/skills/scaffold-develop/SKILL.md").read_bytes(),
+            before_adapter,
+        )
+        self.assertEqual(list(migration_dir(host).glob("*.yaml")), [])
         live = observe_candidate(host)
-        self.assertEqual(live.data.get("projection_generation"), PROJECTION_GENERATION_CURRENT)
+        self.assertEqual(live.digest, pre.digest)
         report = {"candidate": {"candidate_digest": legacy.digest}}
         self.assertTrue(report_usable_for(report, live))
         self.assertTrue(
@@ -586,12 +603,13 @@ class PublishedBoundaryTests(unittest.TestCase):
             root=host,
         )
         self.assertTrue(ready, reason)
-        before = list(migration_dir(host).glob("*.yaml"))
-        code = distribution_cli(
-            ["update", "--host", str(host), "--distribution", str(REPO)]
+        again = apply_consumer_install(plan)
+        self.assertEqual(again["outcome"], "BLOCKED", again.get("blockers"))
+        self.assertEqual(list(migration_dir(host).glob("*.yaml")), [])
+        self.assertEqual(
+            (host / ".cursor/rules/scaffold-first-use.mdc").read_bytes(),
+            before_rule,
         )
-        self.assertEqual(code, 0)
-        self.assertEqual(list(migration_dir(host).glob("*.yaml")), before)
         self.assertTrue(report_usable_for(report, observe_candidate(host)))
 
 

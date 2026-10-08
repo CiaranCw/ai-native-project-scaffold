@@ -196,6 +196,16 @@ def digest_is_current(
     return False
 
 
+def _projection_omitted(root: Path | None, path: str) -> bool:
+    """Generation-2 omission is install infrastructure only.
+
+    Client-delivery bytes are not omitted because a live runtime generator
+    agrees with them. ``root`` is unused; callers still pass the host.
+    """
+    del root
+    return is_install_infrastructure(path)
+
+
 def _creation_equivalent(
     root: Path,
     source_body: dict[str, Any],
@@ -256,7 +266,7 @@ def _paths_match_projection(
     if not isinstance(source_rows, list) or not isinstance(target_rows, list):
         return False
     if any(
-        isinstance(row, dict) and is_install_infrastructure(str(row.get("path") or ""))
+        isinstance(row, dict) and _projection_omitted(root, str(row.get("path") or ""))
         for row in target_rows
     ):
         return False
@@ -265,7 +275,7 @@ def _paths_match_projection(
         if not isinstance(row, dict):
             return False
         path = str(row.get("path") or "")
-        if is_install_infrastructure(path):
+        if _projection_omitted(root, path):
             continue
         projected = dict(row)
         if path in MIXED_OWNERSHIP_PATHS:
@@ -309,7 +319,7 @@ def _inventories_match_projection(
         row = source_inventory[path]
         if not isinstance(row, dict):
             return False
-        if is_install_infrastructure(path):
+        if _projection_omitted(root, path):
             continue
         projected = dict(row)
         if path in MIXED_OWNERSHIP_PATHS:
@@ -365,15 +375,21 @@ def _record_proof_issue(record: dict[str, Any], root: Path | None = None) -> str
     if not _bodies_structurally_related(source_body, target_body):
         return "body relation"
     if not _paths_structurally_related(
-        source_body.get("tracked_paths"), target_body.get("tracked_paths")
+        source_body.get("tracked_paths"),
+        target_body.get("tracked_paths"),
+        root,
     ):
         return "tracked paths"
     if not _paths_structurally_related(
-        source_body.get("untracked_paths"), target_body.get("untracked_paths")
+        source_body.get("untracked_paths"),
+        target_body.get("untracked_paths"),
+        root,
     ):
         return "untracked paths"
     if source_body.get("kind") == "none":
-        inventory_issue = _stored_inventory_issue(record, source_body, target_body)
+        inventory_issue = _stored_inventory_issue(
+            record, source_body, target_body, root
+        )
         if inventory_issue is not None:
             return "inventory: " + inventory_issue
     mixed_issue = _mixed_bytes_issue(
@@ -389,11 +405,16 @@ def _record_proof_issue(record: dict[str, Any], root: Path | None = None) -> str
     return None
 
 
-def _paths_structurally_related(source_rows: Any, target_rows: Any) -> bool:
+def _paths_structurally_related(
+    source_rows: Any,
+    target_rows: Any,
+    root: Path | None = None,
+) -> bool:
     if not isinstance(source_rows, list) or not isinstance(target_rows, list):
         return False
     if any(
-        isinstance(row, dict) and is_install_infrastructure(str(row.get("path") or ""))
+        isinstance(row, dict)
+        and _projection_omitted(root, str(row.get("path") or ""))
         for row in target_rows
     ):
         return False
@@ -401,7 +422,7 @@ def _paths_structurally_related(source_rows: Any, target_rows: Any) -> bool:
     for row in source_rows:
         if not isinstance(row, dict):
             return False
-        if is_install_infrastructure(str(row.get("path") or "")):
+        if _projection_omitted(root, str(row.get("path") or "")):
             continue
         filtered.append(row)
     target_clean = [row for row in target_rows if isinstance(row, dict)]
@@ -434,14 +455,16 @@ def _stored_inventories_related(
     record: dict[str, Any],
     source_body: dict[str, Any],
     target_body: dict[str, Any],
+    root: Path | None = None,
 ) -> bool:
-    return _stored_inventory_issue(record, source_body, target_body) is None
+    return _stored_inventory_issue(record, source_body, target_body, root) is None
 
 
 def _stored_inventory_issue(
     record: dict[str, Any],
     source_body: dict[str, Any],
     target_body: dict[str, Any],
+    root: Path | None = None,
 ) -> str | None:
     source_text = record.get("source_inventory_canonical")
     target_text = record.get("target_inventory_canonical")
@@ -454,11 +477,11 @@ def _stored_inventory_issue(
         return f"load: {exc}"
     if not isinstance(source_inventory, dict) or not isinstance(target_inventory, dict):
         return "shape"
-    if any(is_install_infrastructure(str(path)) for path in target_inventory):
-        return "install in target"
+    if any(_projection_omitted(root, str(path)) for path in target_inventory):
+        return "neutral path in target"
     filtered: dict[str, Any] = {}
     for path in sorted(source_inventory):
-        if is_install_infrastructure(str(path)):
+        if _projection_omitted(root, str(path)):
             continue
         filtered[str(path)] = source_inventory[path]
     target_paths = [str(path) for path in target_inventory]

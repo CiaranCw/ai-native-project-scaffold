@@ -712,6 +712,112 @@ def _now() -> str:
 
 INTAKE_B64_RE = re.compile(r"^[A-Za-z0-9+/_-]+=*$")
 
+# Non-authoritative pre-Develop transport. This path stays Scaffold authority
+# for every ordinary mutation check. The first-use gate's exact-file Write
+# exception does not reclassify it as product, Task, Session, or evidence.
+INTAKE_STAGING_REL = ".scaffold/transport/develop-intake.json"
+
+
+def canonical_intake_file_argument(raw: str | None) -> str | None:
+    """Return the staging path when ``raw`` is that exact relative token."""
+    text = str(raw or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        text = text[1:-1].strip()
+    text = text.replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    if not text or text.startswith("/") or text.startswith("~"):
+        return None
+    if len(text) >= 2 and text[1] == ":":
+        return None
+    parts = text.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return None
+    if text != INTAKE_STAGING_REL:
+        return None
+    return text
+
+
+def _path_is_link(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    try:
+        return bool(is_junction and is_junction())
+    except OSError:
+        return True
+
+
+def _intake_staging_destination(host: str | Path) -> tuple[Path | None, str | None]:
+    """Resolve the canonical staging file without following an escaping link."""
+    try:
+        host_root = Path(host).resolve()
+    except OSError:
+        return None, "intake staging path escapes the host"
+    current = host_root
+    for part in INTAKE_STAGING_REL.split("/"):
+        if _path_is_link(current):
+            return None, "intake staging path must not be a symlink"
+        current = current / part
+        if _path_is_link(current):
+            return None, "intake staging path must not be a symlink"
+    if current.exists():
+        try:
+            resolved = current.resolve()
+            relative = resolved.relative_to(host_root).as_posix()
+        except (OSError, ValueError):
+            return None, "intake staging path escapes the host"
+        if relative != INTAKE_STAGING_REL:
+            return None, "intake staging path escapes the host"
+    return current, None
+
+
+def read_intake_staging_file(
+    host: str | Path,
+    raw_argument: str | None,
+) -> tuple[str | None, str | None]:
+    """Read UTF-8 JSON text from the canonical staging file only."""
+    if canonical_intake_file_argument(raw_argument) is None:
+        return None, (
+            "intake file must be the canonical relative staging path "
+            f"{INTAKE_STAGING_REL}"
+        )
+    destination, error = _intake_staging_destination(host)
+    if error or destination is None:
+        return None, error or "intake staging path escapes the host"
+    if not destination.is_file():
+        return None, "intake staging file is missing"
+    try:
+        text = destination.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None, "intake staging file is not UTF-8 text"
+    except OSError:
+        return None, "intake staging file is not readable"
+    return text, None
+
+
+def consume_intake_staging_file(host: str | Path) -> None:
+    """Remove the staging file after a Task record has been published.
+
+    A symlink, an escaped path, or a delete failure leaves the file in place.
+    The file is not lifecycle authority either way.
+    """
+    destination, error = _intake_staging_destination(host)
+    if error or destination is None or not destination.is_file():
+        return
+    if _path_is_link(destination):
+        return
+    try:
+        destination.unlink()
+    except OSError:
+        return
+    parent = destination.parent
+    try:
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        return
+
 
 def load_intake_envelope_flags(
     json_text: str | None,

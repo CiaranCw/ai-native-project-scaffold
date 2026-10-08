@@ -43,6 +43,19 @@ Intake Skill results therefore report `mode: normal_task` with
 `extras.operation: task_intake`. They do not bind a Session, mutate source,
 invoke Test, authorize Submit, Commit, or Push.
 
+Zero-context Intake transport, before any Task or Develop Session exists:
+write the JSON envelope to exactly `.scaffold/transport/develop-intake.json`.
+That one editor write is allowed and is not product authority. Then run
+`python .scaffold/install/run.py enter develop --intake-json-file .scaffold/transport/develop-intake.json`
+or `python .scaffold/install/run.py develop intake --intake-json-file .scaffold/transport/develop-intake.json`.
+The runner reads that canonical file through the existing envelope parser,
+publishes a Task only when validation succeeds, creates no Session, and
+removes the staging file after publication. Product source stays blocked
+until an IN_PROGRESS Task, a mutable Stage, and an OPEN Session exist.
+`--intake-json-b64` remains accepted for an already-literal token.
+`--intake-json` is unchanged and does not read a file. Do not calculate
+base64 and do not assemble the envelope with shell quoting.
+
 Initial revision-1 publication is atomic and non-overwriting. Matching Tasks
 are status-aware: reuse `IN_PROGRESS`; activate `DRAFT` only through current
 grounded intent and expected revision; never reopen `READY_FOR_REVIEW` or

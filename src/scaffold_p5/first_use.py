@@ -154,6 +154,17 @@ NON_EDITOR_MUTATION_TOOLS = frozenset(
     }
 )
 EDITOR_MUTATION_TOOLS = MUTATION_TOOLS - NON_EDITOR_MUTATION_TOOLS
+INTAKE_STAGING_EDITOR_TOOLS = frozenset(
+    {
+        "Write",
+        "WriteFile",
+        "StrReplace",
+        "ApplyPatch",
+        "Edit",
+        "EditFile",
+        "MultiEdit",
+    }
+)
 PYTHON_NAMES = frozenset({"python", "python.exe", "python3", "python3.exe"})
 PLAN_DIGEST_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 INTAKE_B64_RE = re.compile(r"^[A-Za-z0-9+/_-]+=*$")
@@ -301,10 +312,20 @@ DEVELOP_DENY_MESSAGE = (
     "Project mutation is blocked because this ACTIVE host has no current "
     "Develop authority (IN_PROGRESS Task Book, mutable Stage, and OPEN "
     "Develop Session bound to that Task). "
-    "Run `python .scaffold/install/run.py enter develop --intake-json-b64 "
-    "<envelope>` to publish a bounded Task proposal through Develop intake. "
+    "Before that authority exists, the only editor write allowed is the "
+    "non-authoritative Intake staging file "
+    "`.scaffold/transport/develop-intake.json`. "
+    "Write the Intake JSON envelope to that exact path, then run "
+    "`python .scaffold/install/run.py enter develop --intake-json-file "
+    ".scaffold/transport/develop-intake.json` to publish a bounded Task "
+    "proposal. Intake creates no Develop Session. "
+    "`--intake-json-b64` remains accepted when the payload is already one "
+    "literal token. Do not calculate base64 and do not build the envelope "
+    "with shell quoting. "
     "Continue an existing Task with `python .scaffold/install/run.py develop "
     "session --task-id <task-id>`. "
+    "Product source, tests, tools, and every other path stay blocked until "
+    "Task and Session authority exist. "
     "Successful Adoption is not permission to edit HUMAN_OWNED project source. "
     "Do not implement the business task outside Develop, and do not write "
     ".scaffold/tasks/ directly."
@@ -353,15 +374,26 @@ Develop execution; it does not mean the host is unadopted.
 Ordinary in-project development commands are autonomous. They do not
 need to be predeclared in commands.yaml, and they do not require a
 Develop Session merely to inspect tools, run local build/test/lint/
-typecheck, or inspect SCM. The shell gate denies hard boundaries only:
+typecheck, or inspect SCM. The shell gate denies hard boundaries:
 writes outside this workspace, destructive or history-rewriting SCM,
 irrecoverable deletion, protected Scaffold governance mutation, inline
-eval, and prohibited security/attack operations. Git Commit and Git
-Push remain separate publication operations.
+eval, prohibited security/attack operations, command chaining,
+redirection, here-strings, and PowerShell subexpressions. Git Commit
+and Git Push remain separate publication operations. Do not build an
+Intake envelope on the command line.
 
-Required editor-mutation route: `python .scaffold/install/run.py enter
-develop --intake-json-b64 <envelope>`, then continue with
-`python .scaffold/install/run.py develop session --task-id <task-id>`.
+Before a Develop Session exists, write the Intake JSON object to exactly
+`.scaffold/transport/develop-intake.json`. That one staging write is
+allowed. It is transport only, not product authority, not a Task Book,
+and not a Session. Product source, tests, tools, `AGENTS.md`, `.cursor`
+governance, and every other `.scaffold` path stay blocked.
+
+Required route: `python .scaffold/install/run.py enter develop
+--intake-json-file .scaffold/transport/develop-intake.json`
+(or `develop intake --intake-json-file` with that same path). Intake
+creates no Develop Session. `--intake-json-b64 <envelope>` remains
+accepted when the payload is already one literal token. Then continue
+with `python .scaffold/install/run.py develop session --task-id <task-id>`.
 Zero-context resume is
 `python .scaffold/install/run.py understand refresh --action resume`.
 Bind an existing Task requirement with
@@ -701,6 +733,10 @@ def evaluate_cursor_hook(
     paths, path_error = _mutation_target_paths(data, host_root)
     if path_error and "outside the host" in path_error:
         return _deny(deny_message, reason=path_error, user_message=deny_user)
+    if _presession_intake_transport_write(authority, tool_name, paths, path_error):
+        return _allow(
+            "pre-session Develop intake transport write; not Develop product authority"
+        )
     if path_error:
         paths = []
     from scaffold_p7.develop_authority import authorize_mutation_paths
@@ -826,7 +862,7 @@ def classify_first_use_shell(
         raw = raw[2:].strip()
     if not raw:
         return SHELL_DENY, "empty shell command is not a first-use lifecycle command"
-    if "--intake-json" not in raw and SHELL_METACHAR_RE.search(raw):
+    if not _inline_intake_metachar_exemption(raw) and SHELL_METACHAR_RE.search(raw):
         return SHELL_DENY, "shell metacharacters are not allowed by the mutation gate"
     argv = _split_shell_argv(raw)
     if argv is None:
@@ -846,7 +882,7 @@ def classify_first_use_shell(
             allowed = _runner_argv_for_policy(gate)
             if positional not in allowed:
                 return SHELL_DENY, "shell command is not a first-use Scaffold lifecycle command"
-            if flags.get("intake_json") or flags.get("intake_json_b64"):
+            if _has_intake_transport(flags):
                 if positional not in INTAKE_POSITIONALS:
                     return (
                         SHELL_DENY,
@@ -1188,7 +1224,16 @@ def _default_deny_user_message(policy: str) -> str:
 def _shell_deny_agent_message(policy: str, lifecycle_message: str, detail: str) -> str:
     if policy == GATE_BOOTSTRAP:
         return lifecycle_message
-    return f"Scaffold blocked this shell command at a hard boundary: {detail}"
+    message = f"Scaffold blocked this shell command at a hard boundary: {detail}"
+    if policy == GATE_DEVELOP and _detail_needs_intake_transport_hint(detail):
+        message += (
+            " Write the Intake envelope to "
+            ".scaffold/transport/develop-intake.json and run "
+            "`python .scaffold/install/run.py enter develop --intake-json-file "
+            ".scaffold/transport/develop-intake.json`. "
+            "Do not build the envelope with shell quoting or base64."
+        )
+    return message
 
 
 def _shell_deny_user_message(policy: str, lifecycle_user: str) -> str:
@@ -1416,6 +1461,12 @@ def _split_runner_flags(
             flags["intake_json_b64"] = rest[i + 1]
             i += 2
             continue
+        if token == "--intake-json-file":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--intake-json-file requires the canonical staging path"
+            flags["intake_json_file"] = rest[i + 1]
+            i += 2
+            continue
         if token == "--action":
             if i + 1 >= len(rest):
                 return tuple(), flags, "--action requires a value"
@@ -1497,7 +1548,7 @@ def _consumer_flag_error(
             return "compatibility flags are only valid on understand compatibility"
         if flags.get("approved") or flags.get("plan_digest"):
             return "approval flags are only valid on Understand bootstrap"
-        if flags.get("intake_json") or flags.get("intake_json_b64"):
+        if _has_intake_transport(flags):
             return "intake JSON flags are only valid on enter develop or develop intake"
         if flags.get("requirement_id") or flags.get("profile_id") or flags.get("kind"):
             return "binding flags are only valid on develop bind"
@@ -1518,7 +1569,7 @@ def _consumer_flag_error(
             return "compatibility flags are only valid on understand compatibility"
         if flags.get("approved") or flags.get("plan_digest"):
             return "approval flags are only valid on Understand bootstrap"
-        if flags.get("intake_json") or flags.get("intake_json_b64"):
+        if _has_intake_transport(flags):
             return "intake JSON flags are only valid on enter develop or develop intake"
         if flags.get("requirement_id") or flags.get("profile_id") or flags.get("kind"):
             return "binding flags are only valid on develop bind"
@@ -1617,14 +1668,14 @@ def _lifecycle_flag_error(
     if has_complete and positional != COMPLETE_RUN_ARGV:
         return "completion flags are only valid on develop complete"
     if positional == BIND_RUN_ARGV:
-        if flags.get("intake_json") or flags.get("intake_json_b64"):
+        if _has_intake_transport(flags):
             return "intake JSON flags are only valid on enter develop or develop intake"
         kind = flags.get("kind")
         if kind is not None and kind != "test_profile":
             return "develop bind --kind must be test_profile"
         return None
     if positional == COMPLETE_RUN_ARGV:
-        if flags.get("intake_json") or flags.get("intake_json_b64"):
+        if _has_intake_transport(flags):
             return "intake JSON flags are only valid on enter develop or develop intake"
         if flags.get("complete_json") and flags.get("complete_json_b64"):
             return "provide only one of --complete-json or --complete-json-b64"
@@ -1635,9 +1686,76 @@ def _lifecycle_flag_error(
     return None
 
 
+def _inline_intake_metachar_exemption(raw: str) -> bool:
+    """Keep the existing inline JSON/base64 exemption.
+
+    ``--intake-json-file`` contains the substring ``--intake-json`` but is a
+    path transport. It must not exempt shell metacharacters.
+    """
+    if "--intake-json-file" in raw:
+        return False
+    return "--intake-json" in raw
+
+
+def _has_intake_transport(flags: dict[str, Any]) -> bool:
+    return bool(
+        flags.get("intake_json")
+        or flags.get("intake_json_b64")
+        or flags.get("intake_json_file")
+    )
+
+
+def _detail_needs_intake_transport_hint(detail: str) -> bool:
+    text = str(detail or "").lower()
+    return any(needle in text for needle in ("metacharacter", "intake", "base64"))
+
+
+def _presession_intake_transport_write(
+    authority: dict[str, Any],
+    tool_name: str,
+    paths: list[str],
+    path_error: str | None,
+) -> bool:
+    """Exact staging Write/Edit before Develop authority exists.
+
+    Transport only. Product paths, deletes, and every other Scaffold path
+    stay on the ordinary deny path.
+    """
+    if path_error or paths is None:
+        return False
+    if authority.get("required_route") != REQUIRED_ROUTE_DEVELOP:
+        return False
+    if str(authority.get("host_class") or "") != "ESTABLISHED_HOST":
+        return False
+    if tool_name not in INTAKE_STAGING_EDITOR_TOOLS:
+        return False
+    from scaffold_p7.intake import INTAKE_STAGING_REL
+
+    return paths == [INTAKE_STAGING_REL]
+
+
 def _intake_flag_error(flags: dict[str, Any]) -> str | None:
     json_text = flags.get("intake_json")
     b64_text = flags.get("intake_json_b64")
+    file_text = flags.get("intake_json_file")
+    selected = [item for item in (json_text, b64_text, file_text) if item]
+    if len(selected) > 1:
+        return (
+            "provide only one of --intake-json, --intake-json-b64, "
+            "or --intake-json-file"
+        )
+    if file_text is not None:
+        from scaffold_p7.intake import (
+            INTAKE_STAGING_REL,
+            canonical_intake_file_argument,
+        )
+
+        if canonical_intake_file_argument(str(file_text)) is None:
+            return (
+                "intake file must be the canonical relative staging path "
+                f"{INTAKE_STAGING_REL}"
+            )
+        return None
     if json_text and b64_text:
         return "provide only one of --intake-json or --intake-json-b64"
     if json_text:

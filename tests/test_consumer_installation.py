@@ -47,7 +47,7 @@ EXPECTED_PACKAGES = {
     ),
     "develop": (
         "2.1.0",
-        "103e151b3102c2ade71e164c476c6f175b965464d0a7c92db2c77251c16136b1",
+        "25ac19783621d64afff3d250ba1bde73cd4e2264485c0f987824aced3b784e70",
     ),
     "test": (
         "2.0.1",

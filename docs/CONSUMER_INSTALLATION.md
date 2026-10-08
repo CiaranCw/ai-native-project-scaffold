@@ -238,10 +238,18 @@ Resume is observational. It does not rewrite command/test indexes.
 
 On Cursor, Trusted-workspace project hooks deny ordinary project mutation
 while `NOT_ADOPTED`. After Adoption they still deny editor file mutation
-until a current Develop Task/Session exists, but they do not treat every
-ordinary in-project command as forbidden. Local build, test, lint,
-typecheck, package-manager scripts, tool inspection, and SCM inspection are
-autonomous; Git Commit/Push and other hard boundaries remain denied. The
+until a current Develop Task/Session exists, except one pre-session write:
+`.scaffold/transport/develop-intake.json`. Write the Intake JSON envelope
+there, then run `python .scaffold/install/run.py enter develop
+--intake-json-file .scaffold/transport/develop-intake.json`. That write is
+Intake transport only. Product source stays blocked until Task and Session
+authority exist. The shell gate still denies chaining, redirection,
+here-strings, and PowerShell subexpressions; do not build the envelope on
+the command line. `--intake-json-b64` remains accepted when the token is
+already literal. Ordinary in-project commands are not all forbidden. Local
+build, test, lint, typecheck, package-manager scripts, tool inspection, and
+SCM inspection are autonomous; Git Commit/Push and other hard boundaries
+remain denied. The
 official digest-bound apply command is an exact-plan APPLY REQUEST, not
 human provenance: `beforeShellExecution` returns `permission=allow` for it
 because first-time Adoption is Agent-autonomous lifecycle work under the

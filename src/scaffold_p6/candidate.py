@@ -216,6 +216,90 @@ def excluded_from_candidate(
     return False
 
 
+def generation2_byte_delta(
+    root: str | Path,
+    replacements: dict[str, bytes],
+    removals: tuple[str, ...] = (),
+) -> list[str]:
+    """Paths whose planned bytes would change the generation-2 candidate.
+
+    Declared client-support and install infrastructure are not a delta.
+    Agreement between a live runtime generator, a client file, and
+    ``install.yaml`` is not consulted. Mixed-ownership paths count only when
+    the projected human surface changes.
+    """
+    host = Path(root)
+    declared = generated_output_exclusions(host)
+    classified = generated_classification_prefixes(host)
+    exclusions = [item for item in declared if _classified_generated(item, classified)]
+    scm = observe_scm(host)
+    changed: list[str] = []
+    for rel, new in replacements.items():
+        normalized = str(rel).replace("\\", "/")
+        if not _generation2_visible(host, exclusions, normalized):
+            continue
+        if _planned_bytes_keep_generation2(host, scm, normalized, new):
+            continue
+        changed.append(normalized)
+    for rel in removals:
+        normalized = str(rel).replace("\\", "/")
+        if not _generation2_visible(host, exclusions, normalized):
+            continue
+        path = host / normalized
+        if path.is_file() and not path.is_symlink():
+            changed.append(normalized)
+    return changed
+
+
+def _generation2_visible(host: Path, exclusions: list[str], rel: str) -> bool:
+    if is_task_book_path(rel):
+        return False
+    return not excluded_from_candidate(
+        rel,
+        exclusions,
+        root=host,
+        generation=PROJECTION_GENERATION_CURRENT,
+    )
+
+
+def _planned_bytes_keep_generation2(
+    host: Path,
+    scm: ScmObservation,
+    rel: str,
+    new: bytes,
+) -> bool:
+    path = host / rel
+    try:
+        old = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+    except OSError:
+        old = None
+    if old == new:
+        return True
+    if rel in MIXED_OWNERSHIP_PATHS:
+        new_digest = projected_digest_of_bytes(rel, new)
+        old_digest = projected_mixed_digest(host, rel)
+        return new_digest is not None and new_digest == old_digest
+    if rel in _SURFACE_NEUTRAL_PATHS and _tracked_entry(scm, rel):
+        try:
+            text = new.decode("utf-8")
+        except UnicodeError:
+            return False
+        head = _head_text(scm, rel)
+        if head is None:
+            return False
+        from scaffold_p5.mixed_surface import human_owned_surface_matches
+
+        return human_owned_surface_matches(rel, text, head)
+    return False
+
+
+def _tracked_entry(scm: ScmObservation, rel: str) -> bool:
+    return any(
+        entry.get("path") == rel and not entry.get("untracked")
+        for entry in scm.entries
+    )
+
+
 def _classified_generated(declared: str, classified: list[str]) -> bool:
     """Authorize a declared exclusion only as the GENERATED path or a descendant."""
     declared_n = declared.replace("\\", "/").strip("/")
