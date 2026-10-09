@@ -157,6 +157,15 @@ def build_develop_to_test(
     candidate_digest: str,
     selected: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Build the Develop → Test handoff.
+
+    ``selected`` contract:
+    - ``None`` or ``[]`` means the caller did not name profiles. Selection is
+      the bound profile ids in first-seen order, with duplicates removed.
+    - A non-empty list is explicit and is copied unchanged, including
+      duplicates, so P6 ``validate_selected`` still rejects them.
+    Requirement bindings stay complete either way.
+    """
     requirement_ids: list[str] = []
     requirement_bindings: list[dict[str, str]] = []
     bound_profiles: list[str] = []
@@ -170,7 +179,10 @@ def build_develop_to_test(
                 {"requirement_id": requirement_id, "profile_id": profile_id}
             )
             bound_profiles.append(profile_id)
-    selected_ids = list(selected or bound_profiles)
+    if selected is None or selected == []:
+        selected_ids = list(dict.fromkeys(bound_profiles))
+    else:
+        selected_ids = list(selected)
     payload = {
         "kind": "develop_to_test",
         "task_id": task.get("record_id"),
@@ -211,13 +223,17 @@ def invoke_test(
     test_package: Path,
 ) -> Any:
     requirement = payload.get("test_requirement") or {}
-    selected = list(requirement.get("selected") or [])
-    if not selected:
-        selected = [
-            str(item.get("profile_id"))
-            for item in (requirement.get("requirement_bindings") or [])
-            if isinstance(item, dict) and item.get("profile_id")
-        ]
+    raw_selected = requirement.get("selected")
+    if raw_selected is None or raw_selected == []:
+        selected = list(
+            dict.fromkeys(
+                str(item.get("profile_id"))
+                for item in (requirement.get("requirement_bindings") or [])
+                if isinstance(item, dict) and item.get("profile_id")
+            )
+        )
+    else:
+        selected = list(raw_selected)
     from scaffold_p6.engine import TestEngine
     from scaffold_p6.sav import reconstruct_sav_plan
 

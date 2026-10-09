@@ -26,7 +26,7 @@ from scaffold_p5.currentness import evaluate_understanding_currentness
 from scaffold_p5.io_util import read_yaml, write_yaml_atomic
 from scaffold_p5.ownership import P6_DURABLE_EVIDENCE_AREA
 from scaffold_p6.candidate import observe_candidate
-from scaffold_p8.models import CHANGES_DIR
+from scaffold_p8.models import CHANGES_DIR, PROVENANCE_CLASSES
 from scaffold_p8.records import persist_candidate_change
 from support import adopt, engine, write
 
@@ -77,13 +77,7 @@ def _valid_change_record(record_id: str, *, kind: str = "none", value=None) -> d
             "relevant_develop_session_ids": [],
             "classes": {
                 name: {"path_count": 0}
-                for name in (
-                    "DEVELOP_KNOWN",
-                    "MIXED_CHANGE",
-                    "PREEXISTING_CHANGE",
-                    "POST_DEVELOP_ADDITIONAL",
-                    "UNATTRIBUTED",
-                )
+                for name in PROVENANCE_CLASSES
             },
         },
         "limitations": [],

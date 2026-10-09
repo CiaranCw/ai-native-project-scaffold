@@ -32,6 +32,9 @@ PROVENANCE_CLASSES = (
     "PREEXISTING_CHANGE",
     "POST_DEVELOP_ADDITIONAL",
     "DEVELOP_KNOWN",
+    # Same-task ABORTED observed_success that still matches live bytes.
+    # Attribution only: not sealed execution authority and not inherited baseline.
+    "ABORTED_ATTRIBUTED",
     "UNATTRIBUTED",
 )
 

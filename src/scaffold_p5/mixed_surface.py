@@ -26,8 +26,11 @@ import json
 from pathlib import Path
 
 from scaffold_p5.agents import (
+    AGENTS_ROUTER_REGION,
     ALLOWED_AGENTS_REGIONS,
+    CONSUMER_INSTALL_REGION,
     human_surface,
+    integrated_agents_text,
     parse_managed_regions,
 )
 from scaffold_p5.consumer_install import (
@@ -86,14 +89,22 @@ def human_owned_surface(rel: str, text: str) -> str | None:
     return None
 
 
-def human_owned_surface_matches(rel: str, live_text: str, reference_text: str) -> bool:
-    """True when live human bytes equal the reference or its installer projection.
+def human_owned_surface_matches(
+    rel: str,
+    live_text: str,
+    reference_text: str,
+    *,
+    adopt_router: bool = False,
+) -> bool:
+    """True when live human bytes equal the reference or its legal projection.
 
     Direct equality covers a region-interior edit that leaves every outside
     byte untouched. Equality with the installer projection of the reference
     covers the separator newline and trailing newline that
     ``apply_gitattributes_region`` / ``apply_consumer_install_region`` insert
-    around a managed region. Nothing else is normalized.
+    around a managed region. An adopted host also projects the
+    ``agents-router`` region through ``integrated_agents_text``. Nothing else
+    is normalized.
     """
     normalized = rel.replace("\\", "/").strip("/")
     live = human_owned_surface(normalized, live_text)
@@ -107,14 +118,18 @@ def human_owned_surface_matches(rel: str, live_text: str, reference_text: str) -
         return True
     if normalized == HOOKS_JSON_REL:
         return False
-    projected = _installer_projection(normalized, reference_text)
+    projected = _installer_projection(
+        normalized, reference_text, adopt_router=adopt_router
+    )
     if projected is None:
         return False
     projected_surface = human_owned_surface(normalized, projected)
     return projected_surface is not None and live == projected_surface
 
 
-def install_managed_bytes_verified(root: str | Path, rel: str) -> bool:
+def install_managed_bytes_verified(
+    root: str | Path, rel: str, *, adopt_router: bool | None = None
+) -> bool:
     """True only when install authority attests these bytes.
 
     Whole-file MANAGED entries must match the manifest file digest. Every
@@ -148,9 +163,13 @@ def install_managed_bytes_verified(root: str | Path, rel: str) -> bool:
     if normalized in REGION_HOST_PATHS:
         if not manifest_ok or not _region_identity_attested(host, normalized, text):
             return False
-        if not _region_presence_preserved(host, normalized, text):
+        if not _region_presence_preserved(
+            host, normalized, text, adopt_router=adopt_router
+        ):
             return False
-        return _human_surface_attested(host, normalized, text)
+        return _human_surface_attested(
+            host, normalized, text, adopt_router=adopt_router
+        )
     if normalized in FRAGMENT_HOST_PATHS:
         if not manifest_ok or not _hook_fragment_attested(text):
             return False
@@ -158,7 +177,13 @@ def install_managed_bytes_verified(root: str | Path, rel: str) -> bool:
     return False
 
 
-def _region_presence_preserved(root: Path, rel: str, live_text: str) -> bool:
+def _region_presence_preserved(
+    root: Path,
+    rel: str,
+    live_text: str,
+    *,
+    adopt_router: bool | None = None,
+) -> bool:
     """True when every reference Scaffold region is still present.
 
     The reference is HEAD for a tracked file and empty text for an
@@ -179,6 +204,13 @@ def _region_presence_preserved(root: Path, rel: str, live_text: str) -> bool:
     reference_ids = _scaffold_owned_region_ids(rel, reference)
     live_ids = _scaffold_owned_region_ids(rel, live_text)
     if reference_ids is None or live_ids is None:
+        return False
+    require_router = (
+        _agents_router_projection(root, rel)
+        if adopt_router is None
+        else bool(adopt_router)
+    )
+    if require_router and not {CONSUMER_INSTALL_REGION, AGENTS_ROUTER_REGION} <= live_ids:
         return False
     return reference_ids <= live_ids
 
@@ -249,23 +281,53 @@ def _hook_fragment_attested(text: str) -> bool:
     return fragment is not None and not missing and not drifted
 
 
-def _human_surface_attested(root: Path, rel: str, text: str) -> bool:
+def _human_surface_attested(
+    root: Path, rel: str, text: str, *, adopt_router: bool | None = None
+) -> bool:
+    use_router = (
+        _agents_router_projection(root, rel) if adopt_router is None else adopt_router
+    )
     tracked = git_path_is_tracked(root, rel)
     if tracked is True:
         head = _head_file_text(root, rel)
         if head is None:
             return False
-        return human_owned_surface_matches(rel, text, head)
+        return human_owned_surface_matches(
+            rel, text, head, adopt_router=use_router
+        )
     if tracked is False:
-        return human_owned_surface_matches(rel, text, "")
+        return human_owned_surface_matches(
+            rel, text, "", adopt_router=use_router
+        )
     return False
 
 
-def _installer_projection(rel: str, text: str) -> str | None:
+def _agents_adoption_applied(root: Path) -> bool:
+    """True when Adoption has written the skills lock.
+
+    ``project.yaml`` alone is not this signal. Structural Review fixtures
+    write that file without performing the router integration. Ownership
+    ``MANAGED`` and install.yaml digests are not this signal either.
+    """
+    return (root / ".scaffold" / "skills.lock").is_file()
+
+
+def _agents_router_projection(root: Path, rel: str) -> bool:
+    return rel == AGENTS_MD and _agents_adoption_applied(root)
+
+
+def _installer_projection(
+    rel: str, text: str, *, adopt_router: bool = False
+) -> str | None:
     if rel == GITATTRIBUTES:
         return apply_gitattributes_region(text)
     if rel == AGENTS_MD:
-        return apply_consumer_install_region(text)
+        installed = apply_consumer_install_region(text)
+        if installed is None:
+            return None
+        if not adopt_router:
+            return installed
+        return integrated_agents_text(installed)
     return None
 
 

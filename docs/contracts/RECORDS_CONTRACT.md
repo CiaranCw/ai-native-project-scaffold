@@ -837,7 +837,11 @@ Abort means this Session is not trustworthy as a completed Develop result.
 It does NOT mean successful `observed_success` mutations never occurred, that
 current workspace bytes are accepted, or that unexplained drift may be
 forgotten (FA2-FND-005). ABORTED `observed_success` MAY remain attribution.
-Pending authorization is not upgraded to provenance. Candidate acceptance
+When that attribution is bound to the same Task, the path, the live byte
+state, and a continuous later chain, Submit S2 records it as
+`ABORTED_ATTRIBUTED`. That class is not `DEVELOP_KNOWN` and is not
+ordinary inherited baseline. A matching path or hash alone does not
+establish it. Pending authorization is not upgraded to provenance. Candidate acceptance
 does not occur. Abort MUST remain an escape path: persist unresolved physical
 truth, then proceed. Drift MUST NOT make abort impossible.
 

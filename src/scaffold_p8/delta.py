@@ -83,9 +83,25 @@ def classify_delta(
     entries: list[dict[str, Any]] | None = None,
     task: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    sealed, aborted = _split_attribution_sessions(sessions)
+    if isinstance(task, dict):
+        aborted = _merge_session_rows(
+            aborted,
+            load_aborted_sessions(
+                root,
+                linked_ids={
+                    str(item)
+                    for item in (task.get("develop_session_ids") or [])
+                    if str(item)
+                },
+                task_id=str(task.get("record_id") or ""),
+            ),
+        )
     classes: dict[str, str] = {}
     for path in real_paths:
-        classes[path] = _classify_path(root, path, sessions)
+        classes[path] = _classify_path(
+            root, path, sealed, aborted=aborted, task=task
+        )
     counts = {name: 0 for name in PROVENANCE_CLASSES}
     for label in classes.values():
         counts[label] = counts.get(label, 0) + 1
@@ -155,7 +171,177 @@ def load_sealed_sessions(
     )
 
 
+def load_aborted_sessions(
+    root: Path, *, linked_ids: set[str] | None = None, task_id: str = ""
+) -> list[dict[str, Any]]:
+    """Task-bound ABORTED sessions. Attribution input, not sealed authority."""
+    folder = root / SESSIONS_DIR
+    if not folder.is_dir() or not task_id:
+        return []
+    rows = []
+    for directory in sorted(folder.iterdir()):
+        if linked_ids is not None and directory.name not in linked_ids:
+            continue
+        session_path = directory / "session.yaml"
+        files_path = directory / "files.yaml"
+        if not session_path.is_file() or not files_path.is_file():
+            continue
+        try:
+            session = read_yaml(session_path)
+            payload = read_yaml(files_path)
+        except (OSError, ValueError, TypeError, UnicodeError):
+            continue
+        if (
+            not isinstance(session, dict)
+            or validate_develop_session(session, expected_id=directory.name)
+            or session.get("status") != "ABORTED"
+            or str(session.get("task_id") or "") != task_id
+            or validate_files_yaml(payload)
+        ):
+            continue
+        rows.append(
+            {
+                "session": session,
+                "files": list(payload.get("files") or []),
+                "directory": directory,
+            }
+        )
+    return _sort_session_rows(rows)
+
+
+def _split_attribution_sessions(
+    sessions: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    sealed: list[dict[str, Any]] = []
+    aborted: list[dict[str, Any]] = []
+    for row in sessions:
+        status = str((row.get("session") or {}).get("status") or "")
+        if status == "ABORTED":
+            aborted.append(row)
+        else:
+            sealed.append(row)
+    return sealed, _sort_session_rows(aborted)
+
+
+def _merge_session_rows(
+    primary: list[dict[str, Any]], extra: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    seen = {
+        str((row.get("session") or {}).get("record_id") or "")
+        for row in primary
+    }
+    merged = list(primary)
+    for row in extra:
+        record_id = str((row.get("session") or {}).get("record_id") or "")
+        if record_id and record_id in seen:
+            continue
+        merged.append(row)
+        if record_id:
+            seen.add(record_id)
+    return _sort_session_rows(merged)
+
+
+def _sort_session_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            str((row.get("session") or {}).get("created_at") or ""),
+            str((row.get("session") or {}).get("record_id") or ""),
+        ),
+    )
+
+
+def _aborted_task_attribution(
+    path: str,
+    observed: tuple[str, str | None],
+    aborted: list[dict[str, Any]],
+    sealed: list[dict[str, Any]],
+    task: dict[str, Any] | None,
+) -> str:
+    """Same-task ABORTED physical chain that still matches live bytes.
+
+    ``proven`` is attribution only. A matching hash or path name without the
+    task binding and a continuous later chain is ``conflict`` or ``none``.
+    """
+    if not isinstance(task, dict):
+        return "none"
+    task_id = str(task.get("record_id") or "")
+    if not task_id:
+        return "none"
+    linked = {
+        str(item)
+        for item in (task.get("develop_session_ids") or [])
+        if str(item)
+    }
+    touches: list[dict[str, Any]] = []
+    saw_nonphysical = False
+    for row in aborted:
+        session = row.get("session") or {}
+        record_id = str(session.get("record_id") or "")
+        if str(session.get("task_id") or "") != task_id:
+            continue
+        if linked and record_id not in linked:
+            continue
+        if str(session.get("status") or "ABORTED") != "ABORTED":
+            continue
+        for item in row.get("files") or []:
+            if not isinstance(item, dict) or item.get("path") != path:
+                continue
+            if not _successful_develop_touch(item):
+                saw_nonphysical = True
+                continue
+            touches.append(item)
+    if not touches:
+        return "none"
+    if saw_nonphysical:
+        return "conflict"
+    if not _continuous_touched_chain(touches):
+        return "conflict"
+    latest = _manifest_after_state(touches[-1])
+    if latest is None or latest != observed:
+        return "conflict"
+    for row in sealed:
+        for item in row.get("files") or []:
+            if (
+                isinstance(item, dict)
+                and item.get("path") == path
+                and _successful_develop_touch(item)
+            ):
+                return "conflict"
+        session = row.get("session") or {}
+        s0_coverage, s0 = _overlay(session, "workspace_overlay_s0")
+        s1_coverage, s1 = _overlay(session, "workspace_overlay_s1")
+        if s0_coverage != "complete" or s1_coverage != "complete":
+            return "conflict"
+        for overlay in (s0, s1):
+            if path in overlay and overlay[path] != observed:
+                return "conflict"
+    return "proven"
+
+
 def _classify_path(
+    root: Path,
+    path: str,
+    sessions: list[dict[str, Any]],
+    *,
+    aborted: list[dict[str, Any]] | None = None,
+    task: dict[str, Any] | None = None,
+) -> str:
+    sealed_label = _classify_sealed_path(root, path, sessions)
+    if sealed_label == "DEVELOP_KNOWN":
+        return sealed_label
+    observed = _path_state(root, path)
+    attribution = _aborted_task_attribution(
+        path, observed, aborted or [], sessions, task
+    )
+    if attribution == "proven":
+        return "ABORTED_ATTRIBUTED"
+    if attribution == "conflict" and sealed_label == "PREEXISTING_CHANGE":
+        return "UNATTRIBUTED"
+    return sealed_label
+
+
+def _classify_sealed_path(
     root: Path, path: str, sessions: list[dict[str, Any]]
 ) -> str:
     if not sessions:
@@ -205,6 +391,15 @@ def _task_delta_role(
             return "task_product_delta"
         return "unrelated_delta"
     if unexplained_matches_current(root, path):
+        if not isinstance(task, dict):
+            return "unrelated_delta"
+        resolution = resolve_task_scope(root, task)
+        if path_in_supporting_scope(path, resolution):
+            return "task_supporting_delta"
+        if path_in_resolved_scope(path, resolution):
+            return "task_product_delta"
+        return "unrelated_delta"
+    if provenance == "ABORTED_ATTRIBUTED":
         if not isinstance(task, dict):
             return "unrelated_delta"
         resolution = resolve_task_scope(root, task)

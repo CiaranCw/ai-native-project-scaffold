@@ -227,6 +227,11 @@ def _install_managed_verified(root: Path, rel: str) -> bool:
     """
     from scaffold_p5.mixed_surface import install_managed_bytes_verified
 
+    # Mixed AGENTS.md stays out of wholesale drift classification when the
+    # only extra bytes are the adopted router. Submit S3 still uses the
+    # default two-phase projection.
+    if str(rel).replace("\\", "/").strip("/") == "AGENTS.md":
+        return install_managed_bytes_verified(root, rel, adopt_router=False)
     return install_managed_bytes_verified(root, rel)
 
 

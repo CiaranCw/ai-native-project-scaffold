@@ -31,7 +31,14 @@ from scaffold_p6.candidate import observe_candidate
 from scaffold_p6.engine import TestEngine
 from scaffold_p7.models import SESSIONS_DIR
 from scaffold_p8.handoff import UNRESOLVED_REPAIR_REASON
-from scaffold_p8.models import CHANGES_DIR, FINALIZATIONS_DIR, PROVIDES, REQUIRES, SKILL_ID
+from scaffold_p8.models import (
+    CHANGES_DIR,
+    FINALIZATIONS_DIR,
+    PROVENANCE_CLASSES,
+    PROVIDES,
+    REQUIRES,
+    SKILL_ID,
+)
 from scaffold_p8.schemas import validate_change_record
 
 
@@ -850,13 +857,7 @@ class P8SubmitTests(unittest.TestCase):
                 "relevant_develop_session_ids": [],
                 "classes": {
                     name: {"path_count": 0}
-                    for name in (
-                        "DEVELOP_KNOWN",
-                        "MIXED_CHANGE",
-                        "PREEXISTING_CHANGE",
-                        "POST_DEVELOP_ADDITIONAL",
-                        "UNATTRIBUTED",
-                    )
+                    for name in PROVENANCE_CLASSES
                 },
             },
             "limitations": [],

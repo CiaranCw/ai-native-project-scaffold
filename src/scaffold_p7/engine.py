@@ -68,6 +68,7 @@ from scaffold_p7.repair_state import (
     consumed_repair_replay,
     load_repair_state,
     persist_repair_state,
+    reconcile_pending_repair,
     reconstruct_repair_view,
 )
 from scaffold_p7.models import DEVELOP_MODES, PROVIDES, REQUIRES, SESSIONS_DIR, SKILL_ID
@@ -2009,11 +2010,15 @@ class DevelopEngine:
         test_result = None
         if opts.get("invoke_test"):
             emit_working(self.root, "develop.run", "invoke_test")
+            raw_selected = opts.get("selected", None)
+            # None and [] are unspecified: the handoff dedupes bound profiles.
+            # A non-empty list is an explicit selection and is not rewritten.
+            handoff_selected = None if not raw_selected else list(raw_selected)
             develop_to_test = build_develop_to_test(
                 task=task,
                 session_id=str(session["record_id"]),
                 candidate_digest=after.digest,
-                selected=list(opts.get("selected") or []),
+                selected=handoff_selected,
             )
             test_result = invoke_test(
                 self.root,
@@ -2308,6 +2313,15 @@ class DevelopEngine:
                         stale_invalidated = stale_invalidated or (
                             not report_usable_for(report, after)
                         )
+
+        if (
+            test_to_develop
+            and test_to_develop.get("test_pass") is True
+            and test_to_develop.get("test_complete") is True
+        ):
+            reconcile_pending_repair(
+                self.root, task=task, covering=test_to_develop
+            )
 
         if test_to_develop and test_to_develop.get("test_pass") is False:
             if test_to_develop.get("target_stage_ids"):

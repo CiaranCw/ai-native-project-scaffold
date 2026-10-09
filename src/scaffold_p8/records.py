@@ -13,7 +13,7 @@ from scaffold_p5.io_util import file_digest, read_yaml, sha256_text, write_yaml_
 from scaffold_p5 import yaml_lite
 from scaffold_p5.scm import observe_scm, project_to_worktree_path
 
-from scaffold_p8.models import CHANGES_DIR, RECORD_SCHEMA_VERSION
+from scaffold_p8.models import CHANGES_DIR, PROVENANCE_CLASSES, RECORD_SCHEMA_VERSION
 from scaffold_p8.noscms import complete_path, verify_noscms_publication, PUBLICATIONS_REL
 from scaffold_p8.schemas import (
     CHANGE_ID_RE,
@@ -261,13 +261,7 @@ def build_change_record(
             "relevant_develop_session_ids": frozen_ids,
             "classes": {
                 name: {"path_count": int(counts.get(name) or 0)}
-                for name in (
-                    "DEVELOP_KNOWN",
-                    "MIXED_CHANGE",
-                    "PREEXISTING_CHANGE",
-                    "POST_DEVELOP_ADDITIONAL",
-                    "UNATTRIBUTED",
-                )
+                for name in PROVENANCE_CLASSES
             },
         },
         "limitations": (

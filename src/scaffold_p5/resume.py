@@ -313,6 +313,23 @@ def select_next_route(
         and str(item.get("record_id") or "") not in finalized
     ]
     if len(ready) == 1 and len(continuable) <= 1:
+        record_id = str(ready[0].get("record_id") or "")
+        repair = next(
+            (
+                row
+                for row in repair_rows
+                if str(row.get("task_id") or "") == record_id
+            ),
+            None,
+        )
+        if repair is not None and repair.get("ready_possible") is not True:
+            return {
+                "next_route": "human",
+                "reason": (
+                    "READY_FOR_REVIEW Task is not current against Candidate "
+                    "and Decision authority"
+                ),
+            }
         return {
             "next_route": "submit",
             "reason": "exactly one continuable READY_FOR_REVIEW Task is reconstructable",
@@ -538,6 +555,8 @@ def _repair_rows(root: Path, tasks: list[dict[str, Any]]) -> list[dict[str, Any]
                 "target_stage_ids": list(view.get("target_stage_ids") or []),
                 "blockers": list(view.get("blockers") or []),
                 "fail_ids": list(view.get("fail_ids") or []),
+                "failure_history": list(view.get("failure_history") or []),
+                "ready_possible": bool(view.get("ready_possible")),
                 "reason": view.get("reason") or "",
                 "next": view.get("next"),
                 "candidate_digest": view.get("candidate_digest") or "",
@@ -546,12 +565,20 @@ def _repair_rows(root: Path, tasks: list[dict[str, Any]]) -> list[dict[str, Any]
     return rows
 
 
+# Resolved and consumed rows keep fail ids as evidence. They are not the
+# current required failure. pending, active, and any other recorded status
+# still are.
+_HISTORICAL_FAILURE_STATUSES = frozenset({"resolved", "consumed"})
+
+
 def _test_view(repair_rows: list[dict[str, Any]]) -> dict[str, Any]:
     failures = []
     for row in repair_rows:
-        for fail_id in row.get("fail_ids") or []:
-            failures.append({"task_id": row.get("task_id"), "fail_id": fail_id})
-        if row.get("blockers") and row.get("repair_state_status") in {"pending", "active"}:
+        status = row.get("repair_state_status")
+        if status not in _HISTORICAL_FAILURE_STATUSES:
+            for fail_id in row.get("fail_ids") or []:
+                failures.append({"task_id": row.get("task_id"), "fail_id": fail_id})
+        if row.get("blockers") and status in {"pending", "active"}:
             failures.append(
                 {
                     "task_id": row.get("task_id"),

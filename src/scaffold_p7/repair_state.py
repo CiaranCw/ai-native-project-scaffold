@@ -8,7 +8,11 @@ from typing import Any
 
 from scaffold_p5.io_util import read_yaml, write_yaml_atomic
 from scaffold_p6.candidate import observe_candidate
-from scaffold_p7.lifecycle import evaluate_ready_for_review
+from scaffold_p7.lifecycle import (
+    decision_is_satisfied_current,
+    evaluate_ready_for_review,
+    stage_completion_decision_binding,
+)
 from scaffold_p7.models import REPAIR_STATE_DIR
 from scaffold_p7.tasks import resolve_task
 
@@ -30,10 +34,70 @@ def load_repair_state(root: Path, task_id: str) -> dict[str, Any] | None:
     return data
 
 
+def _failure_episode(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(state.get("status") or ""),
+        "fail_ids": list(state.get("fail_ids") or []),
+        "report_id": state.get("report_id") or "",
+        "candidate_digest": state.get("candidate_digest") or "",
+        "session_id": state.get("session_id") or "",
+        "target_stage_ids": list(state.get("target_stage_ids") or []),
+        "resolved_by_report_id": state.get("resolved_by_report_id") or "",
+        "resolved_by_session_id": state.get("resolved_by_session_id") or "",
+        "resolved_candidate_digest": state.get("resolved_candidate_digest") or "",
+    }
+
+
+def _episodes_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return (
+        str(left.get("status") or "") == str(right.get("status") or "")
+        and list(left.get("fail_ids") or []) == list(right.get("fail_ids") or [])
+        and str(left.get("report_id") or "") == str(right.get("report_id") or "")
+    )
+
+
+def _retained_failure_history(
+    existing: dict[str, Any] | None,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    """Keep prior failure evidence when a later write omits ``failure_history``.
+
+    An explicit history on the payload is stored as given. Otherwise the
+    on-disk history is copied. A changed episode that already recorded
+    fail ids, or a resolved episode, is appended once. Rewriting the same
+    status, fail ids, and report id does not append.
+    """
+    if "failure_history" in payload:
+        history = payload.get("failure_history")
+        return list(history) if isinstance(history, list) else []
+    if not isinstance(existing, dict):
+        return None
+    history = [
+        dict(item)
+        for item in (existing.get("failure_history") or [])
+        if isinstance(item, dict)
+    ]
+    prior = _failure_episode(existing)
+    incoming = {
+        "status": str(payload.get("status") or "pending"),
+        "fail_ids": list(payload.get("fail_ids") or []),
+        "report_id": payload.get("report_id") or "",
+    }
+    changed = not _episodes_match(prior, incoming)
+    evidence = bool(prior["fail_ids"]) or prior["status"] == "resolved" or bool(history)
+    if changed and evidence and (not history or not _episodes_match(history[-1], prior)):
+        history.append(prior)
+    if not history:
+        return None
+    return history
+
+
 def persist_repair_state(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     task_id = str(payload.get("task_id") or "")
     if not task_id:
         raise ValueError("repair supporting state requires task_id")
+    existing = load_repair_state(root, task_id)
+    retained_history = _retained_failure_history(existing, payload)
     data = {
         "schema_version": "1",
         "kind": "repair_state",
@@ -53,6 +117,15 @@ def persist_repair_state(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "reason": payload.get("reason") or "",
         "updated_at": _iso_utc(),
     }
+    if retained_history is not None:
+        data["failure_history"] = retained_history
+    for key in (
+        "resolved_by_report_id",
+        "resolved_by_session_id",
+        "resolved_candidate_digest",
+    ):
+        if key in payload:
+            data[key] = payload[key]
     path = repair_state_path(root, task_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_yaml_atomic(path, data)
@@ -168,6 +241,8 @@ def reconstruct_repair_view(root: Path, task_id: str) -> dict[str, Any]:
         "blockers": list((state or {}).get("blockers") or []),
         "evidence_refs": list((state or {}).get("evidence_refs") or []),
         "fail_ids": list((state or {}).get("fail_ids") or []),
+        "failure_history": list((state or {}).get("failure_history") or []),
+        "resolved_by_report_id": (state or {}).get("resolved_by_report_id") or "",
         "report_id": (state or {}).get("report_id") or "",
         "candidate_digest": candidate.digest if candidate.usable else (
             (state or {}).get("candidate_digest") or ""
@@ -187,12 +262,117 @@ def reconstruct_repair_view(root: Path, task_id: str) -> dict[str, Any]:
     }
 
 
+def reconcile_pending_repair(
+    root: Path,
+    *,
+    task: dict[str, Any],
+    covering: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve pending Repair only when later same-task authority covers it.
+
+    A PASS that is not TEST_COMPLETE, a different Task or Stage, or a
+    candidate the covering execution does not currently bind leaves the
+    pending record unchanged. Failure history is retained. A second call
+    with the record already resolved does not append history.
+    """
+    if not isinstance(task, dict) or not isinstance(covering, dict):
+        return None
+    task_id = str(task.get("record_id") or "")
+    if not task_id or str(covering.get("task_id") or "") != task_id:
+        return None
+    state = load_repair_state(root, task_id)
+    if not isinstance(state, dict):
+        return None
+    if state.get("status") == "resolved":
+        return state
+    if state.get("status") != "pending":
+        return None
+    if covering.get("test_pass") is not True or covering.get("test_complete") is not True:
+        return None
+    candidate = observe_candidate(root)
+    if not candidate.usable:
+        return None
+    live = candidate.digest
+    if str(covering.get("candidate_digest") or "") != live:
+        return None
+    report_id = str(covering.get("report_id") or "")
+    if not report_id or report_id == str(state.get("report_id") or ""):
+        return None
+    targets = [
+        str(item)
+        for item in (state.get("target_stage_ids") or [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if not targets:
+        return None
+    stages = [
+        row for row in (task.get("stages") or []) if isinstance(row, dict)
+    ]
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in stages:
+        stage_id = str(row.get("stage_id") or "")
+        if not stage_id or stage_id in by_id:
+            return None
+        by_id[stage_id] = row
+    for stage_id in targets:
+        stage = by_id.get(stage_id)
+        if stage is None:
+            return None
+        decision = stage.get("completion_decision")
+        bound, _reason = stage_completion_decision_binding(
+            decision, stage_id=stage_id, stages=stages
+        )
+        if not bound or not decision_is_satisfied_current(
+            decision, live, root=root
+        ):
+            return None
+    history = list(state.get("failure_history") or [])
+    history.append(
+        {
+            "status": "pending",
+            "fail_ids": list(state.get("fail_ids") or []),
+            "report_id": state.get("report_id") or "",
+            "candidate_digest": state.get("candidate_digest") or "",
+            "session_id": state.get("session_id") or "",
+            "target_stage_ids": list(targets),
+        }
+    )
+    return persist_repair_state(
+        root,
+        {
+            "task_id": task_id,
+            "status": "resolved",
+            "target_stage_ids": list(targets),
+            "target_mapping": state.get("target_mapping") or "explicit",
+            "candidate_digest": live,
+            "consumed_task_revision": state.get("consumed_task_revision"),
+            "resulting_task_revision": state.get("resulting_task_revision"),
+            "session_id": state.get("session_id") or "",
+            "blockers": list(state.get("blockers") or []),
+            "evidence_refs": list(state.get("evidence_refs") or []),
+            "fail_ids": list(state.get("fail_ids") or []),
+            "report_id": state.get("report_id") or "",
+            "reason": state.get("reason") or "",
+            "failure_history": history,
+            "resolved_by_report_id": report_id,
+            "resolved_by_session_id": str(covering.get("session_id") or ""),
+            "resolved_candidate_digest": live,
+        },
+    )
+
+
 def _next_action(
     *,
     task: dict[str, Any] | None,
     state: dict[str, Any] | None,
     ready_ok: bool,
 ) -> str:
+    status = (state or {}).get("status")
+    if ready_ok and status == "pending":
+        return (
+            "READY completion is current but pending Repair is not covered "
+            "by later authoritative execution of the same Task"
+        )
     if ready_ok:
         return "Repair loop is complete; Task is READY_FOR_REVIEW"
     if not isinstance(task, dict):
