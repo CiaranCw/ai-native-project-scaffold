@@ -26,6 +26,9 @@ _MANAGED_STRATEGIES = frozenset({"THIN_BRIDGE", "MANAGED_UPDATE"})
 _AUTHORITY_NAMES = frozenset({".scaffold", ".git"})
 _AUTHORITY_PREFIXES = (".scaffold/", ".git/")
 _AUTHORITY_FILES = frozenset({"AGENTS.md", ".gitattributes"})
+# Project required-test policy is governance, not ordinary Develop product.
+# The string is shared with policy acceptance. It is not a generated artifact.
+REQUIRED_TEST_POLICY = "docs/project/required-test-policy.yaml"
 
 # host-key -> (project digest, install digest, declared client-support, enforcement prefixes)
 _cache: dict[str, tuple[Any, Any, tuple[str, ...], tuple[str, ...]]] = {}
@@ -79,6 +82,8 @@ def is_protected_mutation_target(root: str | Path, rel: str) -> bool:
     normalized = normalize_rel(rel)
     if not normalized:
         return False
+    if normalized == REQUIRED_TEST_POLICY:
+        return True
     if is_scaffold_authority_path(normalized):
         return True
     for prefix in managed_enforcement_prefixes(root):
@@ -178,6 +183,7 @@ def _protected_consumption_records(root: str | Path) -> tuple[str, ...]:
     records = set(managed_enforcement_prefixes(root))
     records.update(_AUTHORITY_NAMES)
     records.update(_AUTHORITY_FILES)
+    records.add(REQUIRED_TEST_POLICY)
     return tuple(sorted(item for item in records if item))
 
 

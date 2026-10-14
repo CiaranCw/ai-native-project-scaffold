@@ -843,9 +843,13 @@ class UnderstandEngine:
             return self._base("refresh", "BLOCKED", blockers=preflight.blockers or ["refresh requires established host"], extras=extras)
         if action == "understand":
             return self._understand_currentness(snapshot, preflight, opts)
+        if action == "required_tests":
+            return self._required_tests(snapshot, preflight, opts)
         result = refresh_host(self.root)
         extras["conflicts"] = result.get("conflicts") or []
         extras["untouched_business"] = result.get("untouched_business") or []
+        if result.get("authority_diagnostics"):
+            extras["authority_diagnostics"] = result["authority_diagnostics"]
         self._maybe_publish_knowledge_assessment("refresh", opts, extras)
         return self._base(
             "refresh",
@@ -857,9 +861,57 @@ class UnderstandEngine:
             blockers=result.get("blockers") or [],
             evidence=["HUMAN_OWNED preserved", "business source not edited"],
             next_route=(
-                "human knowledge/ownership resolution → understand/refresh"
-                if result.get("conflicts")
-                else "continue"
+                "understand refresh --action required_tests"
+                if result.get("authority_diagnostics") and not result.get("conflicts")
+                else (
+                    "human knowledge/ownership resolution → understand/refresh"
+                    if result.get("conflicts")
+                    else "continue"
+                )
+            ),
+            extras=extras,
+        )
+
+    def _required_tests(self, snapshot, preflight: PreflightDecision, opts: dict[str, Any]):
+        from scaffold_p5.required_tests import establish_required_tests
+
+        extras = {
+            "preflight_context": preflight.context,
+            "host_class": snapshot.host_class,
+            "authority": preflight.authority,
+        }
+        result = establish_required_tests(
+            self.root,
+            proposal=opts.get("proposal") if isinstance(opts.get("proposal"), dict) else None,
+            plan_digest=str(opts.get("plan_digest") or "") or None,
+            staging_path=str(opts.get("proposal_path") or "") or None,
+        )
+        extras["required_tests"] = {
+            key: value
+            for key, value in result.items()
+            if key in {"mode", "plan_digest", "plan", "wrote", "evidence_currentness"}
+        }
+        if not result.get("ok"):
+            return self._base(
+                "refresh",
+                "BLOCKED",
+                blockers=list(result.get("blockers") or ["required-tests authority was not published"]),
+                extras=extras,
+            )
+        wrote = bool(result.get("wrote"))
+        return self._base(
+            "refresh",
+            "COMPLETED",
+            mutations="bounded" if wrote else "none",
+            artifacts=list(result.get("artifacts") or []),
+            evidence=[
+                "required-tests preview" if not wrote else "required-tests apply",
+                "HUMAN_OWNED preserved",
+            ],
+            next_route=(
+                "official Test, then Submit"
+                if wrote
+                else "understand refresh --action required_tests --plan-digest <preview digest>"
             ),
             extras=extras,
         )

@@ -113,6 +113,17 @@ def evaluate_completeness(
         test_complete = False
     if completeness.get("required_set_authoritative") is not True:
         test_complete = False
+    from scaffold_p6.contract import inspect_host_project, resolve_contract
+
+    project_status, _reasons, project = inspect_host_project(root)
+    current_contract = resolve_contract(
+        root, project_status=project_status, project=project
+    )
+    if not current_contract.required_set_authoritative:
+        if completeness.get("required_set_authoritative") is True or test_complete:
+            test_complete = False
+            completeness = dict(completeness)
+            completeness["required_set_authoritative"] = False
     report_zero_required = bool(
         usable
         and completeness.get("required_set_authoritative") is True
@@ -232,21 +243,29 @@ def _required_authority_guidance(
         f"authoritative (report required_policy is {policy}); S5 cannot "
         "verify completeness against an ungrounded required set",
         "required-set authority lives in .scaffold/tests.yaml, which is "
-        "GENERATED and maintained only by Understand Refresh; Develop and "
-        "Submit must not hand-edit it",
+        "GENERATED and maintained only by Understand; Develop and Submit "
+        "must not hand-edit it",
     ]
+    recovery = (
+        "Understand Refresh action required_tests reads "
+        "docs/project/required-test-policy.yaml, which the project must "
+        "already declare and which Understand does not write; stage "
+        "{\"publish\": true} at .scaffold/transport/required-tests.json, "
+        "preview with understand refresh --action required_tests "
+        "--required-tests-json-file <proposal>, apply that exact "
+        "--plan-digest, rerun official Test, then resubmit"
+    )
     if required_total == 0:
         guidance.append(
             "this report declares an empty required set without top-level "
-            "required_authority: VERIFIED; record the grounded zero-required "
-            "fact (or the grounded required profiles) in tests.yaml through "
-            "Understand Refresh, rerun Test, then resubmit"
+            "required_authority: VERIFIED; the project policy must set "
+            "policy zero_required with no required_sources, then " + recovery
         )
     else:
         guidance.append(
             "tests.yaml currently carries no VERIFIED required-authority "
-            "facts; run Understand Refresh to ground the required profiles, "
-            "rerun Test, then resubmit"
+            "facts; the project policy must name the required command "
+            "sources, then " + recovery
         )
     return guidance
 

@@ -191,7 +191,7 @@ class P5UnderstandTests(unittest.TestCase):
             distribution=dist,
         )
         self.assertEqual(live.validity, "VALID")
-        self.assertEqual(live.ref.skill_version, "2.1.0")
+        self.assertEqual(live.ref.skill_version, "2.3.0")
         self.assertEqual(live_exact["result"], "EXACT")
         compatible = evaluate_package(
             pinned,
@@ -391,7 +391,7 @@ class P5SupportTests(unittest.TestCase):
         pkg = load_package(REPO_UNDERSTAND)
         self.assertEqual(pkg.validity, "VALID")
         self.assertEqual(pkg.ref.skill_id, "understand")
-        self.assertEqual(pkg.ref.skill_version, "2.1.0")
+        self.assertEqual(pkg.ref.skill_version, "2.3.0")
 
     def test_yaml_roundtrip_facts(self):
         from scaffold_p5 import yaml_lite

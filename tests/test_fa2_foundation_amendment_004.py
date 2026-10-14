@@ -357,7 +357,7 @@ class FA2FoundationAmendment004VersionTests(unittest.TestCase):
     def test_FND4_V01_live_understand_identity_is_not_released_2_0_0(self):
         pkg = load_package(REPO_UNDERSTAND)
         self.assertNotEqual(pkg.ref.skill_version, "2.0.0")
-        self.assertEqual(pkg.ref.skill_version, "2.1.0")
+        self.assertEqual(pkg.ref.skill_version, "2.3.0")
         self.assertEqual(pkg.ref.skill_id, "understand")
 
     def test_FND4_V02_skill_md_and_yaml_identity_agree(self):
@@ -366,14 +366,14 @@ class FA2FoundationAmendment004VersionTests(unittest.TestCase):
         manifest = read_yaml(REPO_UNDERSTAND / "skill.yaml")
         skill_md = (REPO_UNDERSTAND / "SKILL.md").read_text(encoding="utf-8")
         self.assertEqual(manifest.get("skill_id"), "understand")
-        self.assertEqual(manifest.get("skill_version"), "2.1.0")
+        self.assertEqual(manifest.get("skill_version"), "2.3.0")
         self.assertIn("- `skill_id`: `understand`", skill_md)
-        self.assertIn("- `skill_version`: `2.1.0`", skill_md)
+        self.assertIn("- `skill_version`: `2.3.0`", skill_md)
 
     def test_FND4_V03_live_understand_package_is_valid(self):
         pkg = load_package(REPO_UNDERSTAND)
         self.assertEqual(pkg.validity, "VALID", pkg.validity_reasons)
-        self.assertEqual(pkg.ref.skill_version, "2.1.0")
+        self.assertEqual(pkg.ref.skill_version, "2.3.0")
         substitutions = pkg.manifest.get("may_substitute_for") or []
         self.assertTrue(
             any(
@@ -384,8 +384,17 @@ class FA2FoundationAmendment004VersionTests(unittest.TestCase):
             ),
             substitutions,
         )
+        self.assertTrue(
+            any(
+                item.get("skill_id") == "understand"
+                and str(item.get("skill_version")) == "2.1.0"
+                for item in substitutions
+                if isinstance(item, dict)
+            ),
+            substitutions,
+        )
 
-    def test_FND4_V04_established_host_2_0_0_evaluates_live_2_1_0_compatible(self):
+    def test_FND4_V04_established_host_2_0_0_evaluates_live_2_3_0_compatible(self):
         adopted = adopt(self.host)
         self.assertEqual(adopted.outcome, "COMPLETED")
         lock_path = self.host / ".scaffold/skills.lock"
@@ -397,12 +406,12 @@ class FA2FoundationAmendment004VersionTests(unittest.TestCase):
         row = evaluation["results"]["understand"]
         self.assertEqual(row["result"], "COMPATIBLE", evaluation)
         self.assertNotEqual(row["result"], "EXACT")
-        self.assertEqual(row["actual_version"], "2.1.0")
+        self.assertEqual(row["actual_version"], "2.3.0")
         self.assertEqual(row["expected_version"], "2.0.0")
         result = live_understand_engine(self.host).run("compatibility")
         self.assertEqual(result.outcome, "COMPLETED", result.blockers)
         self.assertEqual(result.compatibility, "COMPATIBLE")
-        self.assertEqual(result.skill_version, "2.1.0")
+        self.assertEqual(result.skill_version, "2.3.0")
         self.assertEqual(lock_path.read_bytes(), before)
         self.assertEqual(
             read_yaml(lock_path)["skills"]["understand"]["skill_version"],
@@ -443,9 +452,9 @@ class FA2FoundationAmendment004VersionTests(unittest.TestCase):
     def test_FND4_V06_released_2_0_0_does_not_represent_fnd004(self):
         live = load_package(REPO_UNDERSTAND)
         self.assertNotEqual(live.ref.skill_version, "2.0.0")
-        self.assertEqual(live.ref.skill_version, "2.1.0")
+        self.assertEqual(live.ref.skill_version, "2.3.0")
         live_md = (REPO_UNDERSTAND / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("2.1.0", live_md)
+        self.assertIn("2.3.0", live_md)
         self.assertIn("Knowledge Assessment", live_md)
         released_dir = FIXTURE_DIST / "packages/understand-2.0.0"
         released = load_package(released_dir)

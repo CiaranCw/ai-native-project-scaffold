@@ -254,7 +254,7 @@ COMPLETE_RUN_ARGV = ("develop", "complete")
 COMPATIBILITY_RUN_ARGV = ("understand", "compatibility")
 REFRESH_RUN_ARGV = ("understand", "refresh")
 COMPATIBILITY_PUBLIC_ACTIONS = frozenset({"evaluate", "lock_update"})
-REFRESH_PUBLIC_ACTIONS = frozenset({"resume", "understand"})
+REFRESH_PUBLIC_ACTIONS = frozenset({"resume", "understand", "required_tests"})
 
 SHELL_ALLOW = "allow"
 SHELL_DENY = "deny"
@@ -387,6 +387,12 @@ Before a Develop Session exists, write the Intake JSON object to exactly
 allowed. It is transport only, not product authority, not a Task Book,
 and not a Session. Product source, tests, tools, `AGENTS.md`, `.cursor`
 governance, and every other `.scaffold` path stay blocked.
+
+On an ESTABLISHED host, Understand may stage a required-test publication
+request at exactly `.scaffold/transport/required-tests.json`. That write
+is transport only. It does not authorize editing `.scaffold/tests.yaml`
+or any other Scaffold file. The required set comes from
+`docs/project/required-test-policy.yaml`, not from the staging JSON.
 
 Required route: `python .scaffold/install/run.py enter develop
 --intake-json-file .scaffold/transport/develop-intake.json`
@@ -737,6 +743,10 @@ def evaluate_cursor_hook(
         return _allow(
             "pre-session Develop intake transport write; not Develop product authority"
         )
+    if _required_tests_transport_write(authority, tool_name, paths, path_error):
+        return _allow(
+            "Understand required-tests transport write; not tests.yaml authority"
+        )
     if path_error:
         paths = []
     from scaffold_p7.develop_authority import authorize_mutation_paths
@@ -907,7 +917,12 @@ def classify_first_use_shell(
                     positional == COMPATIBILITY_RUN_ARGV
                     and flags.get("action") == "lock_update"
                 )
-                if not lock_update_apply:
+                required_tests_apply = (
+                    positional == REFRESH_RUN_ARGV
+                    and flags.get("action") == "required_tests"
+                    and flags.get("required_tests_json_file")
+                )
+                if not lock_update_apply and not required_tests_apply:
                     return SHELL_DENY, "plan digest without --approved is not an official apply command"
             if flags.get("approved") and flags.get("plan_digest"):
                 return SHELL_ALLOW, ASK_APPLY_REASON
@@ -1473,6 +1488,12 @@ def _split_runner_flags(
             flags["action"] = rest[i + 1]
             i += 2
             continue
+        if token == "--required-tests-json-file":
+            if i + 1 >= len(rest):
+                return tuple(), flags, "--required-tests-json-file requires a path"
+            flags["required_tests_json_file"] = rest[i + 1]
+            i += 2
+            continue
         if token == "--new-expected":
             if i + 1 >= len(rest):
                 return tuple(), flags, "--new-expected requires a JSON object"
@@ -1598,11 +1619,30 @@ def _compatibility_flag_error(
 ) -> str | None:
     action = flags.get("action")
     has_expected = bool(flags.get("new_expected") or flags.get("new_expected_b64"))
+    if flags.get("required_tests_json_file") and not (
+        positional == REFRESH_RUN_ARGV and action == "required_tests"
+    ):
+        return (
+            "--required-tests-json-file is only valid on "
+            "understand refresh --action required_tests"
+        )
     if positional == REFRESH_RUN_ARGV:
         if has_expected:
             return "--new-expected is only valid on understand compatibility"
         if action is None:
+            if flags.get("plan_digest"):
+                return (
+                    "--plan-digest on understand refresh is only valid with "
+                    "--action required_tests"
+                )
             return None
+        if flags.get("plan_digest") and action != "required_tests":
+            return (
+                "--plan-digest on understand refresh is only valid with "
+                "--action required_tests"
+            )
+        if action == "required_tests" and not flags.get("required_tests_json_file"):
+            return "--required-tests-json-file is required for --action required_tests"
         if action in REFRESH_PUBLIC_ACTIONS:
             return None
         if action in COMPATIBILITY_PUBLIC_ACTIONS:
@@ -1732,6 +1772,30 @@ def _presession_intake_transport_write(
     from scaffold_p7.intake import INTAKE_STAGING_REL
 
     return paths == [INTAKE_STAGING_REL]
+
+
+def _required_tests_transport_write(
+    authority: dict[str, Any],
+    tool_name: str,
+    paths: list[str],
+    path_error: str | None,
+) -> bool:
+    """Exact staging Write/Edit for the required-tests proposal.
+
+    Transport only. It does not authorize ``.scaffold/tests.yaml`` or any
+    other Scaffold path, and it does not create Task or Develop authority.
+    """
+    if path_error or paths is None:
+        return False
+    if authority.get("required_route") != REQUIRED_ROUTE_DEVELOP:
+        return False
+    if str(authority.get("host_class") or "") != "ESTABLISHED_HOST":
+        return False
+    if tool_name not in INTAKE_STAGING_EDITOR_TOOLS:
+        return False
+    from scaffold_p5.required_tests import STAGING_REL
+
+    return paths == [STAGING_REL]
 
 
 def _intake_flag_error(flags: dict[str, Any]) -> str | None:

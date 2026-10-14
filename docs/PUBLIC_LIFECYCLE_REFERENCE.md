@@ -325,9 +325,14 @@ resume 路径的心跳只输出到终端 stderr（文本格式与 WORKING 心跳
    声明（或 grounded 的零 required 事实）；非空 required 集缺各 profile 的
    `required_authority: VERIFIED` 事实。
 
-恢复路径（全部自主，无人工审批门）：运行 Understand Refresh grounded
-required profiles（或 zero-required 事实）→ 重跑 Test 产出新报告 → 重新 Submit。
-该诊断只解释阻断原因，不改变 TEST_COMPLETE 判定语义。
+恢复路径（全部自主，无人工审批门）：
+
+```text
+python .scaffold/install/run.py understand refresh --action required_tests --required-tests-json-file .scaffold/transport/required-tests.json
+python .scaffold/install/run.py understand refresh --action required_tests --required-tests-json-file .scaffold/transport/required-tests.json --plan-digest <hex>
+```
+
+提案 JSON 是传输，不是批准：`{"publish": true}`。它可以回声 `required_profile_ids` 或 `zero_required`，但必须与项目策略文件 `docs/project/required-test-policy.yaml` 完全一致。该文件是受保护治理路径，Develop Session 不能写入。它只有在与已接受基线一致时才有效：干净的 Git HEAD，或已接受的无 SCM 基线清单。Agent 自行写入、未提交的副本、plan digest、一次通过的 Test，以及命令的 INFERRED confidence 都不能批准 required 集。`zero_required` 同样要求这份已接受声明。先预览，再用该次预览的精确 `plan_digest` 应用。应用不是 `--approved`，也不是 Git Commit 或 Push。应用后重跑 Test 产出新报告，再重新 Submit。该诊断只解释阻断原因，不改变 TEST_COMPLETE 判定语义。
 
 ## 6. tests.yaml required 权威升级路径
 
@@ -335,24 +340,42 @@ required profiles（或 zero-required 事实）→ 重跑 Test 产出新报告 �
 （UNKNOWN / VERIFIED 等）。required 集权威判定（`contract.py`
 `_required_set_is_authoritative()`）：
 
-1. 契约（tests.yaml）confidence 必须为 `VERIFIED`；
-2. 每个 required profile（`required: true`）的 `required_authority` 必须
-   显式为 `VERIFIED`；
-3. required 集为空时，必须存在顶层 `required_authority: VERIFIED` 声明，
-   否则 required 集不权威。
+1. 顶层 `required_authority` 为 `VERIFIED`，且每个 required profile 的
+   `required_authority` 也显式为 `VERIFIED`。发现用的 `confidence`
+   （UNKNOWN / INFERRED）保持原值，不因发布 required 权威而被改成 VERIFIED。
+2. 兼容旧契约：当顶层 `required_authority` 缺省、required 集非空、且
+   `confidence` 已是 `VERIFIED` 时，仍可按 profile 回退判定。空 required 集
+   不能只靠发现 confidence 变成权威。
+3. required 集为空时，必须存在顶层 `required_authority: VERIFIED`，且该声明
+   来自项目策略 `policy: zero_required`，否则 required 集不权威。
 
-升级路径：Understand Refresh 重新发现命令/测试后，在确认某 profile 的命令
-真实可执行且属项目权威测试面时，将该 profile 的 `required: true` 与
-`required_authority: VERIFIED` 写入 tests.yaml（并按需声明顶层
-`required_authority`）。该文件按 project.yaml ownership 规则维护
-（GENERATED 索引可由 Refresh 重写；人工确认后视为权威）。升级完成后，
-后续 Test 报告的 `required_policy` 变为 `VERIFIED`，`TEST_COMPLETE` 才可能为 true。
+升级路径：项目在 `docs/project/required-test-policy.yaml` 中声明
+`policy: required_set` 与 `required_sources`（例如
+`package.json#scripts.test`），或声明 `policy: zero_required`。Understand
+不写这个文件。默认 Refresh 只发现命令和 profile。然后
+`understand refresh --action required_tests` 读取该策略：每个 source 必须
+对应一条可执行命令及其 profile。命令存在、命令可执行、以及项目策略把它列为
+required，是三件不同的事。发现、`auto: true`、一次通过的 Test、以及 Agent
+提案都不能把 profile 升为 required。策略未点名的 profile 保持 optional。
+
+应用绑定策略文件摘要、source、argv、有效命令定义（`package.json` script
+正文，或该 source 文件字节），以及 profile 的 `success.exit_code`、
+`timeout_seconds`、`evidence_required`。这个边界不覆盖传递依赖或包管理器
+二进制本身。应用不读取 Test 报告，也不改写 discovery `confidence`。应用后
+必须对当时的候选再跑一次官方 Test。
+
+后续默认 Refresh 会核对 grounding 记录自身的 plan digest、策略、命令定义和
+当前 profile。记录自相矛盾、digest 与内容不符、策略或 script 正文变化、或
+执行字段变化时，整份 required 权威降为 UNKNOWN，并写入
+`authority_diagnostics`。不把部分记录恢复成 VERIFIED。`tests.yaml` 仍是
+GENERATED。升级完成后，后续 Test 报告的 `required_policy` 变为 `VERIFIED`，
+`TEST_COMPLETE` 才可能为 true。
 
 S5 恢复可用性（R8-FND-D）：Submit S5 因 required 集不权威而阻断时，
 阻断结果的 `extras.authority_blockers` 携带结构化诊断——说明阻断原因
 （required_policy 为 UNKNOWN）、修正权威归属（tests.yaml GENERATED，
 仅 Understand Refresh 维护）、缺失的 grounded 信息，以及自主恢复路径
-（Refresh → 重跑 Test → 重新 Submit）。整个恢复过程无需人工审批门；
+（`understand refresh --action required_tests` 预览并按精确 plan digest 应用 → 重跑 Test → 重新 Submit）。整个恢复过程无需人工审批门；
 语义约束不变：required 集不权威时 TEST_COMPLETE 恒为 false。
 
 ## 7. 测试口径与交付报告规范（F9）

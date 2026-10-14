@@ -196,7 +196,7 @@ def resolve_contract(
     required = [p for p in profiles if p.required]
     optional = [p for p in profiles if not p.required]
 
-    if applicability == "UNKNOWN" or confidence == "UNKNOWN":
+    if applicability == "UNKNOWN":
         return ContractResolution(
             status="UNKNOWN",
             applicability="UNKNOWN",
@@ -217,7 +217,22 @@ def resolve_contract(
         confidence=confidence,
         applicability=applicability,
         authority_issues=authority_issues,
+        root=root,
     )
+    if confidence == "UNKNOWN" and not set_authoritative:
+        return ContractResolution(
+            status="UNKNOWN",
+            applicability=applicability,
+            confidence="UNKNOWN",
+            profiles=profiles,
+            required=required,
+            optional=optional,
+            commands=commands,
+            blockers=["UNKNOWN Test discovery confidence is not required-set authority"]
+            + command_blockers,
+            route="understand.refresh",
+            raw=raw,
+        )
     verified_none = (
         set_authoritative
         and applicability == "NOT_APPLICABLE"
@@ -512,10 +527,44 @@ def _required_set_is_authoritative(
     confidence: str,
     applicability: str,
     authority_issues: list[str],
+    root: Path | None = None,
 ) -> bool:
     if authority_issues:
         return False
-    if confidence != "VERIFIED" or applicability not in {"APPLICABLE", "NOT_APPLICABLE"}:
+    if applicability not in {"APPLICABLE", "NOT_APPLICABLE"}:
+        return False
+    declared = raw.get("required_authority")
+    if _published_required_format(raw, root):
+        # A recorded required-tests-1 identity, or leftover grounding, never
+        # falls back to legacy VERIFIED discovery confidence.
+        if declared != "VERIFIED" or confidence == "CONFLICTING":
+            return False
+        for profile in required:
+            if profile.data.get("required_authority") != "VERIFIED":
+                return False
+            if profile.data.get("confidence") == "CONFLICTING":
+                return False
+            if profile.data.get("policy") == "observed" and (
+                profile.data.get("required_authority") != "VERIFIED"
+            ):
+                return False
+        if root is None:
+            return False
+        from scaffold_p5.required_tests import (
+            format_identity_state,
+            live_grounding_problems,
+        )
+
+        if format_identity_state(root) in {"conflict", "unreadable"}:
+            return False
+        return not live_grounding_problems(root, raw)
+    # Legacy contracts have never recorded required-tests-1 and have no
+    # grounding remnant. Discovery confidence must be VERIFIED. INFERRED
+    # and UNKNOWN are not authority. An empty set still needs an explicit
+    # VERIFIED flag. A non-empty set that omits required_authority may fall
+    # back to VERIFIED discovery confidence. VERIFIED discovery is not a
+    # substitute for required-tests-1 grounding.
+    if confidence != "VERIFIED":
         return False
     for profile in required:
         source = (
@@ -529,12 +578,25 @@ def _required_set_is_authoritative(
             profile.data.get("required_authority") != "VERIFIED"
         ):
             return False
-    declared = raw.get("required_authority")
     if not required:
         return declared == "VERIFIED"
     if declared is not None:
         return declared == "VERIFIED"
     return True
+
+
+def _published_required_format(raw: dict[str, Any], root: Path | None) -> bool:
+    """New-format identity. Without a host, only in-file remnants count."""
+    if root is None:
+        if "required_grounding" in raw:
+            return True
+        profiles = raw.get("profiles")
+        return isinstance(profiles, list) and any(
+            isinstance(row, dict) and "required_grounding" in row for row in profiles
+        )
+    from scaffold_p5.required_tests import published_required_format
+
+    return published_required_format(root, raw)
 
 
 def _required_policy_issues(profiles: list[Profile], contract_confidence: str) -> list[str]:

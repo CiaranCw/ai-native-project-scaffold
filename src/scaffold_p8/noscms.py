@@ -13,7 +13,7 @@ from typing import Any, Iterator
 from scaffold_p5.io_util import file_digest, read_yaml, sha256_bytes, write_yaml_atomic
 from scaffold_p5.ownership import resolve_ownership
 from scaffold_p5.scm import observe_scm
-from scaffold_p5.client_support import is_client_support_path
+from scaffold_p5.client_support import REQUIRED_TEST_POLICY, is_client_support_path
 from scaffold_p6.candidate import RUNTIME_PREFIX, is_ext_support_path, observe_candidate
 from scaffold_p8.schemas import (
     CHANGE_ID_RE,
@@ -73,6 +73,9 @@ def initialize_noscms_baseline(root: Path) -> dict[str, Any]:
     owned = _submit_namespace_owned(root)
     if not owned["ok"]:
         return owned
+    policy_blocker = _required_policy_reinit_blocker(root)
+    if policy_blocker:
+        return {"ok": False, "blockers": [policy_blocker]}
     inventory = inventory_workspace(root)
     payload = {
         "kind": "noscms_baseline",
@@ -87,6 +90,49 @@ def initialize_noscms_baseline(root: Path) -> dict[str, Any]:
         "path_count": len(inventory),
         "inventory_digest": _inventory_digest(inventory),
     }
+
+
+def _required_policy_reinit_blocker(root: Path) -> str | None:
+    """Refuse to treat a changed required-test policy as a fresh baseline grant.
+
+    The first initialization, when no accepted baseline exists, may record the
+    policy that is already on disk. A later initialization may refresh every
+    other path. It does not approve a new policy digest. Acceptance of a
+    changed policy remains a COMPLETE no-SCM publication inventory, or the
+    unchanged bytes of the baseline already accepted.
+    """
+    loaded = load_noscms_baseline(root)
+    if not loaded.get("ok"):
+        return None
+    inventory = loaded.get("inventory")
+    if not isinstance(inventory, dict):
+        return (
+            "refusing to re-initialize the no-SCM baseline: the accepted "
+            "inventory is unusable, so a required-test policy change cannot "
+            "be judged."
+        )
+    entry = inventory.get(REQUIRED_TEST_POLICY)
+    recorded = entry.get("digest") if isinstance(entry, dict) else None
+    path = root / REQUIRED_TEST_POLICY
+    current: str | None = None
+    if path.is_file() and not path.is_symlink():
+        try:
+            current = file_digest(path)
+        except OSError:
+            return (
+                f"{REQUIRED_TEST_POLICY} could not be read. The no-SCM "
+                "baseline was not rewritten."
+            )
+    if recorded == current:
+        return None
+    return (
+        f"refusing to re-initialize the no-SCM baseline: {REQUIRED_TEST_POLICY} "
+        "differs from the accepted baseline. Re-initialization is not approval "
+        "of a new required-test policy. Restore the accepted policy bytes and "
+        "initialize again to refresh other files, or carry the new policy in a "
+        "COMPLETE no-SCM publication. That publication inventory is the next "
+        "accepted baseline. An Agent approval flag is not that act."
+    )
 
 
 def load_noscms_baseline(root: Path) -> dict[str, Any]:

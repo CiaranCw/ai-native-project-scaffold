@@ -17,6 +17,11 @@ from scaffold_p5.rules import rule_ref_issues
 
 
 PROJECT_SCHEMA_VERSION = "1"
+# Written only by Understand required-tests publication. Absence means the
+# project has never published required-tests-1 authority. Refresh, migration,
+# and later publication copy project.yaml and do not clear it.
+REQUIRED_AUTHORITY_FORMAT_KEY = "required_authority_format"
+REQUIRED_AUTHORITY_FORMAT = "required-tests-1"
 ADOPTION_SESSION_SCHEMA_VERSION = "1"
 ADOPTION_PLAN_SCHEMA_VERSION = "1"
 PERSISTED_LIFECYCLES = {"ADOPTING", "ACTIVE", "RECOVERY_REQUIRED"}
@@ -147,6 +152,11 @@ def validate_project_data(data: Any) -> tuple[str, list[str]]:
     refresh_conflicts = data.get("refresh_conflicts")
     if refresh_conflicts is not None and not _string_list(refresh_conflicts):
         issues.append("project.yaml refresh_conflicts must be a list")
+    if (
+        REQUIRED_AUTHORITY_FORMAT_KEY in data
+        and data.get(REQUIRED_AUTHORITY_FORMAT_KEY) != REQUIRED_AUTHORITY_FORMAT
+    ):
+        issues.append("project.yaml required_authority_format is unsupported")
 
     if issues:
         return "INCOMPLETE", issues

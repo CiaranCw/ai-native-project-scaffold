@@ -270,6 +270,8 @@ python .scaffold/install/run.py understand bootstrap
 python .scaffold/install/run.py understand full
 python .scaffold/install/run.py understand refresh
 python .scaffold/install/run.py understand refresh --action resume
+python .scaffold/install/run.py understand refresh --action required_tests --required-tests-json-file .scaffold/transport/required-tests.json
+python .scaffold/install/run.py understand refresh --action required_tests --required-tests-json-file .scaffold/transport/required-tests.json --plan-digest <hex>
 python .scaffold/install/run.py understand compatibility
 python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json>
 python .scaffold/install/run.py understand compatibility --action lock_update --new-expected <json> --plan-digest <hex>
@@ -277,7 +279,11 @@ python .scaffold/install/run.py understand compatibility --action lock_update --
 
 Zero-context resume is `understand refresh --action resume`. Default Refresh
 rewrites GENERATED command/test indexes; resume is observational and does
-not. Do not silently rewrite `skills.lock`. Consumer UPDATE does not change
+not. Required Test Authority reads `docs/project/required-test-policy.yaml`.
+Stage `{"publish": true}` at `.scaffold/transport/required-tests.json`, then
+`understand refresh --action required_tests` and apply that preview
+`--plan-digest`. The JSON is transport, not approval. That apply is Agent
+lifecycle work, not `--approved` and not Git Commit or Push. Do not silently rewrite `skills.lock`. Consumer UPDATE does not change
 project-local expected identity. Explicit compatibility lock-update is
 the supported authority transition. Preview, then apply that exact plan
 digest. That apply is Agent lifecycle work, not Git Commit or Push.
@@ -1549,6 +1555,11 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
     parser.add_argument("--intake-json-b64", default=None)
     parser.add_argument("--intake-json-file", default=None)
     parser.add_argument("--action", default=None)
+    parser.add_argument(
+        "--required-tests-json-file",
+        dest="required_tests_json_file",
+        default=None,
+    )
     parser.add_argument("--new-expected", dest="new_expected", default=None)
     parser.add_argument("--new-expected-b64", dest="new_expected_b64", default=None)
     parser.add_argument("--distribution", default=None)
@@ -1616,6 +1627,15 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
             return _print_installed_blocked(
                 ["--new-expected is only valid on understand compatibility"]
             )
+    if args.required_tests_json_file and not (
+        refresh_mode and args.action == "required_tests"
+    ):
+        return _print_installed_blocked(
+            [
+                "--required-tests-json-file is only valid on "
+                "understand refresh --action required_tests"
+            ]
+        )
     if args.action:
         if compatibility_mode:
             pass
@@ -1624,6 +1644,17 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                 return _print_installed_blocked(
                     [f"unsupported refresh action {args.action}"]
                 )
+            if args.action == "required_tests" and not args.required_tests_json_file:
+                return _print_installed_blocked(
+                    ["--required-tests-json-file is required for --action required_tests"]
+                )
+            if args.plan_digest and args.action != "required_tests":
+                return _print_installed_blocked(
+                    [
+                        "--plan-digest on understand refresh is only valid with "
+                        "--action required_tests"
+                    ]
+                )
         else:
             return _print_installed_blocked(
                 [
@@ -1631,6 +1662,13 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                     "understand refresh"
                 ]
             )
+    elif refresh_mode and args.plan_digest:
+        return _print_installed_blocked(
+            [
+                "--plan-digest on understand refresh is only valid with "
+                "--action required_tests"
+            ]
+        )
     if (args.requirement_id or args.profile_id or args.kind) and not bind_mode:
         return _print_installed_blocked(
             ["binding flags are only valid on develop bind"]
@@ -1721,6 +1759,23 @@ def installed_main(install_root: Path, argv: list[str] | None = None) -> int:
                 opts["action"] = args.action
             if args.task_id:
                 opts["task_id"] = args.task_id
+            if args.action == "required_tests":
+                proposal, proposal_error = _load_required_tests_proposal(
+                    target,
+                    args.required_tests_json_file,
+                )
+                if proposal_error:
+                    print(
+                        json.dumps(
+                            {"outcome": "BLOCKED", "blockers": [proposal_error]},
+                            indent=2,
+                        )
+                    )
+                    return 1
+                opts["proposal"] = proposal
+                opts["proposal_path"] = args.required_tests_json_file
+                if args.plan_digest:
+                    opts["plan_digest"] = args.plan_digest
             emit_working(target, "understand.refresh", args.action or "default")
         elif args.approved:
             # Subject selector only. It names which Plan is presented to the
@@ -1926,6 +1981,7 @@ def _run_installed_consumer(
             or args.intake_json
             or args.intake_json_b64
             or args.intake_json_file
+            or args.required_tests_json_file
             or args.requirement_id
             or args.profile_id
             or args.kind
@@ -1983,6 +2039,36 @@ def _parse_new_expected_cli(
         return None, "new-expected JSON is not parseable"
     if not isinstance(payload, dict) or not payload:
         return None, "new-expected JSON must be a nonempty object"
+    return payload, None
+
+
+def _load_required_tests_proposal(
+    host: Path,
+    raw_path: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Read the required-tests proposal. The file is transport, not authority."""
+    if not raw_path or not str(raw_path).strip():
+        return None, "--required-tests-json-file is required for --action required_tests"
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = host / path
+    try:
+        resolved = path.resolve()
+        host_resolved = host.resolve()
+    except OSError:
+        return None, "required-tests JSON file path is unreadable"
+    if resolved != host_resolved and host_resolved not in resolved.parents:
+        return None, "required-tests JSON file must stay inside the host"
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None, "required-tests JSON file is unreadable"
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None, "required-tests JSON file is not a JSON object"
+    if not isinstance(payload, dict):
+        return None, "required-tests JSON file is not a JSON object"
     return payload, None
 
 

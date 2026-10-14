@@ -641,10 +641,17 @@ class TestEngine:
                     )
                 )
                 continue
-            if profile_app in {"UNKNOWN", "CONFLICTING"} or profile_conf in {
-                "UNKNOWN",
-                "CONFLICTING",
-            }:
+            required_authority_verified = (
+                profile.required
+                and profile.data.get("required_authority") == "VERIFIED"
+            )
+            # CONFLICTING discovery confidence cannot be consumed as required
+            # authority. UNKNOWN and INFERRED keep the existing contract:
+            # UNKNOWN blocks unless this required profile is separately
+            # VERIFIED; INFERRED remains executable.
+            if profile_app in {"UNKNOWN", "CONFLICTING"} or profile_conf == "CONFLICTING" or (
+                profile_conf == "UNKNOWN" and not required_authority_verified
+            ):
                 results.append(
                     ScenarioResult(
                         profile_id=profile.profile_id,

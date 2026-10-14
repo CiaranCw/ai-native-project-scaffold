@@ -42,6 +42,7 @@ from scaffold_p5.host_state import (
 from scaffold_p5.io_util import read_text, read_yaml, write_text_atomic, write_yaml_atomic
 from scaffold_p5.models import DiscoveryFact
 from scaffold_p5.ownership import source_area_ownership
+from scaffold_p5.required_tests import reconcile_required_authority
 from scaffold_p5.schemas import plan_owned_text_mutation, whole_file_mutation_allowed
 
 
@@ -304,6 +305,7 @@ def refresh_host(root: Path) -> dict[str, Any]:
             conflicts,
         )
 
+    authority_diagnostics: list[str] = []
     tests_fact = _fact(facts, "test_tree")
     prior_tests_status, prior_tests, _prior_tests_issues = _inspect_machine_index(
         root / TESTS_YAML,
@@ -369,6 +371,12 @@ def refresh_host(root: Path) -> dict[str, Any]:
         tests_data["profiles"] = sorted(
             tests_data["profiles"], key=lambda row: str(row.get("id") or "")
         )
+    authority_diagnostics = reconcile_required_authority(
+        root,
+        tests_data,
+        prior_tests if prior_tests_status == "VALID" else None,
+        commands,
+    )
     if _yaml_changed(root / TESTS_YAML, tests_data):
         _queue_yaml(
             root,
@@ -519,6 +527,7 @@ def refresh_host(root: Path) -> dict[str, Any]:
         "facts": facts,
         "baseline": project.get("baseline"),
         "untouched_business": _business_files(root),
+        "authority_diagnostics": authority_diagnostics,
     }
 
 

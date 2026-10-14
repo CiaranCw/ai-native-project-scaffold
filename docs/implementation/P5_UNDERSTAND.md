@@ -556,11 +556,15 @@ history, tags, remotes, or Git itself for core operation.
 
 ## Knowledge Assessment (FA2-FND-004)
 
-The live Understand package is `understand@2.1.0`, a MINOR extension of
-released `understand@2.0.0`. Released `2.0.0` remains immutable and does not
-include Knowledge Assessment publication. The live package declares
-`may_substitute_for: understand@2.0.0`. Pre-adoption Bootstrap still requires
-the exact release-pinned Understand package.
+The live Understand package is `understand@2.3.0`. Published
+`understand@2.1.0` added Knowledge Assessment as a MINOR extension of released
+`understand@2.0.0` and remains immutable at that publication. `2.3.0` is a
+further MINOR extension that publishes project-policy Required Test Authority.
+Released `2.0.0` does not include Knowledge Assessment. Published `2.1.0` does
+not include that required-test publication. The live package declares
+`may_substitute_for` both `understand@2.0.0` and `understand@2.1.0`.
+Pre-adoption Bootstrap still requires the exact release-pinned Understand
+package.
 
 Understand owns semantic knowledge assessment. Refresh (or Full on an ACTIVE
 host) may publish a supporting Knowledge Assessment after optional allowed
